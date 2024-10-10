@@ -20,29 +20,37 @@
 
 import os
 import subprocess
+import shutil
 import sys
 import json
 import argparse
 from pprint import pprint
 
 from emtools.utils import Color, Timer, Path
-from emtools.jobs import Pipeline, BatchManager
-from emtools.metadata import StarFile, StarMonitor
+from emtools.jobs import ProcessingPipeline, BatchManager
+from emtools.metadata import Table, Column, StarFile, StarMonitor
 
 
-class McPipeline(Pipeline):
+class McPipeline(ProcessingPipeline):
     """ Pipeline specific to Motioncor processing. """
     def __init__(self, args):
-        Pipeline.__init__(self)
+        ProcessingPipeline.__init__(self, os.getcwd(), args['output_dir'])
 
         self.program = args.get('motioncor_path',
                                 os.environ.get('MOTIONCOR_PATH', None))
         self.extraArgs = args.get('motioncor_args', '')
         self.gpuList = args['gpu_list'].split()
-        self.outputDir = args['output_dir']
+        self.outputMicDir = self.join('Micrographs')
         self.inputStar = args['input_star']
         self.batchSize = args.get('batch_size', 32)
         self.optics = None
+        self._outputPrefix = "output/aligned_"
+        self._outputDict = {
+            'rlnCtfPowerSpectrum': '_Ctf.mrc',
+            'rlnMicrographName': '.mrc',
+            'rlnMicrographMetadata': '_Ctf.txt',
+            'rlnOpticsGroup': None
+        }
 
     def _build(self):
         def _movie_filename(row):
@@ -94,7 +102,7 @@ class McPipeline(Pipeline):
         voltage = acq.rlnVoltage
         cs = acq.rlnSphericalAberration
 
-        opts = f"{inArg} ./ -OutMrc output/aligned_ -InSuffix {ext} "
+        opts = f"{inArg} ./ -OutMrc {self._outputPrefix} -InSuffix {ext} "
         opts += f"-Serial 1  -Gpu {gpu} -LogDir log/ "
         opts += f"-PixSize {ps} -kV {voltage} -Cs {cs} "
         opts += self.extraArgs
@@ -119,7 +127,101 @@ class McPipeline(Pipeline):
         return _motioncor
 
     def _output(self, batch):
+        """
+        Movies/20170629_00021_frameImage.tiff
+
+        56956944 Sep 23 11:08 aligned_20170629_00021_frameImage.mrc
+         1049600 Sep 23 11:08 aligned_20170629_00022_frameImage_Ctf.mrc
+             293 Sep 23 11:08 aligned_20170629_00022_frameImage_Ctf.txt
+
+======================== movies.star =============================================
+# version 50001
+
+data_optics
+
+loop_
+_rlnOpticsGroupName #1
+_rlnOpticsGroup #2
+_rlnMtfFileName #3
+_rlnMicrographOriginalPixelSize #4
+_rlnVoltage #5
+_rlnSphericalAberration #6
+_rlnAmplitudeContrast #7
+opticsGroup1            1 mtf_k2_200kV.star     0.885000   200.000000     1.400000     0.100000
+
+
+# version 50001
+
+data_movies
+
+loop_
+_rlnMicrographMovieName #1
+_rlnOpticsGroup #2
+Movies/20170629_00021_frameImage.tiff            1
+Movies/20170629_00022_frameImage.tiff            1
+Movies/20170629_00023_frameImage.tiff            1
+Movies/20170629_00024_frameImage.tiff            1
+
+
+
+======================== corrected_micrographs.star ============================
+
+# version 50001
+
+data_optics
+
+loop_
+_rlnOpticsGroupName #1
+_rlnOpticsGroup #2
+_rlnMtfFileName #3
+_rlnMicrographOriginalPixelSize #4
+_rlnVoltage #5
+_rlnSphericalAberration #6
+_rlnAmplitudeContrast #7
+_rlnMicrographPixelSize #8
+opticsGroup1            1 mtf_k2_200kV.star     0.885000   200.000000     1.400000     0.100000     0.885000
+
+
+# version 50001
+
+data_micrographs
+
+loop_
+_rlnCtfPowerSpectrum #1
+_rlnMicrographName #2
+_rlnMicrographMetadata #3
+_rlnOpticsGroup #4
+_rlnAccumMotionTotal #5
+_rlnAccumMotionEarly #6
+_rlnAccumMotionLate #7
+MotionCorr/job002/Movies/20170629_00021_frameImage_PS.mrc MotionCorr/job002/Movies/20170629_00021_frameImage.mrc MotionCorr/job002/Movies/20170629_00021_frameImage.star            1    16.429035     2.504605    13.924432
+MotionCorr/job002/Movies/20170629_00022_frameImage_PS.mrc MotionCorr/job002/Movies/20170629_00022_frameImage.mrc MotionCorr/job002/Movies/20170629_00022_frameImage.star            1    19.556374     2.480002    17.076372
+MotionCorr/job002/Movies/20170629_00023_frameImage_PS.mrc MotionCorr/job002/Movies/20170629_00023_frameImage.mrc MotionCorr/job002/Movies/20170629_00023_frameImage.star            1    17.542337     1.940450    15.601886
+MotionCorr/job002/Movies/20170629_00024_frameImage_PS.mrc MotionCorr/job002/Movies/20170629_00024_frameImage.mrc MotionCorr/job002/Movies/20170629_00024_frameImage.star            1    18.102179     1.725132    16.377047
+MotionCorr/job002/Movies/20170629_00025_frameImage_PS.mrc MotionCorr/job002/Movies/20170629_00025_frameImage.mrc MotionCorr/job002/Movies/20170629_00025_frameImage.star            1    24.124382     3.573240    20.551142
+MotionCorr/job002/Movies/20170629_00026_frameImage_PS.mrc MotionCorr/job002/Movies/20170629_00026_frameImage.mrc MotionCorr/job002/Movies/20170629_00026_frameImage.star            1    13.147140     1.832367    11.314774
+MotionCorr/job002/Movies/20170629_00027_frameImage_PS.mrc MotionCorr/job002/Movies/20170629_00027_frameImage.mrc MotionCorr/job002/Movies/20170629_00027_frameImage.star            1    15.070049     1.434088    13.635961
+MotionCorr/job002/Movies/20170629_00028_frameImage_PS.mrc MotionCorr/job002/Movies/20170629_00028_frameImage.mrc MotionCorr/job002/Movies/20170629_00028_frameImage.star            1    13.784786     1.098232    12.686556
+
+        """
         batch_dir = batch['path']
+        def _path(p):
+            return os.path.join(batch_dir, p)
+
+        def _move(p):
+            return self.relpath(shutil.move(_path(p), self.outputMicDir))
+
+        for item in batch['items']:
+            base = Path.removeBaseExt(item.rlnMicrographMovieName)
+            self._outSf.writeRowValues([
+                _move(f"{self._outputPrefix}{base}{'_Ctf.mrc'}"),
+                _move(f"{self._outputPrefix}{base}{'.mrc'}"),
+                item.rlnOpticsGroup])
+
+            # for newExt in zip(self._outputExts, ):
+            #     newFile = _path(f"{self._outputPrefix}{base}{newExt}")
+            #     shutil.move(newFile, self.outputMicDir)
+
         # FIXME: Check what we want to move to output
         #os.system(f'mv {batch_dir}/* {self.outputDir}/ && rm -rf {batch_dir}')
         return batch
@@ -127,9 +229,31 @@ class McPipeline(Pipeline):
     def run(self):
         with StarFile(self.inputStar) as sf:
             self.optics = sf.getTable('optics')
+
+        # Create a new optics table adding pixelSize
+        cols = list(self.optics.getColumns())
+        cols.append(Column('rlnMicrographPixelSize', type=float))
+        self.newOptics = Table(columns=cols)
+        self.micTable = Table(columns=list(self._outputDict.keys()))
+        for row in self.optics:
+            d = row._asdict()
+            d['rlnMicrographPixelSize'] = row.rlnMicrographOriginalPixelSize  #FIXME incorrect with binning
+            self.newOptics.addRowValues(**d)
+
+        if not os.path.exists(self.outputMicDir):
+            os.mkdir(self.outputMicDir)
+
         self._build()
         print(f"Batch size: {self.batchSize}")
+
+        self._outFile = open(self.join('corrected_micrographs.star'), 'w')  #FIXME improve for continue
+        self._outSf = StarFile(self._outFile)
+        self._outSf.writeTable('optics', self.newOptics)
+        self._outSf.writeHeader('micrographs', self.micTable)
+
         Pipeline.run(self)
+
+        self._outSf.close()
 
 #
 #
@@ -155,14 +279,15 @@ class McPipeline(Pipeline):
 
 def main():
     p = argparse.ArgumentParser(prog='emw-motioncor')
-    p.add_argument('--json', '-j',
+    p.add_argument('--json',
                    help="Input all arguments through this JSON file. "
                         "The other arguments will be ignored. ")
-    p.add_argument('--input', '-i')
+    p.add_argument('--in_movies', '-i')
     p.add_argument('--output', '-o')
     p.add_argument('--motioncor_path', '-p')
     p.add_argument('--motioncor_args', '-a', default='')
     p.add_argument('--batch_size', '-b', type=int, default=8)
+    p.add_argument('--j', help="Just to ignore the threads option from Relion")
     p.add_argument('--gpu')
 
     args = p.parse_args()
@@ -171,7 +296,7 @@ def main():
         raise Exception("JSON input not yet implemented.")
     else:
         argsDict = {
-            'input_star': args.input,
+            'input_star': args.in_movies,
             'output_dir': args.output,
             'motioncor_args': args.motioncor_args,
             'gpu_list': args.gpu,

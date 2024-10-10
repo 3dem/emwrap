@@ -64,7 +64,8 @@ setup(
     install_requires=requirements,
     entry_points={  # Optional
        'console_scripts': [
-           'emw-motioncor = emwrap.motioncor.__main__:main'
+           'emw-motioncor = emwrap.motioncor.__main__:main',
+           'emw-aretomo = emwrap.aretomo.__main__:main'
        ],
 
     }
