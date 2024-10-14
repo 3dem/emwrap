@@ -84,7 +84,7 @@ class AreTomoPipeline(ProcessingPipeline):
             return os.path.join(batch_dir, p)
 
         os.mkdir(_path('output'))
-        os.mkdir(_path('logs'))
+        os.mkdir(_path('log'))
         logFn = _path('aretomo_log.txt')
         args = [self.program]
         mdoc = batch['mdoc']
@@ -95,8 +95,8 @@ class AreTomoPipeline(ProcessingPipeline):
             section['SubFramePath'] = _baseSubframe(section)
         mdoc.write(_path('local.mdoc'))
 
-        opts = f"-Cmd 0 -InMdoc local.mdoc -InSuffix .mdoc -OutDir output "
-        opts += f"-Gpu {gpu} -McPatch 5 5 -McBin 2 -Group 4 8 -AtBin 4 -AtPatch 4 4"
+        opts = f"-Cmd 0 -InMdoc local.mdoc -InSuffix .mdoc -OutDir output -LogDir log"
+        opts += f"-Gpu {gpu} -McPatch 5 5 -McBin 2 -Group 4 8 -AtBin 4 -AtPatch 4 4 "
         opts += f"-PixSize {ps} "
         opts += self.extraArgs
         args.extend(opts.split())
@@ -106,6 +106,7 @@ class AreTomoPipeline(ProcessingPipeline):
         print(f">>> {batchStr}: Running {Color.green(self.program)} {Color.bold(opts)}")
 
         with open(logFn, 'w') as logFile:
+            logFile.write(f"\n{self.program} {opts}\n")
             subprocess.call(args, cwd=batch_dir, stderr=logFile, stdout=logFile)
 
         print(f">>> {batchStr}: Done! Elapsed: {t.getToc()}. "

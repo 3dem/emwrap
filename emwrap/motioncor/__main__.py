@@ -93,6 +93,8 @@ class McPipeline(ProcessingPipeline):
             inArg = '-InTiff'
         elif extLower.startswith('.mrc'):
             inArg = '-InMrc'
+        elif extLower.startswith('.eer'):
+            inArg = '-InEer'
         else:
             raise Exception(f"Unsupported movie format: {ext}")
 
@@ -209,7 +211,11 @@ MotionCorr/job002/Movies/20170629_00028_frameImage_PS.mrc MotionCorr/job002/Movi
             return os.path.join(batch_dir, p)
 
         def _move(p):
-            return self.relpath(shutil.move(_path(p), self.outputMicDir))
+            pp = _path(p)
+            if os.path.exists(pp):
+                return self.relpath(shutil.move(pp, self.outputMicDir))
+            else:
+                return 'None'
 
         for item in batch['items']:
             base = Path.removeBaseExt(item.rlnMicrographMovieName)
@@ -226,6 +232,10 @@ MotionCorr/job002/Movies/20170629_00028_frameImage_PS.mrc MotionCorr/job002/Movi
         #os.system(f'mv {batch_dir}/* {self.outputDir}/ && rm -rf {batch_dir}')
         return batch
 
+    def _writeMicrographsTableHeader(self):
+        self.micTable = Table(columns=list(self._outputDict.keys()))
+        self._outSf.writeHeader('micrographs', self.micTable)
+        
     def run(self):
         with StarFile(self.inputStar) as sf:
             self.optics = sf.getTable('optics')
@@ -234,7 +244,7 @@ MotionCorr/job002/Movies/20170629_00028_frameImage_PS.mrc MotionCorr/job002/Movi
         cols = list(self.optics.getColumns())
         cols.append(Column('rlnMicrographPixelSize', type=float))
         self.newOptics = Table(columns=cols)
-        self.micTable = Table(columns=list(self._outputDict.keys()))
+
         for row in self.optics:
             d = row._asdict()
             d['rlnMicrographPixelSize'] = row.rlnMicrographOriginalPixelSize  #FIXME incorrect with binning
@@ -249,9 +259,9 @@ MotionCorr/job002/Movies/20170629_00028_frameImage_PS.mrc MotionCorr/job002/Movi
         self._outFile = open(self.join('corrected_micrographs.star'), 'w')  #FIXME improve for continue
         self._outSf = StarFile(self._outFile)
         self._outSf.writeTable('optics', self.newOptics)
-        self._outSf.writeHeader('micrographs', self.micTable)
 
-        Pipeline.run(self)
+
+        ProcessingPipeline.run(self)
 
         self._outSf.close()
 
@@ -298,6 +308,7 @@ def main():
         argsDict = {
             'input_star': args.in_movies,
             'output_dir': args.output,
+            'motioncor_path': args.motioncor_path,
             'motioncor_args': args.motioncor_args,
             'gpu_list': args.gpu,
             'batch_size': args.batch_size
