@@ -40,19 +40,28 @@ def _baseSubframe(section):
 
 class MdocBatchManager(BatchManager):
     """ Batch manager for Tilt-series. """
-    def __init__(self, tsIterator, workingPath):
+    def __init__(self, tsIterator, workingPath, suffix=None):
         """
         Args:
             tsIterator: input tilt-series iterator
             workingPath: path where the batches folder will be created
-            itemFileNameFunc: function to extract a filename from each item
+            suffix: suffix to be removed from mdoc filename to generate
+                the tilt-series name
         """
         BatchManager.__init__(self, 0, tsIterator, workingPath,
                               itemFileNameFunc=lambda item: item[1]['SubFramePath'])
+        self._suffix = suffix
 
     def _subframePath(self, mdocFn, section):
         return os.path.join(os.path.dirname(mdocFn), _baseSubframe(section))
         section['SubFramePath'] = self.join(os.path.dirname(mdocFn), base)
+
+    def _tsName(self, mdocFn):
+        baseName = os.path.basename(mdocFn)
+        if self._suffix:
+            return baseName.replace(self._suffix, '')
+        else:
+            return Path.removeExt(baseName)
 
     def generate(self):
         """ Generate batches based on the input items. """
@@ -61,8 +70,7 @@ class MdocBatchManager(BatchManager):
             self._itemFileNameFunc = lambda item: self._subframePath(mdocFn, item[1])
             batch = self._createBatch(mdoc.zvalues)
             batch['mdoc'] = mdoc
-            # Link also the mdoc file
-            #self.createBatchLink(batch['path'], mdoc['MdocFile']['Path'])
+            batch['tsName'] = self._tsName(mdocFn)
             yield batch
 
 
@@ -76,6 +84,7 @@ class AreTomoPipeline(ProcessingPipeline):
         self.gpuList = args['gpu_list'].split()
         self.outputMicDir = self.join('Micrographs')
         self.inputMdocs = args['input_mdocs']
+        self.mdoc_suffix = args['mdoc_suffix']
 
     def aretomo(self, gpu, batch):
         batch_dir = batch['path']
@@ -90,26 +99,34 @@ class AreTomoPipeline(ProcessingPipeline):
         mdoc = batch['mdoc']
         ps = mdoc['global']['PixelSpacing']
 
+        localMdoc = f"{batch['tsName']}.mdoc"
+
         # Let's write a local MDOC file with fixed filenames
         for _, section in mdoc.zvalues:
             section['SubFramePath'] = _baseSubframe(section)
-        mdoc.write(_path('local.mdoc'))
+        mdoc.write(_path(localMdoc))
 
-        opts = f"-Cmd 0 -InMdoc local.mdoc -InSuffix .mdoc -OutDir output -LogDir log"
-        opts += f"-Gpu {gpu} -McPatch 5 5 -McBin 2 -Group 4 8 -AtBin 4 -AtPatch 4 4 "
-        opts += f"-PixSize {ps} "
+        opts = f"-Cmd 0 -InMdoc {localMdoc} -InSuffix .mdoc -OutDir output "
+        opts += f"-Gpu {gpu} -PixSize {ps} "
+        # Example of extraArgs:
+        # -McPatch 5 5 -McBin 2 -Group 4 8 -AtBin 4 -AtPatch 4 4
         opts += self.extraArgs
         args.extend(opts.split())
-        batchStr = Color.cyan("BATCH_%02d" % batch['index'])
-        t = Timer()
 
+        batchStr = Color.cyan(f"BATCH_{batch['index']:02} - {batch['tsName']}")
+        t = Timer()
         print(f">>> {batchStr}: Running {Color.green(self.program)} {Color.bold(opts)}")
 
         with open(logFn, 'w') as logFile:
-            logFile.write(f"\n{self.program} {opts}\n")
+            logFile.write(f"\n{self.program} {opts}\n\n")
+            logFile.flush()
+
             subprocess.call(args, cwd=batch_dir, stderr=logFile, stdout=logFile)
 
-        print(f">>> {batchStr}: Done! Elapsed: {t.getToc()}. "
+            elapsed = f"Elapsed: {t.getToc()}"
+            logFile.write(f"\n{elapsed}\n\n")
+
+        print(f">>> {batchStr}: Done! {elapsed}. "
               f"Log file: {Color.bold(logFn)}")
 
         return batch
@@ -136,8 +153,9 @@ class AreTomoPipeline(ProcessingPipeline):
             mdoc['MdocFile'] = {'Path': mdocFn}
             yield mdoc
 
-    def run(self):
-        batchMgr = MdocBatchManager(self._iterMdocs(), self.outputDir)
+    def prerun(self):
+        batchMgr = MdocBatchManager(self._iterMdocs(), self.outputDir,
+                                    suffix=self.mdoc_suffix)
         g = self.addGenerator(batchMgr.generate)
         outputQueue = None
         print(f"Creating {len(self.gpuList)} processing threads.")
@@ -148,8 +166,6 @@ class AreTomoPipeline(ProcessingPipeline):
             outputQueue = p.outputQueue
 
         self.addProcessor(outputQueue, self._output)
-
-        ProcessingPipeline.run(self)
 
 
 def main():
@@ -164,6 +180,9 @@ def main():
     p.add_argument('--batch_size', '-b', type=int, default=8)
     p.add_argument('--j', help="Just to ignore the threads option from Relion")
     p.add_argument('--gpu', default='0')
+    p.add_argument('--mdoc_suffix', '-s',
+                   help="Suffix to be removed from the mdoc file names to "
+                        "assign each tilt series' name. ")
 
     args = p.parse_args()
 
@@ -179,7 +198,8 @@ def main():
             'output_dir': args.output,
             'aretomo_args': args.aretomo_args,
             'gpu_list': args.gpu,
-            'batch_size': args.batch_size
+            'batch_size': args.batch_size,
+            'mdoc_suffix': args.mdoc_suffix
         }
         aretomo = AreTomoPipeline(argsDict)
         aretomo.run()

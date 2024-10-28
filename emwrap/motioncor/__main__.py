@@ -28,7 +28,7 @@ from pprint import pprint
 
 from emtools.utils import Color, Timer, Path
 from emtools.jobs import ProcessingPipeline, BatchManager
-from emtools.metadata import Table, Column, StarFile, StarMonitor
+from emtools.metadata import Table, Column, StarFile, StarMonitor, TextFile
 
 
 class McPipeline(ProcessingPipeline):
@@ -36,8 +36,8 @@ class McPipeline(ProcessingPipeline):
     def __init__(self, args):
         ProcessingPipeline.__init__(self, os.getcwd(), args['output_dir'])
 
-        self.program = args.get('motioncor_path',
-                                os.environ.get('MOTIONCOR_PATH', None))
+        self.program = self.get_arg(args, 'motioncor_path', 'MOTIONCOR_PATH')
+        self.program_version = int(self.get_arg(args, 'motioncor_version', 'MOTIONCOR_VERSION', 0))
         self.extraArgs = args.get('motioncor_args', '')
         self.gpuList = args['gpu_list'].split()
         self.outputMicDir = self.join('Micrographs')
@@ -46,11 +46,13 @@ class McPipeline(ProcessingPipeline):
         self.optics = None
         self._outputPrefix = "output/aligned_"
         self._outputDict = {
-            'rlnCtfPowerSpectrum': '_Ctf.mrc',
             'rlnMicrographName': '.mrc',
+            'rlnCtfPowerSpectrum': '_Ctf.mrc',
+
             'rlnMicrographMetadata': '_Ctf.txt',
             'rlnOpticsGroup': None
         }
+
 
     def _build(self):
         def _movie_filename(row):
@@ -207,6 +209,10 @@ MotionCorr/job002/Movies/20170629_00028_frameImage_PS.mrc MotionCorr/job002/Movi
 
         """
         batch_dir = batch['path']
+
+        def _opath(p):
+            return self.relpath(os.path.join(self.outputMicDir, p))
+
         def _path(p):
             return os.path.join(batch_dir, p)
 
@@ -217,26 +223,158 @@ MotionCorr/job002/Movies/20170629_00028_frameImage_PS.mrc MotionCorr/job002/Movi
             else:
                 return 'None'
 
+
+        """
+# version 50001
+
+data_general
+
+_rlnImageSizeX                                     3710
+_rlnImageSizeY                                     3838
+_rlnImageSizeZ                                       24
+_rlnMicrographMovieName                    Movies/20170629_00021_frameImage.tiff
+_rlnMicrographGainName                     Movies/gain.mrc
+_rlnMicrographBinning                          1.000000
+_rlnMicrographOriginalPixelSize                0.885000
+_rlnMicrographDoseRate                         1.277000
+_rlnMicrographPreExposure                      0.000000
+_rlnVoltage                                  200.000000
+_rlnMicrographStartFrame                              1
+_rlnMotionModelVersion                                1
+ 
+
+# version 50001
+
+data_global_shift
+
+loop_ 
+_rlnMicrographFrameNumber #1 
+_rlnMicrographShiftX #2 
+_rlnMicrographShiftY #3 
+           1     0.000000     0.000000 
+           2     0.963387     -0.81697 
+           3     1.956197     -1.56231 
+           4     2.545505     -2.11229 
+           5     3.127461     -2.74669 
+           6     3.711705     -3.40940 
+           7     4.203554     -3.95097 
+           8     4.749740     -4.73250 
+           9     5.122874     -5.25944 
+          10     5.564512     -5.48017 
+          11     6.173563     -6.31221 
+          12     6.658707     -6.61978 
+          13     7.333168     -7.13502 
+          14     7.748536     -7.60218 
+          15     8.064422     -7.91611 
+          16     8.631406     -8.56053 
+          17     8.696014     -9.14832 
+          18     9.040505     -9.36561 
+          19     9.615537     -9.77509 
+          20     9.834720    -10.07185 
+          21    10.181879    -10.60601 
+          22    10.589931    -10.85237 
+          23    11.129778    -11.29847 
+          24    11.276052    -11.53595 
+        """
+
         for item in batch['items']:
-            base = Path.removeBaseExt(item.rlnMicrographMovieName)
-            self._outSf.writeRowValues([
-                _move(f"{self._outputPrefix}{base}{'_Ctf.mrc'}"),
-                _move(f"{self._outputPrefix}{base}{'.mrc'}"),
-                item.rlnOpticsGroup])
+            movName = item.rlnMicrographMovieName
+            base = Path.removeBaseExt(movName)
+            oBase = self._outputPrefix + base
+            logBase = 'log/' + base
+            oMicFn = _move(f"{oBase}.mrc")
+            oStarFn = _opath(Path.replaceBaseExt(oMicFn, ".star"))
+            with StarFile(oStarFn, 'w') as sf:
+                self._writeMicGeneralTable(sf,  # FIXME update other values
+                                           rlnMicrographMovieName=movName)
+                self._writeMicGlobal(sf, _path(f"{logBase}-Patch-Full.log"),
+                                     _path(f"{logBase}-Patch-Frame.log"))
+            values = [
+                oMicFn,
+                oStarFn,
+                1,  # fixme: optics group
+                -999.0, -999.0, -999.0  # fixme motion
+            ]
+            # External/job006/241015-115244_01_20b2a132/log/20170629_00023_frameImage-Patch-Full.log
+            if self.program_version >= 3:
+                values.append(_move(f"{oBase}_Ctf.mrc"))
+                ctfTxt = _path(f"{oBase}_Ctf.txt")
+                # It should be only one line in the CTF txt file
+                for line in TextFile.stripLines(ctfTxt):
+                    ctfValues = [float(v) for v in line.split()]
+                del ctfValues[3]  # remove Phase shift
+                ctfValues.insert(2, abs(ctfValues[0] - ctfValues[1]))  # Add astigmatism
+                """
+                # defocus 1 [A]; #3 - defocus 2; #4 - azimuth of astig; #5 - additional phase shift [radian]; #6 - cross correlation; #7 - spacing (in Angstroms) up to which CTF rings were fit successfully
+   9174.97    8825.42    77.98     0.00    0.24444   10.0000
+                """
+                values.extend(ctfValues)
+            self._outSf.writeRowValues(values)
 
-            # for newExt in zip(self._outputExts, ):
-            #     newFile = _path(f"{self._outputPrefix}{base}{newExt}")
-            #     shutil.move(newFile, self.outputMicDir)
-
-        # FIXME: Check what we want to move to output
-        #os.system(f'mv {batch_dir}/* {self.outputDir}/ && rm -rf {batch_dir}')
         return batch
 
     def _writeMicrographsTableHeader(self):
-        self.micTable = Table(columns=list(self._outputDict.keys()))
+        columns = [
+            'rlnMicrographName',
+            'rlnMicrographMetadata',
+            'rlnOpticsGroup',
+            'rlnAccumMotionTotal',
+            'rlnAccumMotionEarly',
+            'rlnAccumMotionLate'
+        ]
+        if self.program_version >= 3:
+            columns.extend([
+                'rlnCtfImage',
+                'rlnDefocusU',
+                'rlnDefocusV',
+                'rlnCtfAstigmatism',
+                'rlnDefocusAngle',
+                'rlnCtfFigureOfMerit',
+                'rlnCtfMaxResolution'])
+
+        self.micTable = Table(columns=columns)
         self._outSf.writeHeader('micrographs', self.micTable)
-        
-    def run(self):
+        self._outSf.flush()
+
+    def _writeMicGeneralTable(self, sf, **kwargs):
+        dRow = {
+            'rlnImageSizeX': 3710,
+            'rlnImageSizeY': 3838,
+            'rlnImageSizeZ': 24,
+            'rlnMicrographMovieName': '',
+            'rlnMicrographGainName': 'Movies/gain.mrc',
+            'rlnMicrographBinning': 1.0,
+            'rlnMicrographOriginalPixelSize': 0.885,
+            'rlnMicrographDoseRate': 1.277,
+            'rlnMicrographPreExposure': 0.0,
+            'rlnVoltage': 200.0,
+            'rlnMicrographStartFrame': 1,
+            'rlnMotionModelVersion': 1
+        }
+        dRow.update(kwargs)
+        sf.writeSingleRow('general', dRow)
+
+    def _writeMicGlobal(self, sf, globalShiftsFn, localShiftsFn):
+        cols = ["rlnMicrographFrameNumber",
+                "rlnMicrographShiftX",
+                "rlnMicrographShiftY"]
+
+        def _table_from_file(tableName, fn, i=None):
+            if not os.path.exists(fn):
+                return
+
+            t = Table(columns=cols)
+            sf.writeHeader(tableName, t)
+            for line in TextFile.stripLines(fn):
+                values = line.split()[:i] if i else line.split()
+                sf.writeRowValues(values)
+
+        _table_from_file('global_shift', globalShiftsFn)
+        cols.insert(1, 'rlnCoordinateX')
+        cols.insert(2, 'rlnCoordinateY')
+        _table_from_file('local_shift', localShiftsFn, i=-1)
+
+    def prerun(self):
         with StarFile(self.inputStar) as sf:
             self.optics = sf.getTable('optics')
 
@@ -256,13 +394,35 @@ MotionCorr/job002/Movies/20170629_00028_frameImage_PS.mrc MotionCorr/job002/Movi
         self._build()
         print(f"Batch size: {self.batchSize}")
 
-        self._outFile = open(self.join('corrected_micrographs.star'), 'w')  #FIXME improve for continue
+        if self.program_version >= 3:
+            outName = 'mc3_micrographs_ctf.star'
+        else:
+            outName = 'mc2_micrographs.star'
+        self._outFn = self.join(outName)
+        self._outFile = open(self._outFn, 'w')  #FIXME improve for continue
         self._outSf = StarFile(self._outFile)
         self._outSf.writeTable('optics', self.newOptics)
+        self._writeMicrographsTableHeader()
+        # Write Relion-compatible nodes files
+        """
+        data_output_nodes
+loop_
+_rlnPipeLineNodeName #1
+_rlnPipeLineNodeType #2
+External/job006/coords_suffix_topaz.star            2 
+        """
+        with StarFile(self.join('RELION_OUTPUT_NODES.star'), 'w') as sf:
+            t = Table(columns=['rlnPipeLineNodeName', 'rlnPipeLineNodeType'])
+            t.addRowValues(self._outFn, 1)
+            sf.writeTable('output_nodes', t)
 
+        with open(self.join('job.json'), 'w') as f:
+            json.dump({
+                'inputs': [self.inputStar],
+                'outputs': [self._outFn]
+            }, f)
 
-        ProcessingPipeline.run(self)
-
+    def postrun(self):
         self._outSf.close()
 
 #
