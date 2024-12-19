@@ -43,11 +43,11 @@ def _optics_to_acq(t):
         'amplitud_constrast': r.rlnAmplitudeContrast
     }
 
+
 class McPipeline(ProcessingPipeline):
     """ Pipeline specific to Motioncor processing. """
     def __init__(self, args):
-        ProcessingPipeline.__init__(self, os.getcwd(), args['output_dir'])
-
+        ProcessingPipeline.__init__(self, **args)
         program_path = self.get_arg(args, 'motioncor_path', 'MOTIONCOR_PATH')
         program_version = int(self.get_arg(args, 'motioncor_version', 'MOTIONCOR_VERSION', 0))
         mc_args = args.get('motioncor_args', '')

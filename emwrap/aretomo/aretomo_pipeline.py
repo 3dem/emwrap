@@ -27,7 +27,7 @@ import argparse
 from pprint import pprint
 from glob import glob
 
-from emtools.utils import Color, Timer, Path
+from emtools.utils import Color, Timer, Path, Process
 from emtools.jobs import ProcessingPipeline, BatchManager
 from emtools.metadata import Mdoc
 
@@ -76,7 +76,7 @@ class MdocBatchManager(BatchManager):
 class AreTomoPipeline(ProcessingPipeline):
     """ Pipeline specific to AreTomo processing. """
     def __init__(self, args):
-        ProcessingPipeline.__init__(self, os.getcwd(), args['output_dir'], args['scratch'])
+        ProcessingPipeline.__init__(self, **args)
         self.program = args.get('aretomo_path',
                                 os.environ.get('ARETOMO_PATH', None))
         self.extraArgs = args.get('aretomo_args', '')
@@ -84,15 +84,14 @@ class AreTomoPipeline(ProcessingPipeline):
         self.outputTsDir = self.join('TS')
         self.inputMdocs = args['input_mdocs']
         self.mdoc_suffix = args['mdoc_suffix']
-        if self.scratchDir:
-            self.tmpDir = os.path.join()
 
     def aretomo(self, gpu, batch):
         batch_dir = batch['path']
 
-        def _path(p):
-            return os.path.join(batch_dir, p)
+        def _path(*p):
+            return os.path.join(batch_dir, *p)
 
+        tsName = batch['tsName']
         os.mkdir(_path('output'))
         logFn = _path('output', f'{tsName}_aretomo_log.txt')
         args = [self.program]
@@ -115,7 +114,7 @@ class AreTomoPipeline(ProcessingPipeline):
 
         batchStr = Color.cyan(f"BATCH_{batch['index']:02} - {batch['tsName']}")
         t = Timer()
-        print(f">>> {batchStr}: Running A1:  {Color.green(self.program)} {Color.bold(opts)}")
+        print(f">>> {batchStr}: Running:  {Color.green(self.program)} {Color.bold(opts)}")
 
         with open(logFn, 'w') as logFile:
             logFile.write(f"\n{self.program} {opts}\n\n")
@@ -144,9 +143,10 @@ class AreTomoPipeline(ProcessingPipeline):
     def _output(self, batch):
         if 'error' in batch:
             print(f"Failed batch {batch['id']}, error: {batch['error']}")
+        else:
+            output = os.path.join(batch['path'], 'output')
+            Process.system(f"mv {output} {self.outputTsDir}/{batch['tsName']}")
 
-
-        if not o
         return batch
 
     def _iterMdocs(self):
@@ -157,12 +157,11 @@ class AreTomoPipeline(ProcessingPipeline):
             yield mdoc
 
     def prerun(self):
-        if self.scratchDir:
-
-        batchMgr = MdocBatchManager(self._iterMdocs(), self.outputDir,
+        batchMgr = MdocBatchManager(self._iterMdocs(), self.tmpDir,
                                     suffix=self.mdoc_suffix)
         g = self.addGenerator(batchMgr.generate)
         outputQueue = None
+        Process.system(f"mkdir -p {self.outputTsDir}")
         print(f"Creating {len(self.gpuList)} processing threads.")
         for gpu in self.gpuList:
             p = self.addProcessor(g.outputQueue,
