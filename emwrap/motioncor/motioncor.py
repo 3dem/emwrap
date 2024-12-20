@@ -33,10 +33,11 @@ from emtools.metadata import Table, Column, StarFile, StarMonitor, TextFile
 
 class Motioncor:
     """ Motioncor wrapper to run in a batch folder. """
-    def __init__(self, path, version, acquisition, args):
-        self.path = path
-        self.version = version
-        self.acquisition = acquisition
+    def __init__(self, args, **kwargs):
+        if path := kwargs.get('path', None):
+            self.path = path, self.version = kwargs['version']
+        else:
+            self.path, self.version = Motioncor.__get_environ()
         self.args = args
         self.outputPrefix = "output/aligned_"
 
@@ -64,19 +65,9 @@ class Motioncor:
         else:
             raise Exception(f"Unsupported movie format: {ext}")
 
-        # Load acquisition parameters from the optics table
-        acq = self.acquisition
-        ps = acq['pixel_size']
-        voltage = acq['voltage']
-        cs = acq['cs']
-
         opts = f"{inArg} ./ -OutMrc {self.outputPrefix} -InSuffix {ext} "
-        opts += f"-Serial 1  -Gpu {gpu} -LogDir log/ "
-        opts += f"-PixSize {ps} -kV {voltage} -Cs {cs} "
-        opts += self.args
+        opts += f"-Serial 1  -Gpu {gpu} -LogDir log/ {self.args}"
         args.extend(opts.split())
-        # batchStr = Color.cyan("BATCH_%02d" % batch['index'])
-
         t = Timer()
 
         with open(logFn, 'w') as logFile:
@@ -86,3 +77,20 @@ class Motioncor:
 
         return batch
 
+    @staticmethod
+    def __get_environ():
+        varPath = 'MOTIONCOR_PATH'
+        varVersion = 'MOTIONCOR_VERSION'
+
+        if program := os.environ.get(varPath, None):
+            if not os.path.exists(program):
+                raise Exception(f"Motioncor path ({varPath}={program}) does not exists.")
+        else:
+            raise Exception(f"Motioncor path variable {varPath} is not defined.")
+
+        if version := os.getenv(varVersion, 3):
+            pass
+        else:
+            raise Exception(f"Motioncor version variable {varVersion} is not defined.")
+
+        return program, version

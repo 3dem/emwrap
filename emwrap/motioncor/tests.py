@@ -29,25 +29,6 @@ from emtools.metadata import Table, StarFile
 from emwrap.motioncor import Motioncor, McPipeline
 
 
-def get_mc_environ():
-
-    varPath = 'MOTIONCOR_PATH'
-    varVersion = 'MOTIONCOR_VERSION'
-
-    if program := os.environ.get(varPath, None):
-        if not os.path.exists(program):
-            raise Exception(f"Motioncor path ({varPath}={program}) does not exists.")
-    else:
-        raise Exception(f"Motioncor path variable {varPath} is not defined.")
-
-    if version := os.getenv(varVersion, 3):
-        pass
-    else:
-        raise Exception(f"Motioncor version variable {varVersion} is not defined.")
-
-    return program, version
-
-
 def _filename(row):
     """ Helper to get unique name from a particle row. """
     pts, stack = row.rlnImageName.split('@')
@@ -85,11 +66,10 @@ def _make_batch(path, n):
 
 class TestMotioncor(unittest.TestCase):
     def test_batch(self):
-        prog, ver = get_mc_environ()
-        acq = {'pixel_size': 0.64, 'voltage': 300, 'cs': 2.7}
-        mc = Motioncor(prog, ver, acq, '')
+        mc = Motioncor("-PixSize 0.64 -kV 200 -Cs 2.7 -FtBin 2")
 
-        tmp = tempfile.mkdtemp()
+        #TODO Consider create our contest that allow to respond to EM_NOCLEAN
+        tmp = tempfile.mkdtemp(prefix='TestMotioncor.test_batch')
         #with tempfile.TemporaryDirectory() as tmp:
         print(f"Using dir: {tmp}")
 
