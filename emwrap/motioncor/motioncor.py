@@ -42,19 +42,10 @@ class Motioncor:
         self.outputPrefix = "output/aligned_"
 
     def process_batch(self, gpu, batch):
-        batch_dir = batch['path']
-
-        def _path(p):
-            return os.path.join(batch_dir, p)
-
-        os.mkdir(_path('output'))
-        os.mkdir(_path('log'))
-
-        logFn = _path('motioncor_log.txt')
+        batch.mkdir('output')
+        batch.mkdir('log')
         args = [self.path]
-
-        items = batch['items']
-        ext = Path.getExt(items[0].rlnMicrographMovieName)
+        ext = Path.getExt(batch.items[0].rlnMicrographMovieName)
         extLower = ext.lower()
 
         if extLower.startswith('.tif'):
@@ -71,21 +62,68 @@ class Motioncor:
         args.extend(opts.split())
         t = Timer()
 
-        with open(logFn, 'w') as logFile:
+        with open(batch.join('log.txt'), 'w') as logFile:
             print(">>>", Color.green(args[0]), Color.bold(' '.join(args[1:])))
-            subprocess.call(args, cwd=batch_dir, stderr=logFile, stdout=logFile)
+            subprocess.call(args, cwd=batch.path, stderr=logFile, stdout=logFile)
 
         batch['info'] = info = {
-            'items': len(items),
+            'items': len(batch.items),
             'elapsed': str(t.getElapsedTime())
         }
 
         print(json.dumps(info, indent=4))
 
-        with open(_path('batch_info.json'), 'w') as batch_info:
+        with open(batch.join('info.json'), 'w') as batch_info:
             json.dump(info, batch_info, indent=4)
 
         return batch
+
+    def parse_batch(self, batch):
+        batch['results'] = []
+
+        def _expect(fileName):
+            if not os.path.exists(fileName):
+                raise Exception(f"Missing expected output: {fileName}")
+
+        for row in batch.items:
+            result = {}
+            try:
+                movieName = row.rlnMicrographMovieName
+                print(f"- {movieName}")
+                baseName = Path.removeBaseExt(movieName)
+                micName = batch.join('output', f"aligned_{baseName}.mrc")
+                _expect(micName)
+                result['rlnMicrographName'] = micName
+
+                logs = {}
+                if 'Patch' in self.args:
+                    logsFull = batch.join('log', f"{baseName}-Patch-Full.log")
+                    logsPatch = batch.join('log', f"{baseName}-Patch-Patch.log")
+                else:
+                    logsFull = batch.join('log', f"{baseName}-Full.log")
+                    logsPatch = None
+
+                # Parse global motion movements
+                _expect(logsFull)
+                t = Table(['rlnMicrographFrameNumber',
+                           'rlnMicrographShiftX',
+                           'rlnMicrographShiftY'])
+                with open(logsFull) as f:
+                    for line in f:
+                        if line := line.strip():
+                            if not line.startswith('#'):
+                                parts = line.split()
+                                t.addRowValues(*parts)
+                StarFile.printTable(t, 'global_shift')
+
+                # Parse local motions
+                if logsPatch:
+                    _expect(logsPatch)
+
+            except Exception as e:
+                result['error'] = str(e)
+            batch['results'].append(result)
+
 
     @staticmethod
     def __get_environ():

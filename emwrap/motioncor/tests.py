@@ -66,11 +66,18 @@ def _make_batch(path, n):
 
 class TestMotioncor(unittest.TestCase):
     def test_batch(self):
-        mc = Motioncor("-PixSize 0.64 -kV 200 -Cs 2.7 -FtBin 2")
+        def _run(name, args):
+            mc = Motioncor(args)
+            with Path.tmpDir(prefix=f'TestMotioncor.test_batch_{name}__') as tmp:
+                batch = _make_batch(tmp, 8)
+                mc.process_batch(0, batch)
+                mc.parse_batch(batch)
 
-        with Path.tmpDir(prefix='TestMotioncor.test_batch__') as tmp:
-            batch = _make_batch(tmp, 8)
-            mc.process_batch(0, batch)
+        args = "-PixSize 0.64 -kV 200 -Cs 2.7 -FtBin 2"
+        _run('global', args)
+
+        args += " -Patch 5 5"
+        #_run('local', args)
 
     def test_pipeline(self):
         print(Color.bold(">>> Running test: "), Color.warn("test_pipeline"))
