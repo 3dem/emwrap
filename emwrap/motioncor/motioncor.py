@@ -35,7 +35,7 @@ class Motioncor:
     """ Motioncor wrapper to run in a batch folder. """
     def __init__(self, args, **kwargs):
         if path := kwargs.get('path', None):
-            self.path = path, self.version = kwargs['version']
+            self.path = path, self.version = int(kwargs['version'])
         else:
             self.path, self.version = Motioncor.__get_environ()
         self.args = args
@@ -53,7 +53,8 @@ class Motioncor:
         logFn = _path('motioncor_log.txt')
         args = [self.path]
 
-        ext = Path.getExt(batch['items'][0].rlnMicrographMovieName)
+        items = batch['items']
+        ext = Path.getExt(items[0].rlnMicrographMovieName)
         extLower = ext.lower()
 
         if extLower.startswith('.tif'):
@@ -71,9 +72,18 @@ class Motioncor:
         t = Timer()
 
         with open(logFn, 'w') as logFile:
+            print(">>>", Color.green(args[0]), Color.bold(' '.join(args[1:])))
             subprocess.call(args, cwd=batch_dir, stderr=logFile, stdout=logFile)
 
-        batch['elapsed'] = t.getToc()
+        batch['info'] = info = {
+            'items': len(items),
+            'elapsed': str(t.getElapsedTime())
+        }
+
+        print(json.dumps(info, indent=4))
+
+        with open(_path('batch_info.json'), 'w') as batch_info:
+            json.dump(info, batch_info, indent=4)
 
         return batch
 
@@ -88,7 +98,7 @@ class Motioncor:
         else:
             raise Exception(f"Motioncor path variable {varPath} is not defined.")
 
-        if version := os.getenv(varVersion, 3):
+        if version := int(os.getenv(varVersion, 3)):
             pass
         else:
             raise Exception(f"Motioncor version variable {varVersion} is not defined.")

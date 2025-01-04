@@ -22,7 +22,7 @@ import glob
 import numpy as np
 import time
 
-from emtools.utils import Color, Process, System
+from emtools.utils import Color, Process, System, Path
 from emtools.jobs import BatchManager
 from emtools.metadata import Table, StarFile
 
@@ -68,13 +68,9 @@ class TestMotioncor(unittest.TestCase):
     def test_batch(self):
         mc = Motioncor("-PixSize 0.64 -kV 200 -Cs 2.7 -FtBin 2")
 
-        #TODO Consider create our contest that allow to respond to EM_NOCLEAN
-        tmp = tempfile.mkdtemp(prefix='TestMotioncor.test_batch')
-        #with tempfile.TemporaryDirectory() as tmp:
-        print(f"Using dir: {tmp}")
-
-        batch = _make_batch(tmp, 8)
-        mc.process_batch(0, batch)
+        with Path.tmpDir(prefix='TestMotioncor.test_batch__') as tmp:
+            batch = _make_batch(tmp, 8)
+            mc.process_batch(0, batch)
 
     def test_pipeline(self):
         print(Color.bold(">>> Running test: "), Color.warn("test_pipeline"))
@@ -83,36 +79,26 @@ class TestMotioncor(unittest.TestCase):
         if not gpus:
             raise Exception("No GPU detected, required for Motioncor tests. ")
 
-        tmp = tempfile.mkdtemp()
-        cwd = os.getcwd()
-        os.chdir(tmp)
+        with Path.tmpDir(prefix='TestMotioncor.test_pipeline__', chdir=True) as tmp:
+            args = {
+                'output_dir': 'output',
+                'gpu_list': str(gpus[0]['index']),
+                'input_star': 'movies.star',
+                'batch_size': 6,
+                'motioncor_args': "-FtBin 2"
+            }
 
-        args = {
-            'output_dir': 'output',
-            'gpu_list': str(gpus[0]['index']),
-            'input_star': 'movies.star',
-            'batch_size': 6
-        }
+            with StarFile(args['input_star'], 'w') as sf:
+                sf.writeTable('optics', _optics_table(0.64, 300, 1.4, 0.1))
+                sf.writeTable('movies', _movies_table())
 
-        # with tempfile.TemporaryDirectory() as tmp:
-        print(Color.bold(f"Using dir: {tmp}"))
-
-        with StarFile(args['input_star'], 'w') as sf:
-            sf.writeTable('optics', _optics_table(0.64, 300, 1.4, 0.1))
-            sf.writeTable('movies', _movies_table())
-
-        # Run the pipeline with 1 gpu
-        Process.system('mkdir ' + args['output_dir'], color=Color.bold)
-        McPipeline(args).run()
-
-        # Run with 2 GPUs if available
-        if len(gpus) > 1:
-            args.update(gpu_list=' '.join(g['index'] for g in gpus[:2]),
-                        output_dir='output2')
-            Process.system('mkdir ' + args['output_dir'], color=Color.bold)
+            # Run the pipeline with 1 gpu
+            Process.system('mkdir output', color=Color.bold)
             McPipeline(args).run()
 
-
-
-        os.chdir(cwd)
-        #shutil.rmtree(tmp)
+            # Run with 2 GPUs if available
+            if len(gpus) > 1:
+                args.update(gpu_list=' '.join(g['index'] for g in gpus[:2]),
+                            output_dir='output2')
+                Process.system('mkdir output2', color=Color.bold)
+                McPipeline(args).run()

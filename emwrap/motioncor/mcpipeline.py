@@ -33,24 +33,21 @@ from emtools.metadata import Table, Column, StarFile, StarMonitor, TextFile
 from .motioncor import Motioncor
 
 
-def _optics_to_acq(t):
-    r = t[0]
-    print("Optics row:", r)
-    return {
-        'pixel_size': r.rlnMicrographOriginalPixelSize,
-        'voltage': r.rlnVoltage,
-        'cs': r.rlnSphericalAberration,
-        'amplitud_constrast': r.rlnAmplitudeContrast
-    }
+# def _optics_to_acq(t):
+#     r = t[0]
+#     print("Optics row:", r)
+#     return {
+#         'pixel_size': r.rlnMicrographOriginalPixelSize,
+#         'voltage': r.rlnVoltage,
+#         'cs': r.rlnSphericalAberration,
+#         'amplitud_constrast': r.rlnAmplitudeContrast
+#     }
 
 
 class McPipeline(ProcessingPipeline):
     """ Pipeline specific to Motioncor processing. """
     def __init__(self, args):
         ProcessingPipeline.__init__(self, **args)
-        program_path = self.get_arg(args, 'motioncor_path', 'MOTIONCOR_PATH')
-        program_version = int(self.get_arg(args, 'motioncor_version', 'MOTIONCOR_VERSION', 0))
-        mc_args = args.get('motioncor_args', '')
 
         self.gpuList = args['gpu_list'].split()
         self.outputMicDir = self.join('Micrographs')
@@ -67,9 +64,12 @@ class McPipeline(ProcessingPipeline):
             'rlnOpticsGroup': None
         }
 
-        self.mc = Motioncor(program_path, program_version,
-                            _optics_to_acq(self.optics), mc_args)
+        o = self.optics[0]  # shortcut
+        acq_args = (f" -PixSize {o.rlnMicrographOriginalPixelSize}"
+                    f" -kV {o.rlnVoltage} -Cs {o.rlnSphericalAberration} ")
 
+        mc_args = args.get('motioncor_args', '') + acq_args
+        self.mc = Motioncor(mc_args, **args)
 
     def _build(self):
         def _movie_filename(row):
