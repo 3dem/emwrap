@@ -23,7 +23,7 @@ import numpy as np
 import time
 
 from emtools.utils import Color, Process, System, Path
-from emtools.jobs import BatchManager
+from emtools.jobs import BatchManager, Args
 from emtools.metadata import Table, StarFile
 
 from emwrap.motioncor import Motioncor, McPipeline
@@ -66,18 +66,25 @@ def _make_batch(path, n):
 
 class TestMotioncor(unittest.TestCase):
     def test_batch(self):
-        def _run(name, args):
-            mc = Motioncor(args)
+        def _run(name, mc_args):
+            mc = Motioncor(mc_args)
             with Path.tmpDir(prefix=f'TestMotioncor.test_batch_{name}__') as tmp:
+                outMics = os.path.join(tmp, 'Micrographs')
+                Process.system(f'mkdir {outMics}', color=Color.bold)
                 batch = _make_batch(tmp, 8)
                 mc.process_batch(0, batch)
-                mc.parse_batch(batch)
+                mc.parse_batch(batch, outMics)
+                batch.dump_info()
+                info = batch.info
+                # Check that there is no failed micrograph
+                self.assertEquals(info['mc_input'], info['output_total'])
+                self.assertFalse(any('error' in r for r in batch['results']))
 
-        args = "-PixSize 0.64 -kV 200 -Cs 2.7 -FtBin 2"
-        _run('global', args)
+        mc_args = {'-PixSize': 0.64, '-kV': 200, '-Cs': 2.7, '-FtBin': 2}
+        _run('global', mc_args)
 
-        args += " -Patch 5 5"
-        #_run('local', args)
+        mc_args.update({'-Patch': "5 5", '-FtBin': 1})
+        _run('local', mc_args)
 
     def test_pipeline(self):
         print(Color.bold(">>> Running test: "), Color.warn("test_pipeline"))
@@ -92,11 +99,11 @@ class TestMotioncor(unittest.TestCase):
                 'gpu_list': str(gpus[0]['index']),
                 'input_star': 'movies.star',
                 'batch_size': 6,
-                'motioncor_args': "-FtBin 2"
+                'motioncor_args': {'-FtBin': 2}
             }
 
             with StarFile(args['input_star'], 'w') as sf:
-                sf.writeTable('optics', _optics_table(0.64, 300, 1.4, 0.1))
+                sf.writeTable('optics', _optics_table(0.64, 200, 2.7, 0.1))
                 sf.writeTable('movies', _movies_table())
 
             # Run the pipeline with 1 gpu

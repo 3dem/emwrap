@@ -27,7 +27,7 @@ import argparse
 from pprint import pprint
 
 from emtools.utils import Color, Timer, Path
-from emtools.jobs import ProcessingPipeline, BatchManager
+from emtools.jobs import ProcessingPipeline, BatchManager, Args
 from emtools.metadata import Table, Column, StarFile, StarMonitor, TextFile
 
 
@@ -38,7 +38,7 @@ class Motioncor:
             self.path = path, self.version = int(kwargs['version'])
         else:
             self.path, self.version = Motioncor.__get_environ()
-        self.args = args
+        self.args = Args(args)
         self.outputPrefix = "output/aligned_"
 
     def process_batch(self, gpu, batch):
@@ -57,73 +57,108 @@ class Motioncor:
         else:
             raise Exception(f"Unsupported movie format: {ext}")
 
-        opts = f"{inArg} ./ -OutMrc {self.outputPrefix} -InSuffix {ext} "
-        opts += f"-Serial 1  -Gpu {gpu} -LogDir log/ {self.args}"
-        args.extend(opts.split())
+        kwargs = Args({
+            inArg: './', '-OutMrc': self.outputPrefix, '-InSuffix': ext,
+            '-Serial': 1, '-Gpu': gpu, '-LogDir': 'log/'
+        })
+        kwargs.update(self.args)
+        args.extend(kwargs.toList())
+
         t = Timer()
 
         with open(batch.join('log.txt'), 'w') as logFile:
             print(">>>", Color.green(args[0]), Color.bold(' '.join(args[1:])))
             subprocess.call(args, cwd=batch.path, stderr=logFile, stdout=logFile)
 
-        batch['info'] = info = {
-            'items': len(batch.items),
-            'elapsed': str(t.getElapsedTime())
-        }
-
-        print(json.dumps(info, indent=4))
-
-        with open(batch.join('info.json'), 'w') as batch_info:
-            json.dump(info, batch_info, indent=4)
+        batch.info.update({
+            'mc_input': len(batch.items),
+            'mc_elapsed': str(t.getElapsedTime())
+        })
 
         return batch
 
-    def parse_batch(self, batch):
+    def parse_batch(self, batch, outputDir):
         batch['results'] = []
-
-        def _expect(fileName):
-            if not os.path.exists(fileName):
-                raise Exception(f"Missing expected output: {fileName}")
+        total = 0
+        t = Timer()
 
         for row in batch.items:
             result = {}
             try:
                 movieName = row.rlnMicrographMovieName
-                print(f"- {movieName}")
                 baseName = Path.removeBaseExt(movieName)
                 micName = batch.join('output', f"aligned_{baseName}.mrc")
-                _expect(micName)
+
+                # Check that the expected output micrograph file exists
+                # and move it to the final output directory
+                self.__expect(micName)
+                shutil.move(micName, outputDir)
                 result['rlnMicrographName'] = micName
 
-                logs = {}
-                if 'Patch' in self.args:
+                if '-Patch' in self.args:
                     logsFull = batch.join('log', f"{baseName}-Patch-Full.log")
                     logsPatch = batch.join('log', f"{baseName}-Patch-Patch.log")
                 else:
                     logsFull = batch.join('log', f"{baseName}-Full.log")
                     logsPatch = None
 
-                # Parse global motion movements
-                _expect(logsFull)
-                t = Table(['rlnMicrographFrameNumber',
-                           'rlnMicrographShiftX',
-                           'rlnMicrographShiftY'])
-                with open(logsFull) as f:
-                    for line in f:
-                        if line := line.strip():
-                            if not line.startswith('#'):
-                                parts = line.split()
-                                t.addRowValues(*parts)
-                StarFile.printTable(t, 'global_shift')
-
-                # Parse local motions
-                if logsPatch:
-                    _expect(logsPatch)
+                shiftsStar = os.path.join(outputDir, f'aligned_{baseName}.star')
+                self.__write_shift_star(batch, logsFull, logsPatch, movieName, shiftsStar)
+                result['rlnMicrographMetadata'] = shiftsStar
+                total += 1
 
             except Exception as e:
                 result['error'] = str(e)
+                print(Color.red(f"ERROR: {result['error']}"))
+
             batch['results'].append(result)
 
+        batch.info.update({
+            'output_total': total,
+            'output_elapsed': str(t.getElapsedTime())
+        })
+
+    def __expect(self, fileName):
+        if not os.path.exists(fileName):
+            raise Exception(f"Missing expected output: {fileName}")
+
+    def __write_shift_star(self, batch, logsFull, logsPatch, movieName, shiftsStar):
+        # Parse global motion movements
+        self.__expect(logsFull)
+        tGeneral = Table(
+            ['rlnImageSizeX', 'rlnImageSizeY', 'rlnImageSizeZ',
+             'rlnMicrographMovieName', 'rlnMicrographBinning',
+             'rlnMicrographOriginalPixelSize', 'rlnMicrographDoseRate',
+             'rlnMicrographPreExposure', 'rlnVoltage',
+             'rlnMicrographStartFrame', 'rlnMotionModelVersion'
+             ])
+        x, y, z, _ = self.__parse_dimensions(batch.join('log.txt'))
+        tGeneral.addRowValues(x, y, z, movieName,
+                              self.args.get('-FtBin', 1), self.args['-PixSize'], 1.0, 0.0,
+                              self.args['-kV'], 1, 0)
+
+        t = Table(['rlnMicrographFrameNumber',
+                   'rlnMicrographShiftX',
+                   'rlnMicrographShiftY'])
+
+        for line in TextFile.stripLines(logsFull):
+            t.addRowValues(*line.split())
+
+        with StarFile(shiftsStar, 'w') as sf:
+            sf.writeTimeStamp()
+            sf.writeTable('general', tGeneral, singleRow=True)
+            sf.writeTable('global_shift', t)
+
+            # Parse local motions
+            if logsPatch:
+                self.__expect(logsPatch)
+                t = Table(['rlnMicrographFrameNumber',
+                           'rlnCoordinateX', 'rlnCoordinateY',
+                           'rlnMicrographShiftX', 'rlnMicrographShiftY'])
+                for line in TextFile.stripLines(logsPatch):
+                    parts = line.split()
+                    t.addRowValues(*parts[:5])
+                sf.writeTable('local_shift', t)
 
     @staticmethod
     def __get_environ():
@@ -142,3 +177,12 @@ class Motioncor:
             raise Exception(f"Motioncor version variable {varVersion} is not defined.")
 
         return program, version
+
+    @staticmethod
+    def __parse_dimensions(logFile):
+        """ Parse output dimensions from the log file. """
+        with open(logFile) as f:
+            for line in f:
+                if 'size mode:' in line:
+                    return line.split(':')[-1].split()
+        return None
