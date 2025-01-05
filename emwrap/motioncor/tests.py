@@ -71,13 +71,16 @@ class TestMotioncor(unittest.TestCase):
             with Path.tmpDir(prefix=f'TestMotioncor.test_batch_{name}__') as tmp:
                 outMics = os.path.join(tmp, 'Micrographs')
                 Process.system(f'mkdir {outMics}', color=Color.bold)
-                batch = _make_batch(tmp, 8)
-                mc.process_batch(0, batch)
-                mc.parse_batch(batch, outMics)
+                N = 8
+                batch = _make_batch(tmp, N)
+                mc.process_batch(batch, gpu=0)
+                mc.output_batch(batch, outMics)
                 batch.dump_info()
                 info = batch.info
                 # Check that there is no failed micrograph
-                self.assertEquals(info['mc_input'], info['output_total'])
+                self.assertEquals(info['mc_input'], N)
+                self.assertEquals(info['mc_output'], N)
+                self.assertEquals(len(batch['to_move']), N)
                 self.assertFalse(any('error' in r for r in batch['results']))
 
         mc_args = {'-PixSize': 0.64, '-kV': 200, '-Cs': 2.7, '-FtBin': 2}

@@ -20,28 +20,25 @@
 
 import os
 import subprocess
-import shutil
-import sys
-import json
-import argparse
-from pprint import pprint
 
 from emtools.utils import Color, Timer, Path
-from emtools.jobs import ProcessingPipeline, BatchManager, Args
-from emtools.metadata import Table, Column, StarFile, StarMonitor, TextFile
+from emtools.jobs import Args
+from emtools.metadata import Table, StarFile, TextFile
 
 
 class Motioncor:
     """ Motioncor wrapper to run in a batch folder. """
-    def __init__(self, args, **kwargs):
+    def __init__(self, *args, **kwargs):
         if path := kwargs.get('path', None):
             self.path = path, self.version = int(kwargs['version'])
         else:
             self.path, self.version = Motioncor.__get_environ()
-        self.args = Args(args)
+        self.args = Args(args[0])
         self.outputPrefix = "output/aligned_"
 
-    def process_batch(self, gpu, batch):
+    def process_batch(self, batch, **kwargs):
+        gpu = kwargs['gpu']
+
         batch.mkdir('output')
         batch.mkdir('log')
         args = [self.path]
@@ -77,10 +74,10 @@ class Motioncor:
 
         return batch
 
-    def parse_batch(self, batch, outputDir):
+    def output_batch(self, batch, outputDir):
         batch['results'] = []
+        batch['outputs'] = []
         total = 0
-        t = Timer()
 
         for row in batch.items:
             result = {}
@@ -92,7 +89,7 @@ class Motioncor:
                 # Check that the expected output micrograph file exists
                 # and move it to the final output directory
                 self.__expect(micName)
-                shutil.move(micName, outputDir)
+                batch['outputs'].append(micName)
                 result['rlnMicrographName'] = micName
 
                 if '-Patch' in self.args:
@@ -114,8 +111,7 @@ class Motioncor:
             batch['results'].append(result)
 
         batch.info.update({
-            'output_total': total,
-            'output_elapsed': str(t.getElapsedTime())
+            'mc_output': total
         })
 
     def __expect(self, fileName):

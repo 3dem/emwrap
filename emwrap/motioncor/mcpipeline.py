@@ -96,13 +96,13 @@ class McPipeline(ProcessingPipeline):
 
     def get_motioncor_proc(self, gpu):
         def _motioncor(batch):
-            return self.mc.process_batch(gpu, batch)
+            return self.mc.process_batch(batch, gpu=gpu)
         return _motioncor
 
     def _output(self, batch):
-        self.mc.parse_batch(batch, self.outputMicDir)
+        self.mc.output_batch(batch, self.outputMicDir)
         for item, r in zip(batch['items'], batch['results']):
-            if not 'error' in r:
+            if 'error' not in r:
                 self._outSf.writeRowValues([
                     r['rlnMicrographName'],
                     r['rlnMicrographMetadata'],
@@ -111,6 +111,9 @@ class McPipeline(ProcessingPipeline):
                 ])
             else:
                 pass  # TODO write failed items for inspection or retry
+
+        for s, d in batch['to_move']:
+            shutil.move(s, d)
 
         return batch
 

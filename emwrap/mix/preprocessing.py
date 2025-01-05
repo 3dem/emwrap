@@ -27,8 +27,11 @@ import argparse
 from pprint import pprint
 
 from emtools.utils import Color, Timer, Path
-from emtools.jobs import ProcessingPipeline, BatchManager
+from emtools.jobs import Batch
 from emtools.metadata import Table, Column, StarFile, StarMonitor, TextFile
+
+from emwrap.motioncor import Motioncor
+from emwrap.ctffind import Ctffind
 
 
 class Preprocessing:
@@ -38,13 +41,40 @@ class Preprocessing:
      the scratch and minimize the transfer of temporary files.
      """
     def __init__(self, **kwargs):
-        self.motioncor = kwargs['motioncor']
-        self.ctf = kwargs.get('ctf', None)
+        mc = kwargs['motioncor']
+        self.motioncor = Motioncor(*mc['args'], **mc['kwargs'])
+        if 'ctf' in kwargs:
+            ctf = kwargs['ctf']
+            self.ctf = Ctffind(*ctf['args'], **ctf['kwargs'])
+        else:
+            self.ctf = None
+
+        self.outputMics = kwargs['outputMics']
+        self.outputCtfs = kwargs['outputCtfs']
+
+        # TODO
         self.picking = kwargs.get('picking', None)
         self.extract = kwargs.get('extract', None)
 
-    def process_batch(self, gpu, batch):
-        self.motioncor.process_batch(gpu, batch)
+    def process_batch(self, batch, **kwargs):
+        v = kwargs.get('verbose', False)
+        gpu = kwargs['gpu']
+        mc = self.motioncor
+        mc.process_batch(batch, gpu=gpu)
+        mc.output_batch(batch, self.outputMics)
+        ctf_batch = Batch(batch)
+        ctf_batch['items'] = [r['rlnMicrographName'] for r in batch['results'] if 'error' not in r]
+        self.ctf.process_batch(ctf_batch, verbose=v)
+        batch.info.update(ctf_batch.info)
 
+        def _move(outputs, d):
+            for o in outputs:
+                if v:
+                    print(f"Moving {o} -> {d}")
+                shutil.move(o, d)
+
+        _move(batch['outputs'], self.outputMics)
+        _move(ctf_batch['outputs'], self.outputCtfs)
+        # TODO: update with ctf values
         return batch
 

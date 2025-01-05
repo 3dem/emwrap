@@ -26,79 +26,81 @@ import json
 import argparse
 from pprint import pprint
 
-from emtools.utils import Color, Timer, Path
+from emtools.utils import Color, Timer, Path, Process
 from emtools.jobs import ProcessingPipeline, BatchManager
 from emtools.metadata import Table, Column, StarFile, StarMonitor, TextFile
 
 
 class Ctffind:
-    """ Ctffind wrapper to run in a batch folder. 
-    $CTFFIND << eof
-    aligned_20170629_00037_frameImage.mrc
-    aligned_20170629_00037_frameImage_ctffind.mrc
-    0.648500
-    200.000000
-    2.700000
-    0.100000
-    512
-    30.000000
-    5.000000
-    5000.000000
-    50000.000000
-    100.000000
-    no
-    no
-    no
-    no
-    no
-    no
-    no
-    eof
+    def __init__(self, *args, **kwargs):
+        pixel_size, voltage, spherical_aberration, amplitude_contrast = args
+        self.path = kwargs.get('path', '/usr/local/em/ctffind-5.0/bin/ctffind')
+        self.version = 5
+        _get = kwargs.get  # shortcut
+        self.args = [pixel_size, voltage, spherical_aberration, amplitude_contrast,
+                     _get('window', 512), _get('min_res', 30.0), _get('max_res', 5.0),
+                     _get('min_def', 5000.0), _get('max_def', 50000.0), _get('step_def', 100.0),
+                     'no', 'no', 'no', 'no', 'no', 'no', 'no']
 
+    def process(self, micrograph, **kwargs):
+        verbose = kwargs.get('verbose', False)
+        ctf_files = [Path.replaceExt(micrograph, '_ctf.mrc'),
+                     Path.replaceExt(micrograph, '_ctf_avrot.txt')]
+        args = [micrograph, ctf_files[0]] + self.args
+        if verbose:
+            print(">>>", Color.green(self.path), Color.bold(' '.join(str(a) for a in args)))
+        p = Process(self.path, input='\n'.join(str(a) for a in args))
+        for f in ctf_files:
+            if not os.path.exists(f):
+                raise Exception(f"Missing expected CTF file: {f}")
+        ctf_values = self.__parse_output(p.lines())
+        if verbose:
+            print(ctf_values)
+        return ctf_values, ctf_files
 
-    """
-    def __init__(self, args, **kwargs):
-        if path := kwargs.get('path', None):
-            self.path = path, self.version = kwargs['version']
-        else:
-            self.path, self.version = Motioncor.__get_environ()
-        self.args = args
-        self.outputPrefix = "output/aligned_"
-
-    def process_batch(self, gpu, batch):
-        batch_dir = batch['path']
-
-        def _path(p):
-            return os.path.join(batch_dir, p)
-
-        os.mkdir(_path('output'))
-        os.mkdir(_path('log'))
-
-        logFn = _path('motioncor_log.txt')
-        args = [self.path]
-
-        ext = Path.getExt(batch['items'][0].rlnMicrographMovieName)
-        extLower = ext.lower()
-
-        if extLower.startswith('.tif'):
-            inArg = '-InTiff'
-        elif extLower.startswith('.mrc'):
-            inArg = '-InMrc'
-        elif extLower.startswith('.eer'):
-            inArg = '-InEer'
-        else:
-            raise Exception(f"Unsupported movie format: {ext}")
-
-        opts = f"{inArg} ./ -OutMrc {self.outputPrefix} -InSuffix {ext} "
-        opts += f"-Serial 1  -Gpu {gpu} -LogDir log/ {self.args}"
-        args.extend(opts.split())
+    def process_batch(self, batch, **kwargs):
         t = Timer()
+        batch['results'] = []
+        batch['outputs'] = []
 
-        with open(logFn, 'w') as logFile:
-            subprocess.call(args, cwd=batch_dir, stderr=logFile, stdout=logFile)
+        for mic in batch['items']:
+            try:
+                ctf_values, ctf_files = self.process(mic, verbose=kwargs.get('verbose', False))
+                result = {'ctf_values': ctf_values}
+            except Exception as e:
+                result = {'error': str(e)}
+                ctf_files = []
+                print(Color.red(f"ERROR: {result['error']}"))
 
-        batch['elapsed'] = t.getToc()
+            batch['results'].append(result)
+            batch['outputs'].extend(ctf_files)
+
+        batch.info.update({
+            'ctf_elapsed': str(t.getElapsedTime())
+        })
 
         return batch
 
+    def __parse_output(self, lines):
+        """ Parsing CTF values from an output with the form:
+        Estimated defocus values        : 5784.86 , 5614.60 Angstroms
+        Estimated azimuth of astigmatism: 70.84 degrees
+        Score                           : 0.22323
+        Pixel size for fitting          : 1.400 Angstroms
+        Thon rings with good fit up to  : 4.8 Angstroms
+        """
+        for line in lines:
+            def _parts():
+                return line.split(':')[-1].split()
+
+            if line.startswith('Estimated defocus values'):
+                defocus = _parts()
+            elif line.startswith('Estimated azimuth of astigmatism'):
+                defocusAngle = _parts()[0]
+            elif line.startswith('Score       '):
+                ctfScore = _parts()[0]
+            elif line.startswith('Thon rings with good fit up to'):
+                ctfRes = _parts()[0]
+
+        return defocus[0], defocus[2], defocusAngle, ctfScore, ctfRes
 

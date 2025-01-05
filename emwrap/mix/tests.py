@@ -21,15 +21,13 @@ import tempfile
 import glob
 import numpy as np
 import time
+from pprint import pprint
 
-from emtools.utils import Color, Process, System
-from emtools.jobs import BatchManager
+from emtools.utils import Color, Process, System, Path
+from emtools.jobs import BatchManager, Args
 from emtools.metadata import Table, StarFile
 
-from emwrap.motioncor import Motioncor, McPipeline
-
-
-
+from emwrap.mix import Preprocessing
 
 
 def _filename(row):
@@ -69,54 +67,36 @@ def _make_batch(path, n):
 
 class TestPreprocessing(unittest.TestCase):
     def test_batch(self):
-        prog, ver = get_mc_environ()
-        acq = {'pixel_size': 0.64, 'voltage': 300, 'cs': 2.7}
-        mc = Motioncor(prog, ver, acq, '')
+        def _run(name, **kwargs):
 
-        tmp = tempfile.mkdtemp()
-        #with tempfile.TemporaryDirectory() as tmp:
-        print(f"Using dir: {tmp}")
+            with Path.tmpDir(prefix=f'TestPreprocessing.test_batch_{name}__') as tmp:
+                def _mkdir(d):
+                    tmpd = os.path.join(tmp, d)
+                    Process.system(f'mkdir {tmpd}', color=Color.bold)
+                    return tmpd
 
-        batch = _make_batch(tmp, 8)
-        mc.process_batch(0, batch)
+                outMics = _mkdir('Micrographs')
+                outCtfs = _mkdir('CTFs')
+                batch = _make_batch(tmp, 8)
+                kwargs['outputMics'] = outMics
+                kwargs['outputCtfs'] = outCtfs
+                preproc = Preprocessing(**kwargs)
 
-    def test_pipeline(self):
-        print(Color.bold(">>> Running test: "), Color.warn("test_pipeline"))
-        gpus = System.gpus()
+                preproc.process_batch(batch, gpu=0, verbose=True)
+                batch.dump_info()
+                info = batch.info
+                pprint(info)
+                # Check that there is no failed micrograph
+                self.assertEqual(info['mc_input'], info['mc_output'])
+                self.assertFalse(any('error' in r for r in batch['results']))
 
-        if not gpus:
-            raise Exception("No GPU detected, required for Motioncor tests. ")
+        mc_args = {'-PixSize': 0.64, '-kV': 200, '-Cs': 2.7, '-FtBin': 2}
+        mc = {'args': [mc_args], 'kwargs': {}}
 
-        tmp = tempfile.mkdtemp()
-        cwd = os.getcwd()
-        os.chdir(tmp)
+        ctf = {'args': [0.64, 200, 2.7, 0.1], 'kwargs': {}}
 
-        args = {
-            'output_dir': 'output',
-            'gpu_list': str(gpus[0]['index']),
-            'input_star': 'movies.star',
-            'batch_size': 6
-        }
+        _run('global', motioncor=mc, ctf=ctf)
 
-        # with tempfile.TemporaryDirectory() as tmp:
-        print(Color.bold(f"Using dir: {tmp}"))
+        # mc_args.update({'-Patch': "5 5", '-FtBin': 1})
+        # _run('local', motioncor=mc, ctf=ctf)
 
-        with StarFile(args['input_star'], 'w') as sf:
-            sf.writeTable('optics', _optics_table(0.64, 300, 1.4, 0.1))
-            sf.writeTable('movies', _movies_table())
-
-        # Run the pipeline with 1 gpu
-        Process.system('mkdir ' + args['output_dir'], color=Color.bold)
-        McPipeline(args).run()
-
-        # Run with 2 GPUs if available
-        if len(gpus) > 1:
-            args.update(gpu_list=' '.join(g['index'] for g in gpus[:2]),
-                        output_dir='output2')
-            Process.system('mkdir ' + args['output_dir'], color=Color.bold)
-            McPipeline(args).run()
-
-
-
-        os.chdir(cwd)
-        #shutil.rmtree(tmp)
