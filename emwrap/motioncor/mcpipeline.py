@@ -32,18 +32,6 @@ from emtools.metadata import Table, Column, StarFile, StarMonitor, TextFile
 
 from .motioncor import Motioncor
 
-
-# def _optics_to_acq(t):
-#     r = t[0]
-#     print("Optics row:", r)
-#     return {
-#         'pixel_size': r.rlnMicrographOriginalPixelSize,
-#         'voltage': r.rlnVoltage,
-#         'cs': r.rlnSphericalAberration,
-#         'amplitud_constrast': r.rlnAmplitudeContrast
-#     }
-
-
 class McPipeline(ProcessingPipeline):
     """ Pipeline specific to Motioncor processing. """
     def __init__(self, args):
@@ -112,8 +100,8 @@ class McPipeline(ProcessingPipeline):
             else:
                 pass  # TODO write failed items for inspection or retry
 
-        for s, d in batch['to_move']:
-            shutil.move(s, d)
+        for o in batch['outputs']:
+            shutil.move(o, self.outputMicDir)
 
         return batch
 
@@ -187,27 +175,6 @@ External/job006/coords_suffix_topaz.star            2
 
     def postrun(self):
         self._outSf.close()
-
-#
-#
-# def motioncor():
-#     argsDict = {
-#         '-Throw': 0 if self.isEER else (frame0 - 1),
-#         '-Trunc': 0 if self.isEER else (numbOfFrames - frameN),
-#         '-Patch': f"{self.patchX} {self.patchY}",
-#         '-MaskCent': f"{self.cropOffsetX} {self.cropOffsetY}",
-#         '-MaskSize': f"{cropDimX} {cropDimY}",
-#         '-FtBin': self.binFactor.get(),
-#         '-Tol': self.tol.get(),
-#         '-PixSize': inputMovies.getSamplingRate(),
-#         '-kV': inputMovies.getAcquisition().getVoltage(),
-#         '-Cs': 0,
-#         '-OutStack': 1 if self.doSaveMovie else 0,
-#         '-Gpu': '%(GPU)s',
-#         '-SumRange': "0.0 0.0",  # switch off writing out DWS,
-#         '-LogDir': './'
-#         # '-FmRef': 0
-#     }
 
 
 def main():

@@ -80,7 +80,7 @@ class TestMotioncor(unittest.TestCase):
                 # Check that there is no failed micrograph
                 self.assertEquals(info['mc_input'], N)
                 self.assertEquals(info['mc_output'], N)
-                self.assertEquals(len(batch['to_move']), N)
+                self.assertEquals(len(batch['outputs']), N)
                 self.assertFalse(any('error' in r for r in batch['results']))
 
         mc_args = {'-PixSize': 0.64, '-kV': 200, '-Cs': 2.7, '-FtBin': 2}
