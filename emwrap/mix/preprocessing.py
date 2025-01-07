@@ -32,6 +32,7 @@ from emtools.metadata import Table, Column, StarFile, StarMonitor, TextFile
 
 from emwrap.motioncor import Motioncor
 from emwrap.ctffind import Ctffind
+from emwrap.cryolo import CryoloPredict
 
 
 class Preprocessing:
@@ -49,9 +50,6 @@ class Preprocessing:
         else:
             self.ctf = None
 
-        self.outputMics = kwargs['outputMics']
-        self.outputCtfs = kwargs['outputCtfs']
-
         # TODO
         self.picking = kwargs.get('picking', None)
         self.extract = kwargs.get('extract', None)
@@ -61,20 +59,23 @@ class Preprocessing:
         gpu = kwargs['gpu']
         mc = self.motioncor
         mc.process_batch(batch, gpu=gpu)
-        mc.output_batch(batch, self.outputMics)
         ctf_batch = Batch(batch)
         ctf_batch['items'] = [r['rlnMicrographName'] for r in batch['results'] if 'error' not in r]
         self.ctf.process_batch(ctf_batch, verbose=v)
         batch.info.update(ctf_batch.info)
 
-        def _move(outputs, d):
+        def _move(outputs, outName):
+            outDir = ctf_batch.mkdir(outName)
             for o in outputs:
                 if v:
-                    print(f"Moving {o} -> {d}")
-                shutil.move(o, d)
+                    print(f"Moving {o} -> {outDir}")
+                shutil.move(o, outDir)
 
-        _move(batch['outputs'], self.outputMics)
-        _move(ctf_batch['outputs'], self.outputCtfs)
+        _move(batch['outputs'], 'Micrographs')
+        _move(ctf_batch['outputs'], 'CTFs')
+
+        cryolo = CryoloPredict()
+        cryolo.process_batch(batch, gpu=gpu, cpu=8)
         # TODO: update with ctf values
         return batch
 

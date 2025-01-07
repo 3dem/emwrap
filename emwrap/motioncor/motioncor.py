@@ -62,19 +62,14 @@ class Motioncor:
         args.extend(kwargs.toList())
 
         t = Timer()
-
-        with open(batch.join('log.txt'), 'w') as logFile:
-            print(">>>", Color.green(args[0]), Color.bold(' '.join(args[1:])))
-            subprocess.call(args, cwd=batch.path, stderr=logFile, stdout=logFile)
+        logMc = batch.join('mc_log.txt')
+        batch.call(args, logMc)
 
         batch.info.update({
             'mc_input': len(batch.items),
             'mc_elapsed': str(t.getElapsedTime())
         })
 
-        return batch
-
-    def output_batch(self, batch, outputDir):
         batch['results'] = []
         batch['outputs'] = []
         total = 0
@@ -99,8 +94,9 @@ class Motioncor:
                     logsFull = batch.join('log', f"{baseName}-Full.log")
                     logsPatch = None
 
-                shiftsStar = os.path.join(outputDir, f'aligned_{baseName}.star')
-                self.__write_shift_star(batch, logsFull, logsPatch, movieName, shiftsStar)
+                shiftsStar = Path.replaceExt(micName, '.star')
+                batch['outputs'].append(shiftsStar)
+                self.__write_shift_star(logMc, logsFull, logsPatch, movieName, shiftsStar)
                 result['rlnMicrographMetadata'] = shiftsStar
                 total += 1
 
@@ -118,7 +114,7 @@ class Motioncor:
         if not os.path.exists(fileName):
             raise Exception(f"Missing expected output: {fileName}")
 
-    def __write_shift_star(self, batch, logsFull, logsPatch, movieName, shiftsStar):
+    def __write_shift_star(self, logMc, logsFull, logsPatch, movieName, shiftsStar):
         # Parse global motion movements
         self.__expect(logsFull)
         tGeneral = Table(
@@ -128,7 +124,7 @@ class Motioncor:
              'rlnMicrographPreExposure', 'rlnVoltage',
              'rlnMicrographStartFrame', 'rlnMotionModelVersion'
              ])
-        x, y, z, _ = self.__parse_dimensions(batch.join('log.txt'))
+        x, y, z, _ = self.__parse_dimensions(logMc)
         tGeneral.addRowValues(x, y, z, movieName,
                               self.args.get('-FtBin', 1), self.args['-PixSize'], 1.0, 0.0,
                               self.args['-kV'], 1, 0)

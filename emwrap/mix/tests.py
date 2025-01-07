@@ -66,20 +66,16 @@ def _make_batch(path, n):
 
 
 class TestPreprocessing(unittest.TestCase):
-    def test_batch(self):
+    def _run_batch(self, N):
         def _run(name, **kwargs):
 
             with Path.tmpDir(prefix=f'TestPreprocessing.test_batch_{name}__') as tmp:
-                def _mkdir(d):
-                    tmpd = os.path.join(tmp, d)
-                    Process.system(f'mkdir {tmpd}', color=Color.bold)
-                    return tmpd
+                # def _mkdir(d):
+                #     tmpd = os.path.join(tmp, d)
+                #     Process.system(f'mkdir {tmpd}', color=Color.bold)
+                #     return tmpd
 
-                outMics = _mkdir('Micrographs')
-                outCtfs = _mkdir('CTFs')
-                batch = _make_batch(tmp, 8)
-                kwargs['outputMics'] = outMics
-                kwargs['outputCtfs'] = outCtfs
+                batch = _make_batch(tmp, N)
                 preproc = Preprocessing(**kwargs)
 
                 preproc.process_batch(batch, gpu=0, verbose=True)
@@ -90,13 +86,16 @@ class TestPreprocessing(unittest.TestCase):
                 self.assertEqual(info['mc_input'], info['mc_output'])
                 self.assertFalse(any('error' in r for r in batch['results']))
 
-        mc_args = {'-PixSize': 0.64, '-kV': 200, '-Cs': 2.7, '-FtBin': 2}
+        mc_args = {'-PixSize': 0.64, '-kV': 200, '-Cs': 2.7, '-FtBin': 2, '-Patch': '5 5'}
         mc = {'args': [mc_args], 'kwargs': {}}
 
         ctf = {'args': [0.64, 200, 2.7, 0.1], 'kwargs': {}}
 
         _run('global', motioncor=mc, ctf=ctf)
 
-        # mc_args.update({'-Patch': "5 5", '-FtBin': 1})
-        # _run('local', motioncor=mc, ctf=ctf)
+    def test_batch(self):
+        self._run_batch(8)
+
+    def test_batch_full(self):
+        self._run_batch(24)
 
