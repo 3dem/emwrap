@@ -31,6 +31,7 @@ from emtools.utils import Color, Timer, Path
 from emtools.jobs import ProcessingPipeline, BatchManager
 from emtools.metadata import Mdoc
 
+from emr
 
 from .aretomo_pipeline import AreTomoPipeline
 

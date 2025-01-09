@@ -14,7 +14,10 @@
 # *
 # **************************************************************************
 
-from emtools.metadata import Table, StarFile
+from emtools.jobs import BatchManager
+from emtools.metadata import Table, StarFile, StarMonitor
+
+from emwrap.base import Acquisition
 
 
 class RelionStar:
@@ -24,13 +27,14 @@ class RelionStar:
                      mtf=None, originalPixelSize=None):
         origPs = originalPixelSize or acq['pixel_size']
 
-        values = {'rlnOpticsGroupName': opticsGroupName,
-                'rlnOpticsGroup': opticsGroup,
-                'rlnMicrographOriginalPixelSize': origPs,
-                'rlnVoltage': acq['voltage'],
-                'rlnSphericalAberration': acq['cs'],
-                'rlnAmplitudeContrast': acq.get('amplitude_constrast', 0.1),
-                'rlnMicrographPixelSize': acq['pixel_size']
+        values = {
+            'rlnOpticsGroupName': opticsGroupName,
+            'rlnOpticsGroup': opticsGroup,
+            'rlnMicrographOriginalPixelSize': origPs,
+            'rlnVoltage': acq['voltage'],
+            'rlnSphericalAberration': acq['cs'],
+            'rlnAmplitudeContrast': acq.get('amplitude_constrast', 0.1),
+            'rlnMicrographPixelSize': acq['pixel_size']
         }
         if mtf:
             values['rlnMtfFileName'] = mtf
@@ -54,3 +58,27 @@ class RelionStar:
     @staticmethod
     def coordinates_table(**kwargs):
         return Table(['rlnMicrographName', 'rlnMicrographCoordinates'])
+
+    @staticmethod
+    def get_acquisition(inputTableOrFile):
+        """ Load acquisition parameters from an optics table
+        or a given input STAR file.
+        """
+        if isinstance(inputTableOrFile, Table):
+            tOptics = inputTableOrFile
+        else:
+            with StarFile(inputTableOrFile) as sf:
+                tOptics = sf.getTable('optics')
+
+        o = tOptics[0]._asdict()  # get first row
+
+        return Acquisition(
+            pixel_size=o.get('rlnMicrographPixelSize',
+                             o['rlnMicrographOriginalPixelSize']),
+            voltage=o['rlnVoltage'],
+            cs=o['rlnSphericalAberration'],
+            amplitude_constrast=o.get('rlnAmplitudeContrast', 0.1)
+        )
+
+
+

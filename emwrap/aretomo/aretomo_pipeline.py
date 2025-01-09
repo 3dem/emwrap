@@ -28,8 +28,10 @@ from pprint import pprint
 from glob import glob
 
 from emtools.utils import Color, Timer, Path, Process
-from emtools.jobs import ProcessingPipeline, BatchManager
+from emtools.jobs import BatchManager
 from emtools.metadata import Mdoc
+
+from emwrap.base import ProcessingPipeline
 
 
 def _baseSubframe(section):

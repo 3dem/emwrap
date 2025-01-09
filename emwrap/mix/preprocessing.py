@@ -78,13 +78,6 @@ class Preprocessing:
         old_batch = batch
         batch = Batch(old_batch)
 
-        def _pick():
-            cryolo = CryoloPredict()
-            cryolo.process_batch(batch, gpu=gpu, cpu=cpu)
-
-        # th = threading.Thread(target=_pick)
-        # th.start()
-
         def _item(r):
             return None if 'error' in r else r['rlnMicrographName']
 
@@ -100,8 +93,8 @@ class Preprocessing:
         _move(old_batch['outputs'], 'Micrographs')
         _move(batch['outputs'], 'CTFs')
 
-        # th.join()
-        _pick()
+        cryolo = CryoloPredict()
+        cryolo.process_batch(batch, gpu=gpu, cpu=cpu)
 
         # Write output micrographs star file
         acq = Acquisition(self.acq)
@@ -110,6 +103,13 @@ class Preprocessing:
         tOptics = RelionStar.optics_table(acq, originalPixelSize=origPs)
         tMics = RelionStar.micrograph_table(extra_cols=['rlnMicrographCoordinates'])
         tCoords = RelionStar.coordinates_table()
+        def _move_cryolo(micName, folder, ext):
+            """ Move result box files from cryolo. """
+            srcCoords = batch.join('cryolo_boxfiles', folder, Path.replaceExt(micName, ext))
+            dstCoords = os.path.join('Coordinates', Path.replaceExt(micName, f'_coords{ext}'))
+            shutil.move(srcCoords, batch.join(dstCoords))
+            return dstCoords
+
         for row, r in zip(old_batch['items'], batch['results']):
             if 'error' not in r:
                 values = r['values']
@@ -117,13 +117,16 @@ class Preprocessing:
                 values[0] = os.path.join('Micrographs', micName)
                 values[1] = row.rlnOpticsGroup  # Fix optics group
                 values[2] = os.path.join('CTFs', os.path.basename(values[2]))
-                srcCoords = batch.join('cryolo_boxfiles', 'STAR', Path.replaceExt(micName, '.star'))
-                dstCoords = os.path.join('Coordinates', Path.replaceExt(micName, '_coords.star'))
-                shutil.move(srcCoords, batch.join(dstCoords))
+                dstCoords = _move_cryolo(micName, 'STAR', '.star')
+                _move_cryolo(micName, 'CBOX', '.cbox')
+                #srcCoords = batch.join('cryolo_boxfiles', 'STAR', Path.replaceExt(micName, '.star'))
+                #dstCoords = os.path.join('Coordinates', Path.replaceExt(micName, '_coords.star'))
+                #shutil.move(srcCoords, batch.join(dstCoords))
                 values.append(dstCoords)
                 tMics.addRowValues(*values)
                 tCoords.addRowValues(values[0], dstCoords)
 
+        # Write output STAR files, as outputs and needed by extraction
         with StarFile(batch.join('micrographs.star'), 'w') as sf:
             sf.writeTimeStamp()
             sf.writeTable('optics', tOptics)

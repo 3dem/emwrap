@@ -76,12 +76,12 @@ class TestPreprocessing(unittest.TestCase):
                 'amplitude_contrast': 0.1
             },
             'motioncor': {
-                'extra_args': {'-FtBin': 2, '-Patch': '5 5'}
+                'extra_args': {'-FtBin': 2, '-Patch': '5 5', '-FmDose': 1.277}
             },
             'ctf': {},
             'picking': {},
             'extract': {
-                'extra_args': {'--extract_size': 150, '--scale': 100, '--bg_radius': -1}
+                'extra_args': {'--extract_size': 150, '--scale': 100, '--bg_radius': 64}
             }
         }
 

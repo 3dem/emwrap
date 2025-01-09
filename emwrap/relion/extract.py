@@ -94,24 +94,20 @@ class RelionExtract:
         # --extract --extract_size 512 --float16  --scale 128 --norm --bg_radius 27
         # --white_dust -1 --black_dust -1 --invert_contrast   --pipeline_control Extract/job008/
 
-
-        kwargs = {
+        args = Args({
             self.path: '',
             '--i': 'micrographs.star',
             '--coord_list': 'coordinates.star',
             '--part_star': 'particles.star',
             '--extract': '',
             '--float16': '',
-            '--extract_size': 300,
-            '--scale': 100,
             '--norm': '',
-            '--bg_radius': 30,
             '--white_dust': -1,
             '--black_dust': -1,
-            '--invert_constrast': ''
-        }
-
-        batch.call(self.path, kwargs, batch.join('extract_log.txt'))
+            '--invert_contrast': ''
+        })
+        args.update(self.args)
+        batch.call(self.path, args, batch.join('extract_log.txt'))
 
         batch.info.update({
             'extract_elapsed': str(t.getElapsedTime())

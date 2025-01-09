@@ -87,8 +87,6 @@ class CryoloPredict:
 
         batch.call(self.path, kwargs, batch.join('cryolo_log.txt'))
 
-        print(Color.warn("CRYOLO_done"))
-
         batch.info.update({
             'cryolo_elapsed': str(t.getElapsedTime())
         })

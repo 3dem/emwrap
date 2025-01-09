@@ -81,7 +81,9 @@ class Motioncor:
             try:
                 movieName = row.rlnMicrographMovieName
                 baseName = Path.removeBaseExt(movieName)
-                micName = batch.join('output', f"aligned_{baseName}.mrc")
+                suffix = '_DW' if '-FmDose' in self.args else ''
+                # TODO: Allow an option to save non-DW movies if required
+                micName = batch.join('output', f"aligned_{baseName}{suffix}.mrc")
 
                 # Check that the expected output micrograph file exists
                 # and move it to the final output directory

@@ -24,15 +24,18 @@ import shutil
 import sys
 import json
 import argparse
+from pprint import pprint
 
+from emtools.utils import Color, Timer, Path
 from emtools.metadata import Table, Column, StarFile, StarMonitor, TextFile
 
 from emwrap.base import ProcessingPipeline
-from .motioncor import Motioncor
+from emwrap.relion import RelionStar
+from .preprocessing import Preprocessing
 
 
-class McPipeline(ProcessingPipeline):
-    """ Pipeline specific to Motioncor processing. """
+class PreprocessingPipeline(ProcessingPipeline):
+    """ Pipeline to run Preprocessing in batches. """
     def __init__(self, args):
         ProcessingPipeline.__init__(self, **args)
 
@@ -40,25 +43,9 @@ class McPipeline(ProcessingPipeline):
         self.outputMicDir = self.join('Micrographs')
         self.inputStar = args['input_star']
         self.batchSize = args.get('batch_size', 32)
-        self.optics = None
-        with StarFile(self.inputStar) as sf:
-            self.optics = sf.getTable('optics')
-
-        self._outputDict = {
-            'rlnMicrographName': '.mrc',
-            'rlnCtfPowerSpectrum': '_Ctf.mrc',
-            'rlnMicrographMetadata': '_Ctf.txt',
-            'rlnOpticsGroup': None
-        }
-
-        o = self.optics[0]  # shortcut
-        mc_args = {
-            '-PixSize': o.rlnMicrographOriginalPixelSize,
-            '-kV': o.rlnVoltage,
-            '-Cs': o.rlnSphericalAberration
-        }
-        mc_args.update(args.get('motioncor_args', {}))
-        self.mc = Motioncor(mc_args, **args)
+        self.acq = RelionStar.get_acquisition(self.inputStar)
+        pp_args = args['preprocessing_args']
+        self.preprocessing = Preprocessing(pp_args)
 
     def _build(self):
         g = self.addMoviesGenerator(self.inputStar, self.batchSize)
@@ -66,58 +53,19 @@ class McPipeline(ProcessingPipeline):
         print(f"Creating {len(self.gpuList)} processing threads.")
         for gpu in self.gpuList:
             p = self.addProcessor(g.outputQueue,
-                                  self.get_motioncor_proc(gpu),
+                                  self.get_preprocessing(gpu),
                                   outputQueue=outputQueue)
             outputQueue = p.outputQueue
 
         self.addProcessor(outputQueue, self._output)
 
-    def get_motioncor_proc(self, gpu):
-        def _motioncor(batch):
-            return self.mc.process_batch(batch, gpu=gpu)
-        return _motioncor
+    def get_preprocessing(self, gpu):
+        def _preprocessing(batch):
+            return self.preprocessing.process_batch(batch, gpu=gpu)
+        return _preprocessing
 
     def _output(self, batch):
-        self.mc.output_batch(batch, self.outputMicDir)
-        for item, r in zip(batch['items'], batch['results']):
-            if 'error' not in r:
-                self._outSf.writeRowValues([
-                    r['rlnMicrographName'],
-                    r['rlnMicrographMetadata'],
-                    1,  # fixme: optics group
-                    -999.0, -999.0, -999.0  # fixme motion
-                ])
-            else:
-                pass  # TODO write failed items for inspection or retry
-
-        for o in batch['outputs']:
-            shutil.move(o, self.outputMicDir)
-
         return batch
-
-    def _writeMicrographsTableHeader(self):
-        columns = [
-            'rlnMicrographName',
-            'rlnMicrographMetadata',
-            'rlnOpticsGroup',
-            'rlnAccumMotionTotal',
-            'rlnAccumMotionEarly',
-            'rlnAccumMotionLate'
-        ]
-        # FIXME: Now we are ignoring the CTF results
-        # if self.mc.version >= 3:
-        #     columns.extend([
-        #         'rlnCtfImage',
-        #         'rlnDefocusU',
-        #         'rlnDefocusV',
-        #         'rlnCtfAstigmatism',
-        #         'rlnDefocusAngle',
-        #         'rlnCtfFigureOfMerit',
-        #         'rlnCtfMaxResolution'])
-
-        self.micTable = Table(columns=columns)
-        self._outSf.writeHeader('micrographs', self.micTable)
-        self._outSf.flush()
 
     def prerun(self):
         with StarFile(self.inputStar) as sf:
@@ -168,14 +116,13 @@ External/job006/coords_suffix_topaz.star            2
 
 
 def main():
-    p = argparse.ArgumentParser(prog='emw-motioncor')
+    p = argparse.ArgumentParser(prog='emw-preprocessing')
     p.add_argument('--json',
                    help="Input all arguments through this JSON file. "
                         "The other arguments will be ignored. ")
     p.add_argument('--in_movies', '-i')
+    p.add_argument('--preprocessing_args', '-a')
     p.add_argument('--output', '-o')
-    p.add_argument('--motioncor_path', '-p')
-    p.add_argument('--motioncor_args', '-a', default='')
     p.add_argument('--batch_size', '-b', type=int, default=8)
     p.add_argument('--j', help="Just to ignore the threads option from Relion")
     p.add_argument('--gpu')
@@ -185,15 +132,17 @@ def main():
     if args.json:
         raise Exception("JSON input not yet implemented.")
     else:
+        with open(args.preprocessing_args) as f:
+            preprocessing_args = json.load(f)
+
         argsDict = {
             'input_star': args.in_movies,
             'output_dir': args.output,
-            'motioncor_path': args.motioncor_path,
-            'motioncor_args': args.motioncor_args,
             'gpu_list': args.gpu,
-            'batch_size': args.batch_size
+            'batch_size': args.batch_size,
+            'preprocessing_args': preprocessing_args
         }
-        mc = McPipeline(argsDict)
+        mc = PreprocessingPipeline(argsDict)
         mc.run()
 
 
