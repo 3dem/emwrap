@@ -56,7 +56,7 @@ class CryoloPredict:
 
     def process_batch(self, batch, **kwargs):
         gpu = kwargs['gpu']
-        cpu = kwargs.get('cpu', 1)
+        cpu = 1 #kwargs.get('cpu', 1)
 
         t = Timer()
         config = {
@@ -75,7 +75,7 @@ class CryoloPredict:
         with open(batch.join('config.json'), 'w') as f:
             json.dump(config, f, indent=4)
 
-        kwargs = Args({
+        kwargs = {
             '-c': 'config.json',
             '-w': self.model,
             '-i': 'Micrographs/',
@@ -83,11 +83,11 @@ class CryoloPredict:
             '-nc': cpu,
             '-g': gpu,
             '-o': 'cryolo_boxfiles/'
-        })
-        args = kwargs.toList()
-        args.insert(0, self.path)
+        }
 
-        batch.call(args, batch.join('cryolo_log.txt'))
+        batch.call(self.path, kwargs, batch.join('cryolo_log.txt'))
+
+        print(Color.warn("CRYOLO_done"))
 
         batch.info.update({
             'cryolo_elapsed': str(t.getElapsedTime())

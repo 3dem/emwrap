@@ -25,14 +25,17 @@ import sys
 import json
 import argparse
 from pprint import pprint
+import threading
 
-from emtools.utils import Color, Timer, Path
+from emtools.utils import Pretty, Timer, Path
 from emtools.jobs import Batch
 from emtools.metadata import Table, Column, StarFile, StarMonitor, TextFile
 
+from emwrap.base import Acquisition
 from emwrap.motioncor import Motioncor
 from emwrap.ctffind import Ctffind
 from emwrap.cryolo import CryoloPredict
+from emwrap.relion import RelionStar, RelionExtract
 
 
 class Preprocessing:
@@ -41,41 +44,101 @@ class Preprocessing:
      picking and particle extraction. The goal is to reuse
      the scratch and minimize the transfer of temporary files.
      """
-    def __init__(self, **kwargs):
-        mc = kwargs['motioncor']
-        self.motioncor = Motioncor(*mc['args'], **mc['kwargs'])
-        if 'ctf' in kwargs:
-            ctf = kwargs['ctf']
-            self.ctf = Ctffind(*ctf['args'], **ctf['kwargs'])
+    def __init__(self, args):
+        self.acq = Acquisition(args['acquisition'])
+        mc_args = args['motioncor']
+        self.motioncor = Motioncor(self.acq, **mc_args)
+        if 'ctf' in args:
+            self.ctf = Ctffind(self.acq, **args['ctf'])
         else:
             self.ctf = None
 
-        # TODO
-        self.picking = kwargs.get('picking', None)
-        self.extract = kwargs.get('extract', None)
+        # FIXME
+        self.picking = args.get('picking', None)
+        self.extract = args.get('extract', None)
+        if 'extract' in args:
+            self.extract = RelionExtract(**args['extract'])
+        else:
+            self.extract = None
 
     def process_batch(self, batch, **kwargs):
+        t = Timer()
+        start = Pretty.now()
         v = kwargs.get('verbose', False)
         gpu = kwargs['gpu']
+        cpu = kwargs.get('cpu', 4)
+
+        # Motion correction
         mc = self.motioncor
         mc.process_batch(batch, gpu=gpu)
-        ctf_batch = Batch(batch)
-        ctf_batch['items'] = [r['rlnMicrographName'] for r in batch['results'] if 'error' not in r]
-        self.ctf.process_batch(ctf_batch, verbose=v)
-        batch.info.update(ctf_batch.info)
+
+        # Picking in a separate thread
+        batch.mkdir('Coordinates')
+
+        old_batch = batch
+        batch = Batch(old_batch)
+
+        def _pick():
+            cryolo = CryoloPredict()
+            cryolo.process_batch(batch, gpu=gpu, cpu=cpu)
+
+        # th = threading.Thread(target=_pick)
+        # th.start()
+
+        def _item(r):
+            return None if 'error' in r else r['rlnMicrographName']
+
+        batch['items'] = [_item(r) for r in old_batch['results']]
+        self.ctf.process_batch(batch, verbose=v)
+        # batch.info.update(batch.info)
 
         def _move(outputs, outName):
-            outDir = ctf_batch.mkdir(outName)
+            outDir = batch.mkdir(outName)
             for o in outputs:
-                if v:
-                    print(f"Moving {o} -> {outDir}")
                 shutil.move(o, outDir)
 
-        _move(batch['outputs'], 'Micrographs')
-        _move(ctf_batch['outputs'], 'CTFs')
+        _move(old_batch['outputs'], 'Micrographs')
+        _move(batch['outputs'], 'CTFs')
 
-        cryolo = CryoloPredict()
-        cryolo.process_batch(batch, gpu=gpu, cpu=8)
-        # TODO: update with ctf values
+        # th.join()
+        _pick()
+
+        # Write output micrographs star file
+        acq = Acquisition(self.acq)
+        origPs = self.acq.pixel_size
+        acq.pixel_size = origPs * mc.args['-FtBin']
+        tOptics = RelionStar.optics_table(acq, originalPixelSize=origPs)
+        tMics = RelionStar.micrograph_table(extra_cols=['rlnMicrographCoordinates'])
+        tCoords = RelionStar.coordinates_table()
+        for row, r in zip(old_batch['items'], batch['results']):
+            if 'error' not in r:
+                values = r['values']
+                micName = os.path.basename(values[0])
+                values[0] = os.path.join('Micrographs', micName)
+                values[1] = row.rlnOpticsGroup  # Fix optics group
+                values[2] = os.path.join('CTFs', os.path.basename(values[2]))
+                srcCoords = batch.join('cryolo_boxfiles', 'STAR', Path.replaceExt(micName, '.star'))
+                dstCoords = os.path.join('Coordinates', Path.replaceExt(micName, '_coords.star'))
+                shutil.move(srcCoords, batch.join(dstCoords))
+                values.append(dstCoords)
+                tMics.addRowValues(*values)
+                tCoords.addRowValues(values[0], dstCoords)
+
+        with StarFile(batch.join('micrographs.star'), 'w') as sf:
+            sf.writeTimeStamp()
+            sf.writeTable('optics', tOptics)
+            sf.writeTable('micrographs', tMics)
+
+        with StarFile(batch.join('coordinates.star'), 'w') as sf:
+            sf.writeTimeStamp()
+            sf.writeTable('coordinate_files', tCoords)
+
+        self.extract.process_batch(batch)
+
+        batch.info.update({
+            'preprocessing_start': start,
+            'preprocessing_end': Pretty.now(),
+            'preprocessing_elapsed': str(t.getElapsedTime())
+        })
         return batch
 

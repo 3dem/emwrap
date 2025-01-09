@@ -30,14 +30,16 @@ from emtools.utils import Color, Timer, Path, Process
 from emtools.jobs import ProcessingPipeline, BatchManager
 from emtools.metadata import Table, Column, StarFile, StarMonitor, TextFile
 
+from emwrap.base import Acquisition
+
 
 class Ctffind:
     def __init__(self, *args, **kwargs):
-        pixel_size, voltage, spherical_aberration, amplitude_contrast = args
+        self.acq = acq = Acquisition(args[0])
         self.path = kwargs.get('path', '/usr/local/em/ctffind-5.0/bin/ctffind')
         self.version = 5
         _get = kwargs.get  # shortcut
-        self.args = [pixel_size, voltage, spherical_aberration, amplitude_contrast,
+        self.args = [acq.pixel_size, acq.voltage, acq.cs, acq.amplitude_contrast,
                      _get('window', 512), _get('min_res', 30.0), _get('max_res', 5.0),
                      _get('min_def', 5000.0), _get('max_def', 50000.0), _get('step_def', 100.0),
                      'no', 'no', 'no', 'no', 'no', 'no', 'no']
@@ -49,6 +51,7 @@ class Ctffind:
         args = [micrograph, ctf_files[0]] + self.args
         if verbose:
             print(">>>", Color.green(self.path), Color.bold(' '.join(str(a) for a in args)))
+
         p = Process(self.path, input='\n'.join(str(a) for a in args))
         for f in ctf_files:
             if not os.path.exists(f):
@@ -64,13 +67,18 @@ class Ctffind:
         batch['outputs'] = []
 
         for mic in batch['items']:
-            try:
-                ctf_values, ctf_files = self.process(mic, verbose=kwargs.get('verbose', False))
-                result = {'ctf_values': ctf_values}
-            except Exception as e:
-                result = {'error': str(e)}
-                ctf_files = []
-                print(Color.red(f"ERROR: {result['error']}"))
+            ctf_files = []
+            result = {'error': 'Empty input micrograph'}
+            if mic is not None:
+                try:
+                    ctf_values, ctf_files = self.process(mic, verbose=kwargs.get('verbose', False))
+                    du, dv, da, score, res = ctf_values
+                    astig = abs(float(du) - float(dv))
+                    result = {'values': [mic, 1, ctf_files[0], du, dv, astig, da, score, res]}
+                except Exception as e:
+                    result = {'error': str(e)}
+                    ctf_files = []
+                    print(Color.red(f"ERROR: {result['error']}"))
 
             batch['results'].append(result)
             batch['outputs'].extend(ctf_files)
@@ -104,3 +112,16 @@ class Ctffind:
 
         return defocus[0], defocus[2], defocusAngle, ctfScore, ctfRes
 
+    def create_micrograph_table(self, **kwargs):
+        extra_cols = kwargs.get('extra_cols', [])
+        return Table([
+            'rlnMicrographName',
+            'rlnOpticsGroup',
+            'rlnCtfImage',
+            'rlnDefocusU',
+            'rlnDefocusV',
+            'rlnCtfAstigmatism',
+            'rlnDefocusAngle',
+            'rlnCtfFigureOfMerit',
+            'rlnCtfMaxResolution'
+        ] + extra_cols)

@@ -2,6 +2,7 @@ import argparse
 from glob import glob
 
 from .ctffind import Ctffind
+from emwrap.base import Acquisition
 
 """
             **   Welcome to Ctffind   **
@@ -44,9 +45,10 @@ if __name__ == '__main__':
 
     args = p.parse_args()
 
-    ctffind = Ctffind(args.pixel_size, args.voltage,
-                      args.spherical_aberration,
-                      args.amplitude_contrast)
+    ctffind = Ctffind(Acquisition(pixel_size=args.pixel_size,
+                                  voltage=args.voltage,
+                                  cs=args.spherical_aberration,
+                                  amplitude_contrast=args.amplitude_contrast))
 
     if '*' in args.micrograph:
         mics = glob(args.micrograph)

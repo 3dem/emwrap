@@ -21,6 +21,7 @@ import tempfile
 import glob
 import numpy as np
 import time
+import inspect
 from pprint import pprint
 
 from emtools.utils import Color, Process, System, Path
@@ -66,36 +67,43 @@ def _make_batch(path, n):
 
 
 class TestPreprocessing(unittest.TestCase):
-    def _run_batch(self, N):
-        def _run(name, **kwargs):
+    def _get_args(self):
+        return {
+            'acquisition': {
+                'pixel_size': 0.885,
+                'voltage': 200,
+                'cs': 1.4,
+                'amplitude_contrast': 0.1
+            },
+            'motioncor': {
+                'extra_args': {'-FtBin': 2, '-Patch': '5 5'}
+            },
+            'ctf': {},
+            'picking': {},
+            'extract': {
+                'extra_args': {'--extract_size': 150, '--scale': 100, '--bg_radius': -1}
+            }
+        }
 
-            with Path.tmpDir(prefix=f'TestPreprocessing.test_batch_{name}__') as tmp:
-                # def _mkdir(d):
-                #     tmpd = os.path.join(tmp, d)
-                #     Process.system(f'mkdir {tmpd}', color=Color.bold)
-                #     return tmpd
+    def _run_batch(self, N, args):
+        callerName = inspect.currentframe().f_back.f_code.co_name
+        testName = f"{self.__class__.__name__}.{callerName}"
+        print(Color.warn(f"\n============= {testName} ============="))
+        with Path.tmpDir(prefix=f"{testName}__") as tmp:
+            batch = _make_batch(tmp, N)
+            preproc = Preprocessing(args)
 
-                batch = _make_batch(tmp, N)
-                preproc = Preprocessing(**kwargs)
-
-                preproc.process_batch(batch, gpu=0, verbose=True)
-                batch.dump_info()
-                info = batch.info
-                pprint(info)
-                # Check that there is no failed micrograph
-                self.assertEqual(info['mc_input'], info['mc_output'])
-                self.assertFalse(any('error' in r for r in batch['results']))
-
-        mc_args = {'-PixSize': 0.64, '-kV': 200, '-Cs': 2.7, '-FtBin': 2, '-Patch': '5 5'}
-        mc = {'args': [mc_args], 'kwargs': {}}
-
-        ctf = {'args': [0.64, 200, 2.7, 0.1], 'kwargs': {}}
-
-        _run('global', motioncor=mc, ctf=ctf)
+            preproc.process_batch(batch, gpu=0, verbose=True)
+            batch.dump_info()
+            info = batch.info
+            pprint(info)
+            # Check that there is no failed micrograph
+            self.assertEqual(info['mc_input'], info['mc_output'])
+            self.assertFalse(any('error' in r for r in batch['results']))
 
     def test_batch(self):
-        self._run_batch(8)
+        self._run_batch(8, self._get_args())
 
     def test_batch_full(self):
-        self._run_batch(24)
+        self._run_batch(24, self._get_args())
 

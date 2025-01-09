@@ -25,15 +25,19 @@ from emtools.utils import Color, Timer, Path
 from emtools.jobs import Args
 from emtools.metadata import Table, StarFile, TextFile
 
+from emwrap.base import Acquisition
+
 
 class Motioncor:
     """ Motioncor wrapper to run in a batch folder. """
-    def __init__(self, *args, **kwargs):
+    def __init__(self, acq, **kwargs):
         if path := kwargs.get('path', None):
             self.path = path, self.version = int(kwargs['version'])
         else:
             self.path, self.version = Motioncor.__get_environ()
-        self.args = Args(args[0])
+        self.acq = Acquisition(acq)
+        self.args = self.argsFromAcq(acq)
+        self.args.update(kwargs.get('extra_args', {}))
         self.outputPrefix = "output/aligned_"
 
     def process_batch(self, batch, **kwargs):
@@ -41,7 +45,6 @@ class Motioncor:
 
         batch.mkdir('output')
         batch.mkdir('log')
-        args = [self.path]
         ext = Path.getExt(batch.items[0].rlnMicrographMovieName)
         extLower = ext.lower()
 
@@ -54,16 +57,15 @@ class Motioncor:
         else:
             raise Exception(f"Unsupported movie format: {ext}")
 
-        kwargs = Args({
+        kwargs = {
             inArg: './', '-OutMrc': self.outputPrefix, '-InSuffix': ext,
             '-Serial': 1, '-Gpu': gpu, '-LogDir': 'log/'
-        })
+        }
         kwargs.update(self.args)
-        args.extend(kwargs.toList())
 
         t = Timer()
         logMc = batch.join('mc_log.txt')
-        batch.call(args, logMc)
+        batch.call(self.path, kwargs, logMc)
 
         batch.info.update({
             'mc_input': len(batch.items),
@@ -178,3 +180,12 @@ class Motioncor:
                 if 'size mode:' in line:
                     return line.split(':')[-1].split()
         return None
+
+    @staticmethod
+    def argsFromAcq(acq):
+        """ Define arguments from a given acquisition """
+        return Args({
+            '-PixSize': acq.pixel_size,
+            '-kV': acq.voltage,
+            '-Cs': acq.amplitude_contrast,
+        })
