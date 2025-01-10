@@ -29,59 +29,20 @@ from emtools.jobs import BatchManager, Args
 from emtools.metadata import Table, StarFile
 
 from emwrap.mix import Preprocessing
-
-
-def _filename(row):
-    """ Helper to get unique name from a particle row. """
-    pts, stack = row.rlnImageName.split('@')
-    return stack.replace('.mrcs', f'_p{pts}.mrcs')
-
-
-def _movies_table():
-    dataset = '/jude/facility/jmrt/SCIPION/TESTDATA/relion30_tutorial/Movies'
-    movies = glob.glob(os.path.join(dataset, '*.tiff'))
-    t = Table(['rlnMicrographMovieName', 'rlnOpticsGroup'])
-    for m in movies:
-        t.addRowValues(m, 1)
-    return t
-
-
-def _optics_table(ps, voltage, cs, ac=0.1, opticsGroup=1, opticsGroupName="opticsGroup1", mtf=None):
-    cols = ['rlnOpticsGroupName', 'rlnOpticsGroup', 'rlnMicrographOriginalPixelSize',
-            'rlnVoltage', 'rlnSphericalAberration', 'rlnAmplitudeContrast']
-    values = [opticsGroupName, opticsGroup, ps, voltage, cs, ac]
-    if mtf:
-        cols.append('rlnMtfFileName')
-        values.append(mtf)
-    t = Table(cols)
-    t.addRowValues(*values)
-    return t
-
-
-def _make_batch(path, n):
-    """ Create a batch with that number of movies. """
-    table = _movies_table()
-    batchMgr = BatchManager(n, iter(table[:n]), path,
-                            itemFileNameFunc=lambda i: i.rlnMicrographMovieName)
-    return next(batchMgr.generate())
+from emwrap.tests import RelionTutorial
 
 
 class TestPreprocessing(unittest.TestCase):
     def _get_args(self):
         return {
-            'acquisition': {
-                'pixel_size': 0.885,
-                'voltage': 200,
-                'cs': 1.4,
-                'amplitude_contrast': 0.1
-            },
+            'acquisition': RelionTutorial.acquisition,
             'motioncor': {
                 'extra_args': {'-FtBin': 2, '-Patch': '5 5', '-FmDose': 1.277}
             },
             'ctf': {},
             'picking': {},
             'extract': {
-                'extra_args': {'--extract_size': 150, '--scale': 100, '--bg_radius': 64}
+                'extra_args': {'--extract_size': 150, '--scale': 100, '--bg_radius': 40}
             }
         }
 
@@ -90,7 +51,7 @@ class TestPreprocessing(unittest.TestCase):
         testName = f"{self.__class__.__name__}.{callerName}"
         print(Color.warn(f"\n============= {testName} ============="))
         with Path.tmpDir(prefix=f"{testName}__") as tmp:
-            batch = _make_batch(tmp, N)
+            batch = RelionTutorial.make_batch(tmp, N)
             preproc = Preprocessing(args)
 
             preproc.process_batch(batch, gpu=0, verbose=True)

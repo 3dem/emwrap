@@ -14,10 +14,6 @@
 # *
 # **************************************************************************
 
-"""
-
-"""
-
 import os
 import subprocess
 import shutil
@@ -35,30 +31,12 @@ class McPipeline(ProcessingPipeline):
     """ Pipeline specific to Motioncor processing. """
     def __init__(self, args):
         ProcessingPipeline.__init__(self, **args)
-
         self.gpuList = args['gpu_list'].split()
         self.outputMicDir = self.join('Micrographs')
         self.inputStar = args['input_star']
         self.batchSize = args.get('batch_size', 32)
-        self.optics = None
-        with StarFile(self.inputStar) as sf:
-            self.optics = sf.getTable('optics')
-
-        self._outputDict = {
-            'rlnMicrographName': '.mrc',
-            'rlnCtfPowerSpectrum': '_Ctf.mrc',
-            'rlnMicrographMetadata': '_Ctf.txt',
-            'rlnOpticsGroup': None
-        }
-
-        o = self.optics[0]  # shortcut
-        mc_args = {
-            '-PixSize': o.rlnMicrographOriginalPixelSize,
-            '-kV': o.rlnVoltage,
-            '-Cs': o.rlnSphericalAberration
-        }
-        mc_args.update(args.get('motioncor_args', {}))
-        self.mc = Motioncor(mc_args, **args)
+        self.acq = RelionStar.get_acquisition(self.inputStar)
+        self.mc = Motioncor(self.acq, extra_args=args.get('motioncor_args', {}))
 
     def _build(self):
         g = self.addMoviesGenerator(self.inputStar, self.batchSize)
@@ -104,16 +82,6 @@ class McPipeline(ProcessingPipeline):
             'rlnAccumMotionEarly',
             'rlnAccumMotionLate'
         ]
-        # FIXME: Now we are ignoring the CTF results
-        # if self.mc.version >= 3:
-        #     columns.extend([
-        #         'rlnCtfImage',
-        #         'rlnDefocusU',
-        #         'rlnDefocusV',
-        #         'rlnCtfAstigmatism',
-        #         'rlnDefocusAngle',
-        #         'rlnCtfFigureOfMerit',
-        #         'rlnCtfMaxResolution'])
 
         self.micTable = Table(columns=columns)
         self._outSf.writeHeader('micrographs', self.micTable)

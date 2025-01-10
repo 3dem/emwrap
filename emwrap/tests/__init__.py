@@ -14,23 +14,6 @@
 # *
 # **************************************************************************
 
-import os
-import shutil
-import unittest
-import tempfile
-import glob
-import numpy as np
-import time
-
-from emtools.utils import Color, Process, System
-from emtools.jobs import BatchManager
-from emtools.metadata import Table, StarFile
-
-from emwrap.motioncor import Motioncor, McPipeline
-
-
-
-
-class TestRelion(unittest.TestCase):
-    def test_single(self):
-        pass
+from .datasets import RelionTutorial
+from .tests_motioncor import TestMotioncor
+from .tests_preprocessing import TestPreprocessing

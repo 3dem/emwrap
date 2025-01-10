@@ -121,7 +121,8 @@ def main():
                    help="Input all arguments through this JSON file. "
                         "The other arguments will be ignored. ")
     p.add_argument('--in_movies', '-i')
-    p.add_argument('--preprocessing_args', '-a')
+    p.add_argument('--preprocessing_config', '-c',
+                   help="JSON configuration file with preprocessing options. ")
     p.add_argument('--output', '-o')
     p.add_argument('--batch_size', '-b', type=int, default=8)
     p.add_argument('--j', help="Just to ignore the threads option from Relion")
@@ -132,7 +133,7 @@ def main():
     if args.json:
         raise Exception("JSON input not yet implemented.")
     else:
-        with open(args.preprocessing_args) as f:
+        with open(args.preprocessing_config) as f:
             preprocessing_args = json.load(f)
 
         argsDict = {
