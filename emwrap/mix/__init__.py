@@ -15,4 +15,4 @@
 # **************************************************************************
 
 from .preprocessing import Preprocessing
-
+from .preprocessing_pipeline import PreprocessingPipeline

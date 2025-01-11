@@ -61,58 +61,23 @@ class PreprocessingPipeline(ProcessingPipeline):
 
     def get_preprocessing(self, gpu):
         def _preprocessing(batch):
-            return self.preprocessing.process_batch(batch, gpu=gpu)
+            batch = self.preprocessing.process_batch(batch, gpu=gpu)
+            batch.dump_info()
+            return batch
         return _preprocessing
 
     def _output(self, batch):
         return batch
 
     def prerun(self):
-        with StarFile(self.inputStar) as sf:
-            self.optics = sf.getTable('optics')
-
-        # Create a new optics table adding pixelSize
-        cols = list(self.optics.getColumns())
-        cols.append(Column('rlnMicrographPixelSize', type=float))
-        self.newOptics = Table(columns=cols)
-
-        for row in self.optics:
-            d = row._asdict()
-            d['rlnMicrographPixelSize'] = row.rlnMicrographOriginalPixelSize  #FIXME incorrect with binning
-            self.newOptics.addRowValues(**d)
-
         if not os.path.exists(self.outputMicDir):
             os.mkdir(self.outputMicDir)
 
         self._build()
         print(f"Batch size: {self.batchSize}")
-        outName = 'corrected_micrographs.star'
-        self._outFn = self.join(outName)
-        self._outFile = open(self._outFn, 'w')  #FIXME improve for continue
-        self._outSf = StarFile(self._outFile)
-        self._outSf.writeTable('optics', self.newOptics)
-        self._writeMicrographsTableHeader()
-        # Write Relion-compatible nodes files
-        """
-        data_output_nodes
-loop_
-_rlnPipeLineNodeName #1
-_rlnPipeLineNodeType #2
-External/job006/coords_suffix_topaz.star            2 
-        """
-        with StarFile(self.join('RELION_OUTPUT_NODES.star'), 'w') as sf:
-            t = Table(columns=['rlnPipeLineNodeName', 'rlnPipeLineNodeType'])
-            t.addRowValues(self._outFn, 1)
-            sf.writeTable('output_nodes', t)
-
-        with open(self.join('job.json'), 'w') as f:
-            json.dump({
-                'inputs': [self.inputStar],
-                'outputs': [self._outFn]
-            }, f)
 
     def postrun(self):
-        self._outSf.close()
+        pass
 
 
 def main():

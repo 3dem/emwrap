@@ -17,7 +17,7 @@
 import os
 import glob
 
-from emtools.metadata import Table
+from emtools.metadata import Table, StarFile
 from emtools.jobs import BatchManager
 
 from emwrap.base import Acquisition
@@ -38,6 +38,10 @@ class RelionTutorial:
         return os.path.join(cls.path, *p)
 
     @classmethod
+    def optics_table(cls):
+        return RelionStar.optics_table(cls.acquisition)
+
+    @classmethod
     def movies_table(cls):
         movies = glob.glob(cls.join('Movies', '*.tiff'))
         t = Table(['rlnMicrographMovieName', 'rlnOpticsGroup'])
@@ -46,8 +50,10 @@ class RelionTutorial:
         return t
 
     @classmethod
-    def optics_table(cls):
-        return RelionStar.optics_table(cls.acquisition)
+    def write_movies_star(cls, outputStar):
+        with StarFile(outputStar, 'w') as sf:
+            sf.writeTable('optics', cls.optics_table())
+            sf.writeTable('movies', cls.movies_table())
 
     @classmethod
     def make_batch(cls, outputDir, n):
