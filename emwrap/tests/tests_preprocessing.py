@@ -81,11 +81,7 @@ class TestPreprocessing(unittest.TestCase):
         callerName = inspect.currentframe().f_back.f_code.co_name
         testName = f"{self.__class__.__name__}.{callerName}"
         print(Color.warn(f"\n============= {testName} ============="))
-
-        gpus = self._get_gpus()
-
-        if not gpus:
-            raise Exception("No GPU detected, required for Motioncor tests. ")
+        print(f">>> Using GPUs: {Color.cyan(gpus)}")
 
         with Path.tmpDir(prefix=f"{testName}__", chdir=True) as tmp:
             args = {

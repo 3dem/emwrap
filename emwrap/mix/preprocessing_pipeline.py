@@ -26,7 +26,7 @@ import json
 import argparse
 from pprint import pprint
 
-from emtools.utils import Color, Timer, Path
+from emtools.utils import Color, Timer, Path, Process
 from emtools.metadata import Table, Column, StarFile, StarMonitor, TextFile
 
 from emwrap.base import ProcessingPipeline
@@ -40,14 +40,22 @@ class PreprocessingPipeline(ProcessingPipeline):
         ProcessingPipeline.__init__(self, **args)
 
         self.gpuList = args['gpu_list'].split()
-        self.outputMicDir = self.join('Micrographs')
+        self.outputDirs = {}
         self.inputStar = args['input_star']
         self.batchSize = args.get('batch_size', 32)
+        print(Color.red(f"Batch size: {self.batchSize}"))
         self.acq = RelionStar.get_acquisition(self.inputStar)
         pp_args = args['preprocessing_args']
         self.preprocessing = Preprocessing(pp_args)
 
-    def _build(self):
+    def prerun(self):
+        # Create all required output folders
+        for d in ['Micrographs', 'CTFs', 'Coordinates', 'Particles', 'Logs']:
+            self.outputDirs[d] = p = self.join(d)
+            if not os.path.exists(p):
+                os.mkdir(p)
+
+        # Define the current pipeline with generator and processors
         g = self.addMoviesGenerator(self.inputStar, self.batchSize)
         outputQueue = None
         print(f"Creating {len(self.gpuList)} processing threads.")
@@ -61,23 +69,48 @@ class PreprocessingPipeline(ProcessingPipeline):
 
     def get_preprocessing(self, gpu):
         def _preprocessing(batch):
-            batch = self.preprocessing.process_batch(batch, gpu=gpu)
-            batch.dump_info()
-            return batch
+            return self.preprocessing.process_batch(batch, gpu=gpu)
+
         return _preprocessing
 
     def _output(self, batch):
+        t = Timer()
+
+        with self.outputLock:
+            micsStar = self.join('micrographs.star')
+            firstTime = not os.path.exists(micsStar)
+            micsStarBatch = batch.join('micrographs.star')
+
+            # Update micrographs.star
+            with StarFile(micsStar, 'a') as sf:
+                with StarFile(micsStarBatch) as sfBatch:
+                    micsTable = sfBatch.getTable('micrographs')
+                    if firstTime:
+                        sf.writeTimeStamp()
+                        sf.writeTable('optics', sfBatch.getTable('optics'))
+                        sf.writeHeader('micrographs', micsTable)
+                    for row in micsTable:
+                        sf.writeRow(row)
+
+            # Update coordinates.star
+
+        # Move output files
+        for d in ['Micrographs', 'CTFs', 'Coordinates']:
+            Process.system(f"mv {batch.join(d, '*')} {self.join(d)}")
+
+        for root, dirs, files in os.walk(batch.join('Particles')):
+            for name in files:
+                if name.endswith('.mrcs'):
+                    shutil.move(os.path.join(root, name), self.outputDirs['Particles'])
+
+        batch.info.update({
+            'output_elapsed': str(t.getElapsedTime())
+        })
+
+        with self.outputLock:
+            self.updateBatchInfo(batch)
+
         return batch
-
-    def prerun(self):
-        if not os.path.exists(self.outputMicDir):
-            os.mkdir(self.outputMicDir)
-
-        self._build()
-        print(f"Batch size: {self.batchSize}")
-
-    def postrun(self):
-        pass
 
 
 def main():

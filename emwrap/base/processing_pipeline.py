@@ -18,16 +18,18 @@ import os
 import subprocess
 import shutil
 import sys
+import json
 import signal
 import traceback
+import threading
 from uuid import uuid4
 
-from emtools.utils import Process, Timer, Path
+from emtools.utils import Process, Timer, Path, FolderManager
 from emtools.jobs import BatchManager, Args, Pipeline
 from emtools.metadata import Table, Column, StarFile, StarMonitor, TextFile
 
 
-class ProcessingPipeline(Pipeline):
+class ProcessingPipeline(Pipeline, FolderManager):
     """ Subclass of Pipeline that is commonly used to run programs.
 
     This class will define a workingDir (usually os.getcwd)
@@ -43,7 +45,14 @@ class ProcessingPipeline(Pipeline):
         self.workingDir = self.__validate(workingDir, 'working')
         self.outputDir = self.__validate(outputDir, 'output')
         self.scratchDir = self.__validate(scratchDir, 'scratch') if scratchDir else None
+
+        FolderManager.__init__(self, outputDir)
+
         self.tmpDir = self.join('tmp')
+        self.batchesInfo = {}  # Keep track of batches info
+        self._batchesInfoFile = self.join('batches_info.json')
+        # Lock used when requiring single thread running output generation code
+        self.outputLock = threading.Lock()
 
     def __validate(self, path, key):
         if not path:
@@ -76,12 +85,6 @@ class ProcessingPipeline(Pipeline):
         """
         return argDict.get(key, os.environ.get(envKey, default))
 
-    def join(self, *p):
-        return os.path.join(self.outputDir, *p)
-
-    def relpath(self, p):
-        return os.path.relpath(p, self.workingDir)
-
     def prerun(self):
         """ This method will be called before the run. """
         pass
@@ -104,6 +107,9 @@ class ProcessingPipeline(Pipeline):
             signal.signal(signal.SIGTERM, self.__abort)
             self.__create_tmp()
             self.prerun()
+            if os.path.exists(self._batchesInfoFile):
+                with open(self._batchesInfoFile) as f:
+                    self.batchesInfo = json.load(f)
             Pipeline.run(self)
             self.postrun()
             self.__clean_tmp()
@@ -125,5 +131,11 @@ class ProcessingPipeline(Pipeline):
                                 itemFileNameFunc=_movie_filename)
 
         return self.addGenerator(batchMgr.generate)
+
+    def updateBatchInfo(self, batch):
+        """ Update general info with this batch and write json file. """
+        self.batchesInfo[batch.id] = batch.info
+        with open(self._batchesInfoFile, 'a') as f:
+            json.dump(self.batchesInfo, f, indent=4)
 
 
