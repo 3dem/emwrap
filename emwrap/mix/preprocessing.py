@@ -97,11 +97,13 @@ class Preprocessing:
         cryolo.process_batch(batch, gpu=gpu, cpu=cpu)
 
         # Write output micrographs star file
+
         acq = Acquisition(self.acq)
         origPs = self.acq.pixel_size
         acq.pixel_size = origPs * mc.args['-FtBin']
         tOptics = RelionStar.optics_table(acq, originalPixelSize=origPs)
-        tMics = RelionStar.micrograph_table(extra_cols=['rlnMicrographCoordinates'])
+        tMics = RelionStar.micrograph_table(extra_cols=['rlnMicrographCoordinates',
+                                                        'rlnCoordinatesNumber'])
         tCoords = RelionStar.coordinates_table()
         def _move_cryolo(micName, folder, ext):
             """ Move result box files from cryolo. """
@@ -120,6 +122,8 @@ class Preprocessing:
                 dstCoords = _move_cryolo(micName, 'STAR', '.star')
                 _move_cryolo(micName, 'CBOX', '.cbox')
                 values.append(dstCoords)
+                with StarFile(batch.join(dstCoords)) as sf:
+                    values.append(sf.getTableSize(''))
                 tMics.addRowValues(*values)
                 tCoords.addRowValues(values[0], dstCoords)
 

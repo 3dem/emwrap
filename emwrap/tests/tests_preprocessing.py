@@ -58,7 +58,7 @@ class TestPreprocessing(unittest.TestCase):
     def _run_batch(self, N, args):
         callerName = inspect.currentframe().f_back.f_code.co_name
         testName = f"{self.__class__.__name__}.{callerName}"
-        print(Color.warn(f"\n============= {testName} ============="))
+        print(Color.warn(f"\n============= Running test: {testName} ============="))
         with Path.tmpDir(prefix=f"{testName}__") as tmp:
             batch = RelionTutorial.make_batch(tmp, N)
             preproc = Preprocessing(args)
@@ -80,8 +80,7 @@ class TestPreprocessing(unittest.TestCase):
     def _run_pipeline(self, preprocessing_args, gpus, n=8):
         callerName = inspect.currentframe().f_back.f_code.co_name
         testName = f"{self.__class__.__name__}.{callerName}"
-        print(Color.warn(f"\n============= {testName} ============="))
-        print(f">>> Using GPUs: {Color.cyan(gpus)}")
+        print(Color.warn(f"\n============= Running test: {testName} ============="))
 
         with Path.tmpDir(prefix=f"{testName}__", chdir=True) as tmp:
             args = {

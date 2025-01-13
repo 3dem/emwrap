@@ -15,7 +15,7 @@
 # **************************************************************************
 
 import os
-import subprocess
+import tempfile
 import shutil
 import sys
 import json
@@ -24,7 +24,7 @@ import traceback
 import threading
 from uuid import uuid4
 
-from emtools.utils import Process, Timer, Path, FolderManager
+from emtools.utils import Process, Color, Path, FolderManager
 from emtools.jobs import BatchManager, Args, Pipeline
 from emtools.metadata import Table, Column, StarFile, StarMonitor, TextFile
 
@@ -40,11 +40,14 @@ class ProcessingPipeline(Pipeline, FolderManager):
     def __init__(self, **kwargs):
         workingDir = kwargs.pop('working_dir', os.getcwd())
         outputDir = kwargs.pop('output_dir', None)
-        scratchDir = kwargs.pop('scratch', None)
+        scratchDir = kwargs.pop('scratch_dir', None)
         Pipeline.__init__(self, debug=kwargs.get('debug', False))
         self.workingDir = self.__validate(workingDir, 'working')
         self.outputDir = self.__validate(outputDir, 'output')
         self.scratchDir = self.__validate(scratchDir, 'scratch') if scratchDir else None
+
+        # Relative prefix from the working dir to output dir
+        self.outputPrefix = os.path.relpath(self.outputDir, self.workingDir)
 
         FolderManager.__init__(self, outputDir)
 
@@ -63,13 +66,21 @@ class ProcessingPipeline(Pipeline, FolderManager):
         return path
 
     def __clean_tmp(self):
-        Process.system(f"rm -rf {self.tmpDir}")
+        tmp = tmpDir = self.tmpDir
+        if os.path.exists(tmp):
+            if os.path.islink(tmp):
+                tmpDir = os.readlink(tmp)
+                os.unlink(tmp)
+            print(f"Cleaning {Color.bold(tmpDir)}")
+            shutil.rmtree(tmpDir)
+
+
 
     def __create_tmp(self):
         self.__clean_tmp()
 
         if self.scratchDir:
-            scratchTmp = os.path.join(self.scratchDir, str(uuid4()))
+            scratchTmp = tempfile.mkdtemp(prefix=self.scratchDir)
             Process.system(f"ln -s {scratchTmp} {self.tmpDir}")
         else:
             Process.system(f"mkdir {self.tmpDir}")
@@ -112,7 +123,12 @@ class ProcessingPipeline(Pipeline, FolderManager):
                     self.batchesInfo = json.load(f)
             Pipeline.run(self)
             self.postrun()
-            self.__clean_tmp()
+            if int(os.environ.get('EMWRAP_CLEAN', 1)):
+                self.__clean_tmp()
+            else:
+                print(f"Temporary directory was not deleted, "
+                      f"remove it with the following command: \n"
+                      f"{Color.bold('rm -rf %s' % self.tmpDir)}")
             self.__file('SUCCESS')
         except Exception as e:
             self.__file('FAILURE')
@@ -127,7 +143,7 @@ class ProcessingPipeline(Pipeline, FolderManager):
         monitor = StarMonitor(inputStar, 'movies',
                               _movie_filename, timeout=30)
 
-        batchMgr = BatchManager(batchSize, monitor.newItems(), self.outputDir,
+        batchMgr = BatchManager(batchSize, monitor.newItems(), self.tmpDir,
                                 itemFileNameFunc=_movie_filename)
 
         return self.addGenerator(batchMgr.generate)
@@ -135,7 +151,19 @@ class ProcessingPipeline(Pipeline, FolderManager):
     def updateBatchInfo(self, batch):
         """ Update general info with this batch and write json file. """
         self.batchesInfo[batch.id] = batch.info
-        with open(self._batchesInfoFile, 'a') as f:
+        with open(self._batchesInfoFile, 'w') as f:
             json.dump(self.batchesInfo, f, indent=4)
+
+    def fixOutputPath(self, path):
+        """ Add the output prefix to a path that is relative to
+        the output folder, to make it relative to the working dir
+        (compatible with Relion/Scipion project's path rules)
+        """
+        return os.path.join(self.outputPrefix, path)
+
+    def fixOutputRow(self, row, *pathKeys):
+        """ Fix all output paths in the row defined by pathKeys. """
+        newValues = {k: self.fixOutputPath(getattr(row, k)) for k in pathKeys}
+        return row._replace(**newValues)
 
 
