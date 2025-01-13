@@ -174,7 +174,7 @@ def main():
                    help="Scratch directory where to keep intermediate results. ")
     p.add_argument('--batch_size', '-b', type=int, default=8)
     p.add_argument('--j', help="Just to ignore the threads option from Relion")
-    p.add_argument('--gpu')
+    p.add_argument('--gpu', nargs='*')
 
     args = p.parse_args()
 
@@ -188,7 +188,7 @@ def main():
             'input_star': args.in_movies,
             'output_dir': args.output,
             'scratch_dir': args.scratch,
-            'gpu_list': args.gpu,
+            'gpu_list': ' '.join(g for g in args.gpu),
             'batch_size': args.batch_size,
             'preprocessing_args': preprocessing_args
         }
