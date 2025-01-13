@@ -61,9 +61,10 @@ class PreprocessingPipeline(ProcessingPipeline):
         print(f"Creating {len(self.gpuList)} processing threads.")
         for gpu in self.gpuList:
             p = self.addProcessor(g.outputQueue,
-                                  self.get_preprocessing(gpu),
-                                  outputQueue=outputQueue)
-            outputQueue = p.outputQueue
+                                  self.get_preprocessing(gpu))
+            m = self.addProcessor(p.outputQueue,
+                                  self._move, outputQueue=outputQueue)
+            outputQueue = m.outputQueue
 
         self.addProcessor(outputQueue, self._output)
 
@@ -73,9 +74,26 @@ class PreprocessingPipeline(ProcessingPipeline):
 
         return _preprocessing
 
-    def _output(self, batch):
+    def _move(self, batch):
+        """ Move output files from the batch to the final destination. """
         t = Timer()
+        # Move output files
+        for d in ['Micrographs', 'CTFs', 'Coordinates']:
+            Process.system(f"mv {batch.join(d, '*')} {self.join(d)}")
 
+        for root, dirs, files in os.walk(batch.join('Particles')):
+            for name in files:
+                if name.endswith('.mrcs'):
+                    shutil.move(os.path.join(root, name), self.outputDirs['Particles'])
+
+        batch.info.update({
+            'move_elapsed': str(t.getElapsedTime())
+        })
+        return batch
+
+    def _output(self, batch):
+        """ Update output STAR files. """
+        t = Timer()
         with self.outputLock:
             micsStar = self.join('micrographs.star')
             firstTime = not os.path.exists(micsStar)
@@ -93,21 +111,10 @@ class PreprocessingPipeline(ProcessingPipeline):
                         sf.writeRow(row)
 
             # Update coordinates.star
-
-        # Move output files
-        for d in ['Micrographs', 'CTFs', 'Coordinates']:
-            Process.system(f"mv {batch.join(d, '*')} {self.join(d)}")
-
-        for root, dirs, files in os.walk(batch.join('Particles')):
-            for name in files:
-                if name.endswith('.mrcs'):
-                    shutil.move(os.path.join(root, name), self.outputDirs['Particles'])
-
-        batch.info.update({
-            'output_elapsed': str(t.getElapsedTime())
-        })
-
-        with self.outputLock:
+            # todo
+            batch.info.update({
+                'output_elapsed': str(t.getElapsedTime())
+            })
             self.updateBatchInfo(batch)
 
         return batch
