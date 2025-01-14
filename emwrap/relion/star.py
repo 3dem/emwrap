@@ -41,6 +41,14 @@ class RelionStar:
         return Table.fromDict(values)
 
     @staticmethod
+    def movies_table(**kwargs):
+        extra_cols = kwargs.get('extra_cols', [])
+        return Table([
+            'rlnMicrographMovieName',
+            'rlnOpticsGroup'
+        ] + extra_cols)
+
+    @staticmethod
     def micrograph_table(**kwargs):
         extra_cols = kwargs.get('extra_cols', [])
         return Table([
