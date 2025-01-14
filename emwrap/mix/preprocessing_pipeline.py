@@ -19,7 +19,7 @@
 """
 
 import os
-import subprocess
+import time
 import shutil
 import sys
 import json
@@ -29,8 +29,8 @@ from pprint import pprint
 from emtools.utils import Color, Timer, Path, Process
 from emtools.metadata import Table, Column, StarFile, StarMonitor, TextFile
 
-from emwrap.base import ProcessingPipeline
-from emwrap.relion import RelionStar
+from emwrap.base import ProcessingPipeline, Acquisition
+from emwrap.relion import RelionStar, RelionImportMovies
 from .preprocessing import Preprocessing
 
 
@@ -44,10 +44,12 @@ class PreprocessingPipeline(ProcessingPipeline):
         self.outputDirs = {}
         self.inputStar = args['input_star']
         self.batchSize = args.get('batch_size', 32)
+        self.acq = None  # will be read later
+        self.moviesImport = None
+        self._totalInput = self._totalOutput = 0
 
-        self.acq = RelionStar.get_acquisition(self.inputStar)
-        pp_args = args['preprocessing_args']
-        self.preprocessing = Preprocessing(pp_args)
+        self._pp_args = args['preprocessing_args']
+        self.preprocessing = Preprocessing(self._pp_args)
 
     def prerun(self):
         argStr = json.dumps(self._args, indent=4) + '\n'
@@ -57,24 +59,49 @@ class PreprocessingPipeline(ProcessingPipeline):
               f">>> Batch size: {Color.cyan(str(self.batchSize))}\n"
               f">>> Using GPUs: {Color.cyan(str(self.gpuList))}")
 
+        if '*' in self.inputStar:  # input is a pattern
+            self.acq = Acquisition(self._pp_args['acquisition'])
+            # Update some of the args for the import
+            args = dict(self._args)
+            args['movies_pattern'] = self.inputStar
+            args['acquisition'] = self.acq
+            self.moviesImport = RelionImportMovies(**args)
+            self.moviesImport.start()
+            self.inputStar = self.moviesImport.outputStar
+            while not os.path.exists(self.inputStar):
+                time.sleep(30)  # wait until the star file is being generated
+        else:
+            self.acq = RelionStar.get_acquisition(self.inputStar)
+
         # Create all required output folders
         for d in ['Micrographs', 'CTFs', 'Coordinates', 'Particles', 'Logs']:
-            self.outputDirs[d] = p = self.join(d)
-            if not os.path.exists(p):
-                os.mkdir(p)
+            self.outputDirs[d] = p = self.mkdir(d)
 
         # Define the current pipeline with generator and processors
         g = self.addMoviesGenerator(self.inputStar, self.batchSize)
+        c = self.addProcessor(g.outputQueue, self._count)
         outputQueue = None
         print(f"Creating {len(self.gpuList)} processing threads.")
         for gpu in self.gpuList:
-            p = self.addProcessor(g.outputQueue,
+            p = self.addProcessor(c.outputQueue,
                                   self.get_preprocessing(gpu))
             m = self.addProcessor(p.outputQueue,
                                   self._move, outputQueue=outputQueue)
             outputQueue = m.outputQueue
 
         self.addProcessor(outputQueue, self._output)
+
+    def postrun(self):
+        """ This method will be called after the run. """
+        if self.moviesImport is not None:
+            self.moviesImport.join()
+
+    def _count(self, batch):
+        """ Just count input items. """
+        with self.outputLock:
+            self._totalInput += len(batch['items'])
+
+        return batch
 
     def get_preprocessing(self, gpu):
         def _preprocessing(batch):
@@ -157,6 +184,11 @@ class PreprocessingPipeline(ProcessingPipeline):
                 'output_elapsed': str(t.getElapsedTime())
             })
             self.updateBatchInfo(batch)
+            self._totalOutput += len(batch['items'])
+            percent = self._totalOutput * 100 / self._totalInput
+            print(f">>> Processed {Color.green(str(self._totalOutput))} out of "
+                  f"{Color.red(str(self._totalInput))} "
+                  f"({Color.bold('%0.2f' % percent)}")
 
         return batch
 

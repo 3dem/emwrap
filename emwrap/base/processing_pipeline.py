@@ -74,8 +74,6 @@ class ProcessingPipeline(Pipeline, FolderManager):
             print(f"Cleaning {Color.bold(tmpDir)}")
             shutil.rmtree(tmpDir)
 
-
-
     def __create_tmp(self):
         self.__clean_tmp()
 
@@ -141,7 +139,7 @@ class ProcessingPipeline(Pipeline, FolderManager):
             return row.rlnMicrographMovieName
 
         monitor = StarMonitor(inputStar, 'movies',
-                              _movie_filename, timeout=30)
+                              _movie_filename, timeout=3600)
 
         batchMgr = BatchManager(batchSize, monitor.newItems(), self.tmpDir,
                                 itemFileNameFunc=_movie_filename)
