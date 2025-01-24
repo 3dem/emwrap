@@ -14,64 +14,12 @@
 # *
 # **************************************************************************
 
-
-#  ==================== autopick.star ========================
-"""
-# version 30001
-
-data_coordinate_files
-
-loop_
-_rlnMicrographName #1
-_rlnMicrographCoordinates #2
-MotionCorr/job002/data/Images-Disc1/GridSquare_23333186/Data/FoilHole_23379462_Data_23378980_4_20240423_193203_fractions.mrc AutoPick/job007/data/Images-Disc1/GridSquare_23333186/Data/FoilHole_23379462_Data_23378980_4_20240423_193203_fractions_autopick.star
-MotionCorr/job002/data/Images-Disc1/GridSquare_23333186/Data/FoilHole_23379462_Data_23378992_4_20240423_193157_fractions.mrc AutoPick/job007/data/Images-Disc1/GridSquare_23333186/Data/FoilHole_23379462_Data_23378992_4_20240423_193157_fractions_autopick.star
-MotionCorr/job002/data/Images-Disc1/GridSquare_23333186/Data/FoilHole_23379462_Data_23379004_4_20240423_193200_fractions.mrc AutoPick/job007/data/Images-Disc1/GridSquare_23333186/Data/FoilHole_23379462_Data_23379004_4_20240423_193200_fractions_autopick.star
-"""
-
-# ================== micrographs_ctf.star ==============================
-"""
-# version 30001
-
-data_optics
-
-loop_ 
-_rlnOpticsGroupName #1 
-_rlnOpticsGroup #2 
-_rlnMicrographOriginalPixelSize #3 
-_rlnVoltage #4 
-_rlnSphericalAberration #5 
-_rlnAmplitudeContrast #6 
-_rlnMicrographPixelSize #7 
-opticsGroup1            1     0.648500   300.000000     2.700000     0.100000     0.648500 
- 
-
-# version 30001
-
-data_micrographs
-
-loop_ 
-_rlnMicrographName #1 
-_rlnOpticsGroup #2 
-_rlnCtfImage #3 
-_rlnDefocusU #4 
-_rlnDefocusV #5 
-_rlnCtfAstigmatism #6 
-_rlnDefocusAngle #7 
-_rlnCtfFigureOfMerit #8 
-_rlnCtfMaxResolution #9 
-MotionCorr/job002/data/Images-Disc1/GridSquare_23333186/Data/FoilHole_23379462_Data_23378980_4_20240423_193203_fractions.mrc            1 CtfFind/job005/data/Images-Disc1/GridSquare_23333186/Data/FoilHole_23379462_Data_23378980_4_20240423_193203_fractions_PS.ctf:mrc 19128.781250 18814.488281   314.292969     7.771090     0.151332     3.547526 
-MotionCorr/job002/data/Images-Disc1/GridSquare_23333186/Data/FoilHole_23379462_Data_23378992_4_20240423_193157_fractions.mrc            1 CtfFind/job005/data/Images-Disc1/GridSquare_23333186/Data/FoilHole_23379462_Data_23378992_4_20240423_193157_fractions_PS.ctf:mrc 19331.462891 19187.615234   143.847656    29.402908     0.134823     3.428710 
-
-"""
-
 import os
 import subprocess
 import shutil
 import sys
 import json
-import argparse
-from pprint import pprint
+import numpy as np
 
 from emtools.utils import Color, Timer, Path, Process
 from emtools.jobs import Args
@@ -79,7 +27,8 @@ from emtools.metadata import Table, Column, StarFile, StarMonitor, TextFile
 
 
 class RelionExtract:
-    def __init__(self, *args, **kwargs):
+    def __init__(self, acq, **kwargs):
+        self.acq = acq
         self.path = '/usr/local/em/scripts/relion_extract.sh'
         self.args = Args(kwargs.get('extra_args', {}))
 
@@ -112,6 +61,41 @@ class RelionExtract:
         batch.info.update({
             'extract_elapsed': str(t.getElapsedTime())
         })
+
+    def update_args(self, particle_size):
+        """ Estimate extraction parameters based on pixel size
+        and particle_size in A.
+        """
+
+        particle_size_pix = particle_size / self.acq.pixel_size
+        boxsize = RelionExtract.estimate_box_size(particle_size_pix)
+        bg_radius = np.round(particle_size_pix * 0.7)
+
+        if scale := self.args.get('--scale', None):
+            bg_radius *= scale / boxsize
+
+        self.args.update({
+            '--extract_size': boxsize,
+            '--bg_radius': round(bg_radius)
+        })
+
+    @staticmethod
+    def estimate_box_size(particle_size_pix, scale=2.2):
+        """ Calculate the box size based on the input particle size
+        and recommended boxsize from Eman's wiki page.
+        """
+        EMAN_BOXSIZES = np.array(
+            [24, 32, 36, 40, 44, 48, 52, 56, 60, 64, 72, 84, 96, 100,
+             104, 112, 120, 128, 132, 140, 168, 180, 192, 196, 208,
+             216, 220, 224, 240, 256, 260, 288, 300, 320, 352, 360,
+             384, 416, 440, 448, 480, 512, 540, 560, 576, 588, 600,
+             630, 640, 648, 672, 686, 700, 720, 750, 756, 768, 784,
+             800, 810, 840, 864, 882, 896, 900, 960, 972, 980, 1000,
+             1008, 1024, 2048])
+
+        return int(EMAN_BOXSIZES[np.argmax(EMAN_BOXSIZES >= particle_size_pix * scale)])
+
+
 
 
 

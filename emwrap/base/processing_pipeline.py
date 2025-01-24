@@ -132,14 +132,14 @@ class ProcessingPipeline(Pipeline, FolderManager):
             self.__file('FAILURE')
             traceback.print_exc()
 
-    def addMoviesGenerator(self, inputStar, batchSize):
+    def addMoviesGenerator(self, inputStar, batchSize, inputTimeOut=3600):
         """ Add a generator that monitor input movies from a
         given STAR file and group in batches. """
         def _movie_filename(row):
             return row.rlnMicrographMovieName
 
         monitor = StarMonitor(inputStar, 'movies',
-                              _movie_filename, timeout=3600)
+                              _movie_filename, timeout=inputTimeOut)
 
         batchMgr = BatchManager(batchSize, monitor.newItems(), self.tmpDir,
                                 itemFileNameFunc=_movie_filename)

@@ -46,30 +46,28 @@ class Preprocessing:
      """
     def __init__(self, args):
         self.acq = Acquisition(args['acquisition'])
-        mc_args = args['motioncor']
-        self.motioncor = Motioncor(self.acq, **mc_args)
-        if 'ctf' in args:
-            self.ctf = Ctffind(self.acq, **args['ctf'])
-        else:
-            self.ctf = None
+        self.args = args
 
-        # FIXME
-        self.picking = args.get('picking', None)
-        self.extract = args.get('extract', None)
-        if 'extract' in args:
-            self.extract = RelionExtract(**args['extract'])
-        else:
-            self.extract = None
+    @property
+    def particle_size(self):
+        return self.args.get('picking', {}).get('particle_size', None)
+
+    @particle_size.setter
+    def particle_size(self, value):
+        self.args['picking']['particle_size'] = value
 
     def process_batch(self, batch, **kwargs):
         t = Timer()
         start = Pretty.now()
+
+        batch.dump(self.args, 'args.json')
+
         v = kwargs.get('verbose', False)
         gpu = kwargs['gpu']
         cpu = kwargs.get('cpu', 4)
 
         # Motion correction
-        mc = self.motioncor
+        mc = Motioncor(self.acq, **self.args['motioncor'])
         mc.process_batch(batch, gpu=gpu)
 
         # Picking in a separate thread
@@ -82,7 +80,8 @@ class Preprocessing:
             return None if 'error' in r else r['rlnMicrographName']
 
         batch['items'] = [_item(r) for r in old_batch['results']]
-        self.ctf.process_batch(batch, verbose=v)
+        ctf = Ctffind(self.acq, **self.args['ctf'])
+        ctf.process_batch(batch, verbose=v)
         # batch.info.update(batch.info)
 
         def _move(outputs, outName):
@@ -93,18 +92,25 @@ class Preprocessing:
         _move(old_batch['outputs'], 'Micrographs')
         _move(batch['outputs'], 'CTFs')
 
-        cryolo = CryoloPredict()
-        cryolo.process_batch(batch, gpu=gpu, cpu=cpu)
-
-        # Write output micrographs star file
-
+        # Calculate new pixel size based on the motioncor binning option
         acq = Acquisition(self.acq)
         origPs = self.acq.pixel_size
         acq.pixel_size = origPs * mc.args['-FtBin']
+
+        cryolo = CryoloPredict(**self.args['picking'])
+        cryolo.process_batch(batch, gpu=gpu, cpu=cpu)
+        if self.particle_size is None:
+            size = cryolo.get_size(batch, 75)
+
+            self.particle_size = round(size * acq.pixel_size)
+            print(f">>> Size for percentile 25: {size}, particle_size (A): {self.particle_size}")
+
+
         tOptics = RelionStar.optics_table(acq, originalPixelSize=origPs)
         tMics = RelionStar.micrograph_table(extra_cols=['rlnMicrographCoordinates',
                                                         'rlnCoordinatesNumber'])
         tCoords = RelionStar.coordinates_table()
+
         def _move_cryolo(micName, folder, ext):
             """ Move result box files from cryolo. """
             srcCoords = batch.join('cryolo_boxfiles', folder, Path.replaceExt(micName, ext))
@@ -127,7 +133,7 @@ class Preprocessing:
                 tMics.addRowValues(*values)
                 tCoords.addRowValues(values[0], dstCoords)
 
-        # Write output STAR files, as outputs and needed by extraction
+        # Write output STAR files, as outputs needed by extraction
         with StarFile(batch.join('micrographs.star'), 'w') as sf:
             sf.writeTimeStamp()
             sf.writeTable('optics', tOptics)
@@ -137,7 +143,12 @@ class Preprocessing:
             sf.writeTimeStamp()
             sf.writeTable('coordinate_files', tCoords)
 
-        self.extract.process_batch(batch)
+        extract = RelionExtract(acq, **self.args['extract'])
+        if '--extract_size' not in extract.args:
+            extract.update_args(self.particle_size)
+            self.args['extract']['extra_args'].update(extract.args)
+
+        extract.process_batch(batch)
 
         batch.info.update({
             'preprocessing_start': start,

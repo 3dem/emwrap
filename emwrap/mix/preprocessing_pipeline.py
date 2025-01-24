@@ -19,6 +19,7 @@
 """
 
 import os
+import threading
 import time
 import shutil
 import sys
@@ -44,6 +45,7 @@ class PreprocessingPipeline(ProcessingPipeline):
         self.outputDirs = {}
         self.inputStar = args['input_star']
         self.batchSize = args.get('batch_size', 32)
+        self.inputTimeOut = args.get('input_timeout', 3600)
         self.acq = None  # will be read later
         self.moviesImport = None
         self._totalInput = self._totalOutput = 0
@@ -51,12 +53,29 @@ class PreprocessingPipeline(ProcessingPipeline):
         self._pp_args = args['preprocessing_args']
         self.preprocessing = Preprocessing(self._pp_args)
 
-    def prerun(self):
+        # Create a lock to estimate the extraction args only once,
+        # for the first batch processed
+        self._particle_size = self._pp_args['picking'].get('particle_size', None)
+        self._particle_size_lock = threading.Lock()
+
+    @property
+    def particle_size(self):
+        return self._pp_args.get('picking', {}).get('particle_size', None)
+
+    @particle_size.setter
+    def particle_size(self, value):
+        self._pp_args['picking']['particle_size'] = value
+
+    def dumpArgs(self, printMsg=''):
         argStr = json.dumps(self._args, indent=4) + '\n'
         with open(self.join('args.json'), 'w') as f:
             f.write(argStr)
-        print(f">>> Args: \n\t{Color.cyan(argStr)}"
-              f">>> Batch size: {Color.cyan(str(self.batchSize))}\n"
+        if printMsg:
+            print(f">>> {Color.cyan(printMsg)}: \n\t{Color.bold(argStr)}")
+
+    def prerun(self):
+        self.dumpArgs(printMsg="Input args")
+        print(f">>> Batch size: {Color.cyan(str(self.batchSize))}\n"
               f">>> Using GPUs: {Color.cyan(str(self.gpuList))}")
 
         if '*' in self.inputStar:  # input is a pattern
@@ -78,7 +97,8 @@ class PreprocessingPipeline(ProcessingPipeline):
             self.outputDirs[d] = p = self.mkdir(d)
 
         # Define the current pipeline with generator and processors
-        g = self.addMoviesGenerator(self.inputStar, self.batchSize)
+        g = self.addMoviesGenerator(self.inputStar, self.batchSize,
+                                    inputTimeOut=self.inputTimeOut)
         c = self.addProcessor(g.outputQueue, self._count)
         outputQueue = None
         print(f"Creating {len(self.gpuList)} processing threads.")
@@ -105,6 +125,17 @@ class PreprocessingPipeline(ProcessingPipeline):
 
     def get_preprocessing(self, gpu):
         def _preprocessing(batch):
+            with self._particle_size_lock:
+                if self.particle_size is None:
+                    print(f">>> {Color.warn('Estimating the boxSize...')}")
+                    pp = Preprocessing(self._pp_args)
+                    result = pp.process_batch(batch, gpu=gpu)
+                    # This should update particle_size and other args
+                    self._pp_args.update(pp.args)
+                    self.dumpArgs('Updated args')
+
+                    return result
+            print(f">>> {Color.warn('Using existing boxSize...')}")
             return self.preprocessing.process_batch(batch, gpu=gpu)
 
         return _preprocessing

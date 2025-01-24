@@ -40,9 +40,11 @@ class TestPreprocessing(unittest.TestCase):
                 'extra_args': {'-FtBin': 2, '-Patch': '5 5', '-FmDose': 1.277}
             },
             'ctf': {},
-            'picking': {},
+            'picking': {
+                'particle_size': None  # 180  # A
+            },
             'extract': {
-                'extra_args': {'--extract_size': 150, '--scale': 100, '--bg_radius': 40}
+                'extra_args': {'--scale': 100}
             }
         }
 
@@ -88,7 +90,8 @@ class TestPreprocessing(unittest.TestCase):
                 'gpu_list': ' '.join(gpus),
                 'input_star': 'movies.star',
                 'batch_size': n,
-                'preprocessing_args': preprocessing_args
+                'preprocessing_args': preprocessing_args,
+                'input_timeout': 30
             }
 
             RelionTutorial.write_movies_star('movies.star')
@@ -113,6 +116,6 @@ class TestPreprocessing(unittest.TestCase):
         prep_args = self._get_args()
         gpus = self._get_gpus()
         if len(gpus) > 1:
-            self._run_pipeline(prep_args, gpus[:2], n=12)
+            self._run_pipeline(prep_args, gpus[:2], n=8)
         else:
             raise Exception("This test requires more than one GPU")

@@ -35,7 +35,7 @@ sample_config = {
 # cryolo_predict.py -c config.json -w model.h5 -i Micrographs/ -g 1 -o boxfiles/ -t 0.95 -nc 8
 
 import os
-import subprocess
+import numpy as np
 import shutil
 import sys
 import json
@@ -48,7 +48,7 @@ from emtools.metadata import Table, Column, StarFile, StarMonitor, TextFile
 
 
 class CryoloPredict:
-    def __init__(self, *args, **kwargs):
+    def __init__(self, **kwargs):
         # Denoise with JANNI model
         self.model = '/usr/local/em/cryolo/cryolo_model-202005_nn_N63_c17/gmodel_phosnet_202005_nn_N63_c17.h5'
         self.janni_model = '/usr/local/em/cryolo/janni_model-20190703/gmodel_janni_20190703.h5'
@@ -91,5 +91,26 @@ class CryoloPredict:
             'cryolo_elapsed': str(t.getElapsedTime())
         })
 
+        return batch
+
+    def __distr_file(self, batch, percentile, prefix):
+        distr = batch.join('cryolo_boxfiles', 'DISTR')
+        for fn in os.listdir(distr):
+            if fn.startswith(prefix):
+                filePath = os.path.join(distr, fn)
+                for line in TextFile.stripLines(filePath):
+                    if line.startswith(f"Q{percentile},"):
+                        return line.split(',')[1]
+        return None
+
+    def get_size(self, batch, percentile):
+        """ Get the estimated particle size (in pixels) value for the given percentile.
+        Valid options for percentile are: 25, 50 and 75. """
+        return int(self.__distr_file(batch, percentile, 'size_distribution_summary_'))
+
+    def get_confidence(self, batch, percentile):
+        """ Get confidence of the detected particle for a given percentile.
+        Valid options for percentile are: 25, 50 and 75. """
+        return self.__distr_file(batch, percentile, 'confidence_distribution_summary_')
 
 
