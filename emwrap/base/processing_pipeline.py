@@ -39,8 +39,8 @@ class ProcessingPipeline(Pipeline, FolderManager):
     """
     def __init__(self, **kwargs):
         workingDir = kwargs.pop('working_dir', os.getcwd())
-        outputDir = kwargs.pop('output_dir', None)
-        scratchDir = kwargs.pop('scratch_dir', None)
+        outputDir = kwargs.pop('output', None)
+        scratchDir = kwargs.pop('scratch', None)
         Pipeline.__init__(self, debug=kwargs.get('debug', False))
         self.workingDir = self.__validate(workingDir, 'working')
         self.outputDir = self.__validate(outputDir, 'output')

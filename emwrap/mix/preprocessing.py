@@ -57,11 +57,28 @@ class Preprocessing:
         self.args['picking']['particle_size'] = value
 
     def process_batch(self, batch, **kwargs):
+        batch['Preprocessing.args'] = self.args
+        batch['Preprocessing.process_batch.kwargs'] = kwargs
+        # Let's replace the items to make the rows more json-ready
+        batch['items'] = [row._asdict() for row in batch['items']]
+        batch.dump_all()  # Write batch json to be used in sub-process
+
+        # Launcher can be used in the case that we want to launch
+        # processing of a batch to the cluster
+        # the launcher should load the proper environment
+        # and launch this main in the batch folder
+        if launcher := self.args.get('launcher', None):
+            batch.call(launcher, [os.path.abspath(batch.path)],
+                       logfile=None, #batch.join('pp.log'),
+                       verbose=True)
+            batch.load_all()
+        else:
+            self._process_batch(batch, kwargs)
+            return batch
+
+    def _process_batch(self, batch, kwargs):
         t = Timer()
         start = Pretty.now()
-
-        batch.dump(self.args, 'args.json')
-
         v = kwargs.get('verbose', False)
         gpu = kwargs['gpu']
         cpu = kwargs.get('cpu', 4)
@@ -79,10 +96,12 @@ class Preprocessing:
         def _item(r):
             return None if 'error' in r else r['rlnMicrographName']
 
+        # Change input items as expected by CTF job
         batch['items'] = [_item(r) for r in old_batch['results']]
         ctf = Ctffind(self.acq, **self.args['ctf'])
         ctf.process_batch(batch, verbose=v)
-        # batch.info.update(batch.info)
+        # Restore items
+        batch['items'] = old_batch['items']
 
         def _move(outputs, outName):
             outDir = batch.mkdir(outName)
@@ -91,6 +110,8 @@ class Preprocessing:
 
         _move(old_batch['outputs'], 'Micrographs')
         _move(batch['outputs'], 'CTFs')
+        del old_batch['outputs']
+        del batch['outputs']
 
         # Calculate new pixel size based on the motioncor binning option
         acq = Acquisition(self.acq)
@@ -105,7 +126,6 @@ class Preprocessing:
             self.particle_size = round(size * acq.pixel_size)
             print(f">>> Size for percentile 25: {size}, particle_size (A): {self.particle_size}")
 
-
         tOptics = RelionStar.optics_table(acq, originalPixelSize=origPs)
         tMics = RelionStar.micrograph_table(extra_cols=['rlnMicrographCoordinates',
                                                         'rlnCoordinatesNumber'])
@@ -118,12 +138,12 @@ class Preprocessing:
             shutil.move(srcCoords, batch.join(dstCoords))
             return dstCoords
 
-        for row, r in zip(old_batch['items'], batch['results']):
+        for row, r in zip(batch['items'], batch['results']):
             if 'error' not in r:
                 values = r['values']
                 micName = os.path.basename(values[0])
                 values[0] = os.path.join('Micrographs', micName)
-                values[1] = row.rlnOpticsGroup  # Fix optics group
+                values[1] = row['rlnOpticsGroup']
                 values[2] = os.path.join('CTFs', os.path.basename(values[2]))
                 dstCoords = _move_cryolo(micName, 'STAR', '.star')
                 _move_cryolo(micName, 'CBOX', '.cbox')
@@ -155,5 +175,31 @@ class Preprocessing:
             'preprocessing_end': Pretty.now(),
             'preprocessing_elapsed': str(t.getElapsedTime())
         })
+
+        batch.dump_all()
+
         return batch
+
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument('batch_folder',
+                   help="Batch folder to run the preprocessing")
+    args = p.parse_args()
+    os.chdir(args.batch_folder)
+    batch = Batch(path=args.batch_folder)
+    batch.load_all()
+    # Restore path value that might be corrupted after load_all
+    batch['path'] = args.batch_folder
+    pp = Preprocessing(batch['Preprocessing.args'])
+    pp._process_batch(batch, batch['Preprocessing.process_batch.kwargs'])
+
+
+if __name__ == '__main__':
+    # The purpose of this main is to be used from launcher scripts
+    # For example, to launch the processing of a given batch to
+    # as a job in a queueing system, the only argument should
+    # be the batch folder, which should contain the batch.json file
+    # and args.json file
+    main()
 

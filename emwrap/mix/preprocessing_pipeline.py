@@ -41,17 +41,15 @@ class PreprocessingPipeline(ProcessingPipeline):
         ProcessingPipeline.__init__(self, **args)
         self._args = args
 
-        self.gpuList = args['gpu_list'].split()
+        self.gpuList = args['gpu'].split()
         self.outputDirs = {}
-        self.inputStar = args['input_star']
+        self.inputStar = args['in_movies']
         self.batchSize = args.get('batch_size', 32)
         self.inputTimeOut = args.get('input_timeout', 3600)
         self.acq = None  # will be read later
         self.moviesImport = None
         self._totalInput = self._totalOutput = 0
-
-        self._pp_args = args['preprocessing_args']
-        self.preprocessing = Preprocessing(self._pp_args)
+        self._pp_args = args['preprocessing']
 
         # Create a lock to estimate the extraction args only once,
         # for the first batch processed
@@ -136,7 +134,7 @@ class PreprocessingPipeline(ProcessingPipeline):
 
                     return result
             print(f">>> {Color.warn('Using existing boxSize...')}")
-            return self.preprocessing.process_batch(batch, gpu=gpu)
+            return Preprocessing(self._pp_args).process_batch(batch, gpu=gpu)
 
         return _preprocessing
 
@@ -228,34 +226,29 @@ def main():
     p = argparse.ArgumentParser(prog='emw-preprocessing')
     p.add_argument('--json',
                    help="Input all arguments through this JSON file. "
-                        "The other arguments will be ignored. ")
+                        "Other arguments passed will override the options"
+                        "in this file. ")
     p.add_argument('--in_movies', '-i')
-    p.add_argument('--preprocessing_config', '-c',
-                   help="JSON configuration file with preprocessing options. ")
     p.add_argument('--output', '-o')
     p.add_argument('--scratch', '-s',
                    help="Scratch directory where to keep intermediate results. ")
     p.add_argument('--batch_size', '-b', type=int, default=8)
     p.add_argument('--j', help="Just to ignore the threads option from Relion")
-    p.add_argument('--gpu', nargs='*')
+    p.add_argument('--gpu', '-g', nargs='*')
 
     args = p.parse_args()
 
-    if args.json:
-        raise Exception("JSON input not yet implemented.")
-    else:
-        with open(args.preprocessing_config) as f:
-            preprocessing_args = json.load(f)
+    with open(args.json) as f:
+        input_args = json.load(f)
 
-        argsDict = {
-            'input_star': args.in_movies,
-            'output_dir': args.output,
-            'scratch_dir': args.scratch,
-            'gpu_list': ' '.join(g for g in args.gpu),
-            'batch_size': args.batch_size,
-            'preprocessing_args': preprocessing_args
-        }
-        mc = PreprocessingPipeline(argsDict)
+        for key in ['in_movies', 'output', 'scratch', 'batch_size']:
+            if value := getattr(args, key):
+                input_args[key] = value
+
+        if args.gpu:
+            input_args['gpu'] = ' '.join(g for g in args.gpu)
+
+        mc = PreprocessingPipeline(input_args)
         mc.run()
 
 

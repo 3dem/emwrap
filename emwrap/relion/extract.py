@@ -56,7 +56,7 @@ class RelionExtract:
             '--invert_contrast': ''
         })
         args.update(self.args)
-        batch.call(self.path, args, batch.join('extract_log.txt'))
+        batch.call(self.path, args)
 
         batch.info.update({
             'extract_elapsed': str(t.getElapsedTime())

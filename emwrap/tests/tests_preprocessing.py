@@ -86,11 +86,11 @@ class TestPreprocessing(unittest.TestCase):
 
         with Path.tmpDir(prefix=f"{testName}__", chdir=True) as tmp:
             args = {
-                'output_dir': 'output',
-                'gpu_list': ' '.join(gpus),
-                'input_star': 'movies.star',
+                'output': 'output',
+                'gpu': ' '.join(gpus),
+                'in_movies': 'movies.star',
                 'batch_size': n,
-                'preprocessing_args': preprocessing_args,
+                'preprocessing': preprocessing_args,
                 'input_timeout': 30
             }
 

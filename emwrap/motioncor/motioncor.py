@@ -41,7 +41,7 @@ class Motioncor:
 
         batch.mkdir('output')
         batch.mkdir('log')
-        ext = Path.getExt(batch.items[0].rlnMicrographMovieName)
+        ext = Path.getExt(batch['items'][0]['rlnMicrographMovieName'])
         extLower = ext.lower()
 
         if extLower.startswith('.tif'):
@@ -60,11 +60,10 @@ class Motioncor:
         kwargs.update(self.args)
 
         t = Timer()
-        logMc = batch.join('mc_log.txt')
-        batch.call(self.path, kwargs, logMc)
+        batch.call(self.path, kwargs)
 
         batch.info.update({
-            'mc_input': len(batch.items),
+            'mc_input': len(batch['items']),
             'mc_elapsed': str(t.getElapsedTime())
         })
 
@@ -72,10 +71,10 @@ class Motioncor:
         batch['outputs'] = []
         total = 0
 
-        for row in batch.items:
+        for row in batch['items']:
             result = {}
             try:
-                movieName = row.rlnMicrographMovieName
+                movieName = row['rlnMicrographMovieName']
                 baseName = Path.removeBaseExt(movieName)
                 suffix = '_DW' if '-FmDose' in self.args else ''
                 # TODO: Allow an option to save non-DW movies if required
@@ -96,7 +95,8 @@ class Motioncor:
 
                 shiftsStar = Path.replaceExt(micName, '.star')
                 batch['outputs'].append(shiftsStar)
-                self.__write_shift_star(logMc, logsFull, logsPatch, movieName, shiftsStar)
+                self.__write_shift_star(batch.join('batch.log'),
+                                        logsFull, logsPatch, movieName, shiftsStar)
                 result['rlnMicrographMetadata'] = shiftsStar
                 total += 1
 

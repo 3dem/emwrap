@@ -85,7 +85,7 @@ class CryoloPredict:
             '-o': 'cryolo_boxfiles/'
         }
 
-        batch.call(self.path, kwargs, batch.join('cryolo_log.txt'))
+        batch.call(self.path, kwargs)
 
         batch.info.update({
             'cryolo_elapsed': str(t.getElapsedTime())
