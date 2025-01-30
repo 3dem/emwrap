@@ -44,7 +44,6 @@ class RelionExtract:
         # --white_dust -1 --black_dust -1 --invert_contrast   --pipeline_control Extract/job008/
 
         args = Args({
-            self.path: '',
             '--i': 'micrographs.star',
             '--coord_list': 'coordinates.star',
             '--part_star': 'particles.star',
