@@ -202,6 +202,7 @@ class PreprocessingPipeline(ProcessingPipeline):
                     partTable = sfBatch.getTable('particles')
                     if firstTime:
                         sf.writeTimeStamp()
+                        sf.writeTable('optics', sfBatch.getTable('optics'))
                         sf.writeHeader('particles', partTable)
                     for row in partTable:
                         micName = row.rlnMicrographName
