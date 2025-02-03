@@ -33,7 +33,7 @@ from emwrap.relion import RelionStar
 
 class RelionImportMovies(FolderManager, threading.Thread):
     def __init__(self, **kwargs):
-        FolderManager.__init__(self, kwargs.pop('output_dir', None))
+        FolderManager.__init__(self, kwargs.pop('output', None))
         threading.Thread.__init__(self)
         #workingDir = kwargs.pop('working_dir', os.getcwd())
         self.acq = Acquisition(kwargs['acquisition'])
