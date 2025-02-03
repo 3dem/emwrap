@@ -132,7 +132,8 @@ class ProcessingPipeline(Pipeline, FolderManager):
             self.__file('FAILURE')
             traceback.print_exc()
 
-    def addMoviesGenerator(self, inputStar, batchSize, inputTimeOut=3600):
+    def addMoviesGenerator(self, inputStar, batchSize,
+                           inputTimeOut=3600, queueMaxSize=None):
         """ Add a generator that monitor input movies from a
         given STAR file and group in batches. """
         def _movie_filename(row):
@@ -144,7 +145,8 @@ class ProcessingPipeline(Pipeline, FolderManager):
         batchMgr = BatchManager(batchSize, monitor.newItems(), self.tmpDir,
                                 itemFileNameFunc=_movie_filename)
 
-        return self.addGenerator(batchMgr.generate)
+        return self.addGenerator(batchMgr.generate,
+                                 queueMaxSize=queueMaxSize)
 
     def updateBatchInfo(self, batch):
         """ Update general info with this batch and write json file. """
