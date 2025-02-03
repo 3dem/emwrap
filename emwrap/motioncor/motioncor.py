@@ -20,6 +20,7 @@ import subprocess
 from emtools.utils import Color, Timer, Path
 from emtools.jobs import Args
 from emtools.metadata import Table, StarFile, TextFile
+from emtools.image import Image
 
 from emwrap.base import Acquisition
 
@@ -44,19 +45,21 @@ class Motioncor:
         ext = Path.getExt(batch['items'][0]['rlnMicrographMovieName'])
         extLower = ext.lower()
 
+        kwargs = {
+            '-OutMrc': self.outputPrefix, '-InSuffix': ext,
+            '-Serial': 1, '-Gpu': gpu, '-LogDir': 'log/'
+        }
         if extLower.startswith('.tif'):
             inArg = '-InTiff'
         elif extLower.startswith('.mrc'):
             inArg = '-InMrc'
         elif extLower.startswith('.eer'):
             inArg = '-InEer'
+            kwargs['-EerSampling'] = 1
         else:
             raise Exception(f"Unsupported movie format: {ext}")
 
-        kwargs = {
-            inArg: './', '-OutMrc': self.outputPrefix, '-InSuffix': ext,
-            '-Serial': 1, '-Gpu': gpu, '-LogDir': 'log/'
-        }
+        kwargs[inArg] = './'
         kwargs.update(self.args)
 
         t = Timer()
@@ -95,8 +98,7 @@ class Motioncor:
 
                 shiftsStar = Path.replaceExt(micName, '.star')
                 batch['outputs'].append(shiftsStar)
-                self.__write_shift_star(batch.join('batch.log'),
-                                        logsFull, logsPatch, movieName, shiftsStar)
+                self.__write_shift_star(logsFull, logsPatch, movieName, micName, shiftsStar)
                 result['rlnMicrographMetadata'] = shiftsStar
                 total += 1
 
@@ -114,7 +116,7 @@ class Motioncor:
         if not os.path.exists(fileName):
             raise Exception(f"Missing expected output: {fileName}")
 
-    def __write_shift_star(self, logMc, logsFull, logsPatch, movieName, shiftsStar):
+    def __write_shift_star(self, logsFull, logsPatch, movieName, micName, shiftsStar):
         # Parse global motion movements
         self.__expect(logsFull)
         tGeneral = Table(
@@ -124,8 +126,8 @@ class Motioncor:
              'rlnMicrographPreExposure', 'rlnVoltage',
              'rlnMicrographStartFrame', 'rlnMotionModelVersion'
              ])
-        x, y, z, _ = self.__parse_dimensions(logMc)
-        tGeneral.addRowValues(x, y, z, movieName,
+        x, y = Image.get_dimensions(micName)
+        tGeneral.addRowValues(x, y, 1, movieName,
                               self.args.get('-FtBin', 1), self.args['-PixSize'], 1.0, 0.0,
                               self.args['-kV'], 1, 0)
 
@@ -182,8 +184,12 @@ class Motioncor:
     @staticmethod
     def argsFromAcq(acq):
         """ Define arguments from a given acquisition """
-        return Args({
+        args = Args({
             '-PixSize': acq.pixel_size,
             '-kV': acq.voltage,
             '-Cs': acq.amplitude_contrast,
         })
+        if 'gain' in acq:
+            args['-Gain'] = acq['gain']
+
+        return args
