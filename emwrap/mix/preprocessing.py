@@ -72,9 +72,12 @@ class Preprocessing:
                        logfile=None, #batch.join('pp.log'),
                        verbose=True)
             batch.load_all()
+            # Reload any args that was set by the subprocesses
+            self.args = batch['Preprocessing.process_batch.args']
         else:
             self._process_batch(batch, kwargs)
-            return batch
+
+        return batch
 
     def _process_batch(self, batch, kwargs):
         t = Timer()
@@ -176,6 +179,7 @@ class Preprocessing:
             'preprocessing_elapsed': str(t.getElapsedTime())
         })
 
+        batch['Preprocessing.args'] = self.args
         batch.dump_all()
 
         return batch

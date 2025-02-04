@@ -86,6 +86,7 @@ class PreprocessingPipeline(ProcessingPipeline):
             self.moviesImport.start()
             self.inputStar = self.moviesImport.outputStar
             while not os.path.exists(self.inputStar):
+                print(f"Waiting for input star file: ", self.inputStar)
                 time.sleep(30)  # wait until the star file is being generated
         else:
             self.acq = RelionStar.get_acquisition(self.inputStar)
@@ -96,7 +97,8 @@ class PreprocessingPipeline(ProcessingPipeline):
 
         # Define the current pipeline with generator and processors
         g = self.addMoviesGenerator(self.inputStar, self.batchSize,
-                                    inputTimeOut=self.inputTimeOut)
+                                    inputTimeOut=self.inputTimeOut,
+                                    queueMaxSize=4)
         c = self.addProcessor(g.outputQueue, self._count)
         outputQueue = None
         print(f"Creating {len(self.gpuList)} processing threads.")
@@ -139,88 +141,102 @@ class PreprocessingPipeline(ProcessingPipeline):
         return _preprocessing
 
     def _move(self, batch):
-        """ Move output files from the batch to the final destination. """
-        t = Timer()
-        # Move output files
-        for d in ['Micrographs', 'CTFs', 'Coordinates']:
-            Process.system(f"mv {batch.join(d, '*')} {self.join(d)}")
+        try:
+            """ Move output files from the batch to the final destination. """
+            print(">>>> Moving results from batch: ", Color.green(batch.id))
+            t = Timer()
+            # Move output files
+            for d in ['Micrographs', 'CTFs', 'Coordinates']:
+                Process.system(f"mv {batch.join(d, '*')} {self.join(d)}")
 
-        for root, dirs, files in os.walk(batch.join('Particles')):
-            for name in files:
-                if name.endswith('.mrcs'):
-                    shutil.move(os.path.join(root, name), self.outputDirs['Particles'])
+            for root, dirs, files in os.walk(batch.join('Particles')):
+                for name in files:
+                    if name.endswith('.mrcs'):
+                        shutil.move(os.path.join(root, name), self.outputDirs['Particles'])
 
-        batch.info.update({
-            'move_elapsed': str(t.getElapsedTime())
-        })
-        return batch
+            batch.info.update({
+                'move_elapsed': str(t.getElapsedTime())
+            })
+            return batch
+        except Exception as e:
+            print(Color.red('ERROR: ' + str(e)))
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
 
     def _output(self, batch):
         """ Update output STAR files. """
         def _pair(name):
             return self.join(name), batch.join(name)
 
-        t = Timer()
-        with self.outputLock:
-            micsStar, micsStarBatch = _pair('micrographs.star')
-            firstTime = not os.path.exists(micsStar)
-            partStack = {}  # map micrograph to output stack of particles
-            # Update micrographs.star
-            with StarFile(micsStar, 'a') as sf:
-                with StarFile(micsStarBatch) as sfBatch:
-                    micsTable = sfBatch.getTable('micrographs')
-                    if firstTime:
-                        sf.writeTimeStamp()
-                        sf.writeTable('optics', sfBatch.getTable('optics'))
-                        sf.writeHeader('micrographs', micsTable)
-                    for row in micsTable:
-                        micName = row.rlnMicrographName
-                        stackName = os.path.join('Particles', Path.replaceBaseExt(micName, '.mrcs'))
-                        partStack[micName] = self.fixOutputPath(stackName)
-                        sf.writeRow(self.fixOutputRow(row,
-                                                      'rlnMicrographName',
-                                                      'rlnCtfImage',
-                                                      'rlnMicrographCoordinates'))
+        try:
+            print(">>>> Storing outputs from batch: ", Color.green(batch.id))
+            t = Timer()
+            with self.outputLock:
+                micsStar, micsStarBatch = _pair('micrographs.star')
+                firstTime = not os.path.exists(micsStar)
+                partStack = {}  # map micrograph to output stack of particles
+                # Update micrographs.star
+                with StarFile(micsStar, 'a') as sf:
+                    with StarFile(micsStarBatch) as sfBatch:
+                        micsTable = sfBatch.getTable('micrographs')
+                        if firstTime:
+                            sf.writeTimeStamp()
+                            sf.writeTable('optics', sfBatch.getTable('optics'))
+                            sf.writeHeader('micrographs', micsTable)
+                        for row in micsTable:
+                            micName = row.rlnMicrographName
+                            stackName = os.path.join('Particles', Path.replaceBaseExt(micName, '.mrcs'))
+                            partStack[micName] = self.fixOutputPath(stackName)
+                            sf.writeRow(self.fixOutputRow(row,
+                                                          'rlnMicrographName',
+                                                          'rlnCtfImage',
+                                                          'rlnMicrographCoordinates'))
 
-            # Update coordinates.star
-            coordStar, coordStarBatch = _pair('coordinates.star')
-            with StarFile(coordStar, 'a') as sf:
-                with StarFile(coordStarBatch) as sfBatch:
-                    coordsTable = sfBatch.getTable('coordinate_files')
-                    if firstTime:
-                        sf.writeTimeStamp()
-                        sf.writeHeader('coordinate_files', coordsTable)
-                    for row in coordsTable:
-                        sf.writeRow(self.fixOutputRow(row,
-                                                      'rlnMicrographName',
-                                                      'rlnMicrographCoordinates'))
+                # Update coordinates.star
+                coordStar, coordStarBatch = _pair('coordinates.star')
+                with StarFile(coordStar, 'a') as sf:
+                    with StarFile(coordStarBatch) as sfBatch:
+                        coordsTable = sfBatch.getTable('coordinate_files')
+                        if firstTime:
+                            sf.writeTimeStamp()
+                            sf.writeHeader('coordinate_files', coordsTable)
+                        for row in coordsTable:
+                            sf.writeRow(self.fixOutputRow(row,
+                                                          'rlnMicrographName',
+                                                          'rlnMicrographCoordinates'))
 
-            # Update particles.star
-            partStar, partStarBatch = _pair('particles.star')
-            with StarFile(partStar, 'a') as sf:
-                with StarFile(partStarBatch) as sfBatch:
-                    partTable = sfBatch.getTable('particles')
-                    if firstTime:
-                        sf.writeTimeStamp()
-                        sf.writeTable('optics', sfBatch.getTable('optics'))
-                        sf.writeHeader('particles', partTable)
-                    for row in partTable:
-                        micName = row.rlnMicrographName
-                        i = row.rlnImageName.split('@')[0]
-                        sf.writeRow(row._replace(rlnImageName=f"{i}@{partStack[micName]}",
-                                                 rlnMicrographName=self.fixOutputPath(micName)))
+                # Update particles.star
+                partStar, partStarBatch = _pair('particles.star')
+                with StarFile(partStar, 'a') as sf:
+                    with StarFile(partStarBatch) as sfBatch:
+                        partTable = sfBatch.getTable('particles')
+                        if firstTime:
+                            sf.writeTimeStamp()
+                            sf.writeTable('optics', sfBatch.getTable('optics'))
+                            sf.writeHeader('particles', partTable)
+                        for row in partTable:
+                            micName = row.rlnMicrographName
+                            i = row.rlnImageName.split('@')[0]
+                            sf.writeRow(row._replace(rlnImageName=f"{i}@{partStack[micName]}",
+                                                     rlnMicrographName=self.fixOutputPath(micName)))
 
-            batch.info.update({
-                'output_elapsed': str(t.getElapsedTime())
-            })
-            self.updateBatchInfo(batch)
-            self._totalOutput += len(batch['items'])
-            percent = self._totalOutput * 100 / self._totalInput
-            print(f">>> Processed {Color.green(str(self._totalOutput))} out of "
-                  f"{Color.red(str(self._totalInput))} "
-                  f"({Color.bold('%0.2f' % percent)}")
+                batch.info.update({
+                    'output_elapsed': str(t.getElapsedTime())
+                })
+                self.updateBatchInfo(batch)
+                self._totalOutput += len(batch['items'])
+                percent = self._totalOutput * 100 / self._totalInput
+                print(f">>> Processed {Color.green(str(self._totalOutput))} out of "
+                      f"{Color.red(str(self._totalInput))} "
+                      f"({Color.bold('%0.2f' % percent)}")
 
-        return batch
+            return batch
+        except Exception as e:
+            print(Color.red('ERROR: ' + str(e)))
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
 
 
 def main():
@@ -233,7 +249,7 @@ def main():
     p.add_argument('--output', '-o')
     p.add_argument('--scratch', '-s',
                    help="Scratch directory where to keep intermediate results. ")
-    p.add_argument('--batch_size', '-b', type=int, default=8)
+    p.add_argument('--batch_size', '-b', type=int)
     p.add_argument('--j', help="Just to ignore the threads option from Relion")
     p.add_argument('--gpu', '-g', nargs='*')
 
