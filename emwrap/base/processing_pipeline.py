@@ -24,7 +24,7 @@ import traceback
 import threading
 from uuid import uuid4
 
-from emtools.utils import Process, Color, Path, FolderManager
+from emtools.utils import Process, Color, Pretty, FolderManager
 from emtools.jobs import BatchManager, Args, Pipeline
 from emtools.metadata import Table, Column, StarFile, StarMonitor, TextFile
 
@@ -166,4 +166,5 @@ class ProcessingPipeline(Pipeline, FolderManager):
         newValues = {k: self.fixOutputPath(getattr(row, k)) for k in pathKeys}
         return row._replace(**newValues)
 
-
+    def log(self, msg):
+        print(f"{Pretty.now()}: >>> {msg}")

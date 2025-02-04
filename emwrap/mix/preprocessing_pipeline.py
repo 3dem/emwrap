@@ -69,12 +69,12 @@ class PreprocessingPipeline(ProcessingPipeline):
         with open(self.join('args.json'), 'w') as f:
             f.write(argStr)
         if printMsg:
-            print(f">>> {Color.cyan(printMsg)}: \n\t{Color.bold(argStr)}")
+            self.log(f"{Color.cyan(printMsg)}: \n\t{Color.bold(argStr)}")
 
     def prerun(self):
         self.dumpArgs(printMsg="Input args")
-        print(f">>> Batch size: {Color.cyan(str(self.batchSize))}\n"
-              f">>> Using GPUs: {Color.cyan(str(self.gpuList))}")
+        self.log(f"Batch size: {Color.cyan(str(self.batchSize))}")
+        self.log(f"Using GPUs: {Color.cyan(str(self.gpuList))}")
 
         if '*' in self.inputStar:  # input is a pattern
             self.acq = Acquisition(self._pp_args['acquisition'])
@@ -86,7 +86,7 @@ class PreprocessingPipeline(ProcessingPipeline):
             self.moviesImport.start()
             self.inputStar = self.moviesImport.outputStar
             while not os.path.exists(self.inputStar):
-                print(f"Waiting for input star file: ", self.inputStar)
+                self.log(f"Waiting for input star file: {self.inputStar}")
                 time.sleep(30)  # wait until the star file is being generated
         else:
             self.acq = RelionStar.get_acquisition(self.inputStar)
@@ -101,7 +101,7 @@ class PreprocessingPipeline(ProcessingPipeline):
                                     queueMaxSize=4)
         c = self.addProcessor(g.outputQueue, self._count)
         outputQueue = None
-        print(f"Creating {len(self.gpuList)} processing threads.")
+        self.log(f"Creating {len(self.gpuList)} processing threads.")
         for gpu in self.gpuList:
             p = self.addProcessor(c.outputQueue,
                                   self.get_preprocessing(gpu))
@@ -127,7 +127,7 @@ class PreprocessingPipeline(ProcessingPipeline):
         def _preprocessing(batch):
             with self._particle_size_lock:
                 if self.particle_size is None:
-                    print(f">>> {Color.warn('Estimating the boxSize...')}")
+                    batch.log(f"{Color.warn('Estimating the boxSize.')}")
                     pp = Preprocessing(self._pp_args)
                     result = pp.process_batch(batch, gpu=gpu)
                     # This should update particle_size and other args
@@ -135,7 +135,9 @@ class PreprocessingPipeline(ProcessingPipeline):
                     self.dumpArgs('Updated args')
 
                     return result
-            print(f">>> {Color.warn('Using existing boxSize...')}")
+
+            batch.log(f"{Color.warn('Using existing boxSize.')}")
+
             return Preprocessing(self._pp_args).process_batch(batch, gpu=gpu)
 
         return _preprocessing
@@ -143,11 +145,12 @@ class PreprocessingPipeline(ProcessingPipeline):
     def _move(self, batch):
         try:
             """ Move output files from the batch to the final destination. """
-            print(">>>> Moving results from batch: ", Color.green(batch.id))
+            batch.log("Moving results.")
             t = Timer()
             # Move output files
             for d in ['Micrographs', 'CTFs', 'Coordinates']:
-                Process.system(f"mv {batch.join(d, '*')} {self.join(d)}")
+                Process.system(f"mv {batch.join(d, '*')} {self.join(d)}",
+                               print=batch.log, color=Color.bold)
 
             for root, dirs, files in os.walk(batch.join('Particles')):
                 for name in files:
@@ -170,7 +173,7 @@ class PreprocessingPipeline(ProcessingPipeline):
             return self.join(name), batch.join(name)
 
         try:
-            print(">>>> Storing outputs from batch: ", Color.green(batch.id))
+            batch.log("Storing outputs.")
             t = Timer()
             with self.outputLock:
                 micsStar, micsStarBatch = _pair('micrographs.star')
@@ -229,7 +232,7 @@ class PreprocessingPipeline(ProcessingPipeline):
                 percent = self._totalOutput * 100 / self._totalInput
                 print(f">>> Processed {Color.green(str(self._totalOutput))} out of "
                       f"{Color.red(str(self._totalInput))} "
-                      f"({Color.bold('%0.2f' % percent)}")
+                      f"({Color.bold('%0.2f' % percent)} %)")
 
             return batch
         except Exception as e:
@@ -250,6 +253,8 @@ def main():
     p.add_argument('--scratch', '-s',
                    help="Scratch directory where to keep intermediate results. ")
     p.add_argument('--batch_size', '-b', type=int)
+    p.add_argument('--particle_size', '-p', type=int,
+                   help="Size of the particle in A.")
     p.add_argument('--j', help="Just to ignore the threads option from Relion")
     p.add_argument('--gpu', '-g', nargs='*')
 
