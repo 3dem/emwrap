@@ -22,22 +22,16 @@ import os
 import subprocess
 import pathlib
 import sys
-import json
+import time
 import argparse
-from pprint import pprint
+from datetime import timedelta, datetime
 from glob import glob
 
 from emtools.utils import Color, Timer, Path, Process, FolderManager
-from emtools.jobs import BatchManager
-from emtools.metadata import Mdoc
+from emtools.jobs import Batch
+from emtools.metadata import Mdoc, StarFile
 
 from emwrap.base import ProcessingPipeline
-
-
-def _baseSubframe(section):
-    """ Extract the subframe base filename. """
-    subFramePath = section.get('SubFramePath', '')
-    return pathlib.PureWindowsPath(subFramePath).parts[-1]
 
 
 class StarBatchManager(FolderManager):
@@ -50,10 +44,10 @@ class StarBatchManager(FolderManager):
             outputPath: path where the batches folder will be created
             inputStar: input particles star file.
             groupColumn: column used to group particles.
-                Usuaully gridSquare or micrographName
+                Usually gridSquare or micrographName
             minSize: minimum size for each batch
         """
-        FolderManager.__init__(outputPath)
+        FolderManager.__init__(self, outputPath)
         self._inputStar = inputStar
         self._outputPath = outputPath
         self._groupColumn = groupColumn
@@ -66,32 +60,43 @@ class StarBatchManager(FolderManager):
         self._rows = []
         self._batches = {}
 
-    def _subframePath(self, mdocFn, section):
-        return os.path.join(os.path.dirname(mdocFn), _baseSubframe(section))
-        section['SubFramePath'] = self.join(os.path.dirname(mdocFn), base)
-
-    def _tsName(self, mdocFn):
-        name = Path.removeBaseExt(mdocFn)
-        if self._suffix:
-            name = name.replace(self._suffix, '')
-        return name
-
     def generate(self):
         """ Generate batches based on the input items. """
         while not self.timedOut():
-            now = datetime.now()
-            mTime = datetime.fromtimestamp(os.path.getmtime(self.fileName))
-
+            mTime = datetime.fromtimestamp(os.path.getmtime(self._inputStar))
             if self._lastCheck is None or mTime > self._lastCheck:
                 for batch in self._createNewBatches():
                     yield batch
-
             time.sleep(self._wait)
 
-    def _createBatch(self):
-        self.count += 1
+    def _createNewBatches(self):
+        with StarFile(self._inputStar) as sf:
+            tOptics = sf.getTable('optics')
+            tParticles = sf.getTableInfo('particles')
+            rows = []
+            lastValue = None
+            lastIndex = 0
 
-        outStarFile = Path.replaceExt(starFile, f'_{count:03}.star')
+            for row in sf.iterTable('particles'):
+                value = getattr(row, 'rlnMicrographName')
+                if lastValue is not None and lastValue != value and len(rows) > self._minSize:
+                    yield self._createBatch(tOptics, tParticles, rows)
+                rows.append(row)
+                lastValue = value
+
+            if rows:
+                _writeStar(0)  # Write all remaining
+
+    def _createBatch(self, tOptics, tParticles, rows):
+        self._count += 1
+        prefix = f'b{self._count:02}'
+        batch_id = '2d_' + prefix
+        batch = Batch(id=batch_id,
+                      index=self._count,
+                      path=self.join(batch_id))
+        batch.create()
+
+        outStarFile = batch.join(f'{prefix}_particles.star')
         with StarFile(outStarFile, 'w') as sfOut:
             sfOut.writeTimeStamp()
             sfOut.writeTable('optics', tOptics)
@@ -100,27 +105,6 @@ class StarBatchManager(FolderManager):
                 sfOut.writeRow(row)
         self.rows = []
 
-    def _createNewBatches(self):
-        with StarFile(self._inputStar) as sf:
-            tOptics = sf.getTable('optics')
-            tParticles = sf.getTableInfo('particles')
-            self.rows = []
-
-            def _writeStar():
-
-
-            lastValue = None
-            lastIndex = 0
-
-            for row in sf.iterTable('particles'):
-                value = getattr(row, column)
-                if lastValue is not None and lastValue != value and len(rows) > self._minSize:
-                    yield _writeStar()
-                rows.append(row)
-                lastValue = value
-
-            if rows:
-                _writeStar(0)  # Write all remaining
 
 
     def timedOut(self):
@@ -132,62 +116,11 @@ class StarBatchManager(FolderManager):
             return (self._lastCheck - self._lastUpdate) > self._timeout
 
 
-class AreTomoPipeline(ProcessingPipeline):
+class Relion2DPipeline(ProcessingPipeline):
     """ Pipeline specific to AreTomo processing. """
     def __init__(self, args):
         ProcessingPipeline.__init__(self, **args)
-        self.program = args.get('aretomo_path',
-                                os.environ.get('ARETOMO_PATH', None))
-        self.extraArgs = args.get('aretomo_args', '')
         self.gpuList = args['gpu_list'].split()
-        self.outputTsDir = self.join('TS')
-        self.inputMdocs = args['input_mdocs']
-        self.mdoc_suffix = args['mdoc_suffix']
-
-    def aretomo(self, gpu, batch):
-        batch_dir = batch['path']
-
-        def _path(*p):
-            return os.path.join(batch_dir, *p)
-
-        tsName = batch['tsName']
-        os.mkdir(_path('output'))
-        logFn = _path('output', f'{tsName}_aretomo_log.txt')
-        args = [self.program]
-        mdoc = batch['mdoc']
-        ps = mdoc['global']['PixelSpacing']
-
-        localMdoc = f"{batch['tsName']}.mdoc"
-
-        # Let's write a local MDOC file with fixed filenames
-        for _, section in mdoc.zvalues:
-            section['SubFramePath'] = _baseSubframe(section)
-        mdoc.write(_path(localMdoc))
-
-        opts = f"-Cmd 0 -InMdoc {localMdoc} -InSuffix .mdoc -OutDir output "
-        opts += f"-Gpu {gpu} -PixSize {ps} "
-        # Example of extraArgs:
-        # -McPatch 5 5 -McBin 2 -Group 4 8 -AtBin 4 -AtPatch 4 4
-        opts += self.extraArgs
-        args.extend(opts.split())
-
-        batchStr = Color.cyan(f"BATCH_{batch['index']:02} - {batch['tsName']}")
-        t = Timer()
-        print(f">>> {batchStr}: Running:  {Color.green(self.program)} {Color.bold(opts)}")
-
-        with open(logFn, 'w') as logFile:
-            logFile.write(f"\n{self.program} {opts}\n\n")
-            logFile.flush()
-
-            subprocess.call(args, cwd=batch_dir, stderr=logFile, stdout=logFile)
-
-            elapsed = f"Elapsed: {t.getToc()}"
-            logFile.write(f"\n{elapsed}\n\n")
-
-        print(f">>> {batchStr}: Done! {elapsed}. "
-              f"Log file: {Color.bold(logFn)}")
-
-        return batch
 
     def get_aretomo_proc(self, gpu):
         def _aretomo(batch):

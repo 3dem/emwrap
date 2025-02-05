@@ -37,19 +37,6 @@ class RelionClassify2D:
         clean = kwargs.get('clean', False)
 
         # COMMAND:
-        # relion_refine
-        # --i particles.star
-        # --o run
-        # --particle_diameter 209
-        # --ctf  --zero_mask  --K 200
-        # --grad  --grad_write_iter 10
-        # --class_inactivity_threshold 0.1
-        # --center_classes  --norm  --scale
-        # --oversampling 1 --flatten_solvent
-        # --tau2_fudge 2.0 --iter 200
-        # --offset_range 5.0 --offset_step 2.0 --psi_step 12.0
-        # --dont_combine_weights_via_disc  --preread_images  --pool 50 --gpu --maxsig 50 --j 32
-
         # From Relion GUI: EM
         # `which relion_refine_mpi`
         # --o Class2D/job005/run --iter 25 --i Extract/job002/particles.star
