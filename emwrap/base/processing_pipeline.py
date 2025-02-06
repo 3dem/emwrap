@@ -71,7 +71,7 @@ class ProcessingPipeline(Pipeline, FolderManager):
             if os.path.islink(tmp):
                 tmpDir = os.readlink(tmp)
                 os.unlink(tmp)
-            print(f"Cleaning {Color.bold(tmpDir)}")
+            self.log(f"Cleaning {Color.bold(tmpDir)}")
             shutil.rmtree(tmpDir)
 
     def __create_tmp(self):

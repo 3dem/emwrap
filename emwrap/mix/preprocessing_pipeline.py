@@ -93,7 +93,7 @@ class PreprocessingPipeline(ProcessingPipeline):
 
         # Create all required output folders
         for d in ['Micrographs', 'CTFs', 'Coordinates', 'Particles', 'Logs']:
-            self.outputDirs[d] = p = self.mkdir(d)
+            self.outputDirs[d] = self.mkdir(d)
 
         # Define the current pipeline with generator and processors
         g = self.addMoviesGenerator(self.inputStar, self.batchSize,
