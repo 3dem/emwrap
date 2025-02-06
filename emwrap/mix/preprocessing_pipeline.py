@@ -99,7 +99,8 @@ class PreprocessingPipeline(ProcessingPipeline):
         g = self.addMoviesGenerator(self.inputStar, self.batchSize,
                                     inputTimeOut=self.inputTimeOut,
                                     queueMaxSize=4)
-        c = self.addProcessor(g.outputQueue, self._count)
+        c = self.addProcessor(g.outputQueue, self._count,
+                              queueMaxSize=4)
         outputQueue = None
         self.log(f"Creating {len(self.gpuList)} processing threads.")
         for gpu in self.gpuList:
