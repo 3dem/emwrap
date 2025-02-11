@@ -35,6 +35,7 @@ class RelionClassify2D:
         t = Timer()
 
         clean = kwargs.get('clean', False)
+        gpu = kwargs.get('gpu', '')
 
         # COMMAND:
         # From Relion GUI: EM
@@ -74,7 +75,7 @@ class RelionClassify2D:
             '--dont_combine_weights_via_disc': '',
             '--preread_images': '',
             '--pool': 50,
-            '--gpu': '',
+            '--gpu': gpu,
             '--maxsig': 50,
             '--j': 32
         })

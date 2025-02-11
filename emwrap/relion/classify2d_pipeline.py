@@ -137,7 +137,7 @@ class Relion2DPipeline(ProcessingPipeline):
             try:
                 batch.log(f"{Color.warn('Running 2D classification')}. Items: {batch['items']}")
                 rln2d = RelionClassify2D()
-                rln2d.process_batch(batch)
+                rln2d.process_batch(batch, gpu=gpu)
                 rln2d.clean_iter_files(batch)
             except Exception as e:
                 batch['error'] = str(e)
