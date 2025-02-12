@@ -1,26 +1,27 @@
 import argparse
-from glob import glob
-
-from .cryolo import CryoloPredict
+from .project import RelionProject
 
 
 if __name__ == '__main__':
-    p = argparse.ArgumentParser(prog='emh-cryolo')
-    p.add_argument('micrograph')
-    p.add_argument('pixel_size')
-    p.add_argument('voltage')
-    p.add_argument('spherical_aberration')
-    p.add_argument('amplitude_contrast')
+    p = argparse.ArgumentParser()
+    p.add_argument('path', metavar="PROJECT_PATH",
+                   help="Project path")
+    g = p.add_mutually_exclusive_group()
+    g.add_argument('--clean', '-c', action='store_true',
+                   help="Clean project files")
+    g.add_argument('--update', '-u', action='store_true',
+                   help="Update job status and pipeline star file.")
+    g.add_argument('--run', '-r', nargs=2, metavar=('JOB_TYPE', 'COMMAND'))
 
     args = p.parse_args()
 
-    ctffind = CryoloPredict()
+    rlnProject = RelionProject(args.path)
 
-    if '*' in args.micrograph:
-        mics = glob(args.micrograph)
-    else:
-        mics = [args.micrograph]
-
-    for mic in mics:
-        ctffind.process(mic, verbose=True)
+    if args.clean:
+        rlnProject.clean()
+    elif args.update:
+        rlnProject.update()
+    elif args.run:
+        folder, cmd = args.run
+        rlnProject.run(folder, cmd)
 

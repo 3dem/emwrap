@@ -14,11 +14,27 @@
 # *
 # **************************************************************************
 
-from emtools.utils import FolderManager
+import os
+import argparse
+
+from emtools.utils import FolderManager, Process
 from emtools.jobs import BatchManager, Workflow
 from emtools.metadata import Table, StarFile, StarMonitor
 
-from emwrap.base import Acquisition
+from .star import RelionStar
+
+STATUS_LAUNCHED = 'Launched'
+STATUS_RUNNING = 'Running'
+STATUS_SUCCEEDED = 'Succeeded'
+STATUS_FAILED = 'Failed'
+STATUS_ABORTED = 'Aborted'
+
+JOB_STATUS_FILES = {
+    'RELION_JOB_RUNNING': STATUS_RUNNING,
+    'RELION_JOB_EXIT_SUCCESS': STATUS_SUCCEEDED,
+    'RELION_JOB_EXIT_FAILURE': STATUS_FAILED,
+    'RELION_JOB_EXIT_ABORTED': STATUS_ABORTED
+}
 
 
 class RelionProject(FolderManager):
@@ -26,29 +42,76 @@ class RelionProject(FolderManager):
 
     def __init__(self, path):
         FolderManager.__init__(self, path)
-        self._wf =
+        apath = os.path.abspath(path)
 
-    def _loadPipeline(self):
-        """ Load pipeline Graph from the default_pipeline.star file. """
-        protList = []
-        status_map = {
-            'Succeeded': 'finished',
-            'Running': 'running',
-            'Aborted': 'aborted',
-            'Failed': 'failed'
-        }
-        pipelineStar = self.join('default_pipeline.star')
+        if not self.exists():
+            raise Exception(f"Project path '{apath}' does not exist")
 
-        wf = Workflow.fromRelionPipeline(pipelineStar)
+        if self.exists(self.pipeline_star):
+            self.log(f"Loading project from: {apath}")
+            self._wf = RelionStar.pipeline_to_workflow(self.pipeline_star)
+        else:
+            # Create a new project
+            self._wf = Workflow()
+            self.__create()
 
-        for job in wf.jobs():
-            a = job['alias']
-            protList.append({
-                'id': job.id,
-                'label': j.id if (a is None or a == 'None') else a,
-                'status': status_map.get(job['status'], 'unknown'),
-                'type': job['type'],
-                'links': [o.parent.id for o in job.outputs]
-            })
 
-        return protList
+    @property
+    def pipeline_star(self):
+        return self.join('default_pipeline.star')
+
+    def __create(self):
+        """ Create a new project in the given path. """
+        if self.exists(self.pipeline_star):
+            raise Exception(f"Can not create project, pipeline already exists: "
+                            f"{self.pipeline_star}")
+
+        self.log(f"Creating new project at: {os.path.abspath(self.path)}")
+
+        with open(self.join('.gui_projectdir'), 'w'):
+            pass
+
+        RelionStar.write_pipeline(self.pipeline_star)
+
+    def clean(self):
+        """ Remove all project files. """
+        for name in ['.gui_projectdir', '.TMP_runfiles', '.relion_lock',
+                     'default_pipeline.star',
+                     'Import', 'External']:
+            if self.exists(name):
+                Process.system(f"rm -rf '{self.join(name)}'", print=self.log)
+
+        self.__create()
+
+    def getJobTypeFolder(self, jobtype):
+        """ Return the job folder depending on the job type. """
+        return 'External'
+
+    def run(self, jobtype, cmd):
+        jobtypeFolder = self.getJobTypeFolder(jobtype)
+        jobIndex = self._wf.jobNextIndex
+        jobId = f'{jobtypeFolder}/job{jobIndex:03}'
+        self.mkdir(jobId)
+        job = self._wf.registerJob(jobId,
+                                   status='Launched',
+                                   alias='None',
+                                   jobtype=jobtype)
+        fullCmd = f"{cmd} --output {jobId} &"
+        Process.system(fullCmd)
+        # Update the Pipeline with new job
+        RelionStar.workflow_to_pipeline(self._wf, self.pipeline_star)
+
+    def update(self):
+        """ Update status of the running jobs. """
+        active = [STATUS_LAUNCHED, STATUS_RUNNING]
+        update = False
+        for job in self._wf.jobs():
+            if job['status'] in active:  # Check job status
+                for statusFile, status in JOB_STATUS_FILES.items():
+                    if self.exists(job.id, statusFile):
+                        job['status'] = status
+                        update = True
+        if update:
+            RelionStar.workflow_to_pipeline(self._wf, self.pipeline_star)
+
+

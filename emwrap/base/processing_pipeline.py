@@ -103,17 +103,18 @@ class ProcessingPipeline(Pipeline, FolderManager):
         pass
 
     def __file(self, suffix):
-        with open(self.join(f'RELION_JOB_EXIT_{suffix}'), 'w'):
+        with open(self.join(f'RELION_JOB_{suffix}'), 'w'):
             pass
 
     def __abort(self, signum, frame):
-        self.__file('ABORTED')
+        self.__file('EXIT_ABORTED')
         sys.exit(0)
 
     def run(self):
         try:
             signal.signal(signal.SIGINT, self.__abort)
             signal.signal(signal.SIGTERM, self.__abort)
+            self.__file('RUNNING')
             self.__create_tmp()
             self.prerun()
             if os.path.exists(self._batchesInfoFile):
@@ -127,9 +128,9 @@ class ProcessingPipeline(Pipeline, FolderManager):
                 print(f"Temporary directory was not deleted, "
                       f"remove it with the following command: \n"
                       f"{Color.bold('rm -rf %s' % self.tmpDir)}")
-            self.__file('SUCCESS')
+            self.__file('EXIT_SUCCESS')
         except Exception as e:
-            self.__file('FAILURE')
+            self.__file('EXIT_FAILURE')
             traceback.print_exc()
 
     def addMoviesGenerator(self, inputStar, batchSize,
