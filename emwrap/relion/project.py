@@ -15,9 +15,10 @@
 # **************************************************************************
 
 import os
-import argparse
+import shlex
+import subprocess
 
-from emtools.utils import FolderManager, Process
+from emtools.utils import FolderManager, Process, Color
 from emtools.jobs import BatchManager, Workflow
 from emtools.metadata import Table, StarFile, StarMonitor
 
@@ -93,11 +94,15 @@ class RelionProject(FolderManager):
         jobId = f'{jobtypeFolder}/job{jobIndex:03}'
         self.mkdir(jobId)
         job = self._wf.registerJob(jobId,
-                                   status='Launched',
-                                   alias='None',
-                                   jobtype=jobtype)
-        fullCmd = f"{cmd} --output {jobId} &"
-        Process.system(fullCmd)
+                                   status='Launched', alias='None', jobtype=jobtype)
+        args = shlex.split(cmd)
+        args.extend(['--output', jobId])
+        stdout = open(self.join(jobId, 'run.out'), 'a')
+        stderr = open(self.join(jobId, 'run.err'), 'a')
+        cmd = self.log(f"{Color.green(args[0])} {Color.bold(' '.join(args[1:]))}")
+        stdout.write(f"\n\n{cmd}\n")
+        stdout.flush()
+        p = subprocess.Popen(args, stdout=stdout, stderr=stderr, close_fds=True)
         # Update the Pipeline with new job
         RelionStar.workflow_to_pipeline(self._wf, self.pipeline_star)
 
@@ -112,6 +117,7 @@ class RelionProject(FolderManager):
                         job['status'] = status
                         update = True
         if update:
+            self.log(f"Updating {self.pipeline_star}")
             RelionStar.workflow_to_pipeline(self._wf, self.pipeline_star)
 
 

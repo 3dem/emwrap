@@ -14,10 +14,14 @@
 # *
 # **************************************************************************
 
+import re
+
 from emtools.jobs import Workflow
 from emtools.metadata import Table, StarFile, StarMonitor
 
 from emwrap.base import Acquisition
+
+JOB_INDEX = re.compile('job(\d{3})')
 
 
 class RelionStar:
@@ -118,6 +122,15 @@ class RelionStar:
                         sf.writeTable(f"pipeline_{name}", t)
 
     @staticmethod
+    def job_index(jobId):
+        """ Return the integer job index from the name of the form Folder/jobXXX. """
+        m = JOB_INDEX.search(jobId)
+        if m is None:
+            return None
+        else:
+            return int(m.groups()[0])
+
+    @staticmethod
     def pipeline_to_workflow(pipelineStar):
         """ Read the Relion pipeline star file and build the proper Workflow. """
         wf = Workflow()
@@ -135,10 +148,12 @@ class RelionStar:
 
             if tProc := _table('processes'):
                 for row in tProc:
-                    wf.registerJob(row.rlnPipeLineProcessName,
+                    jobId = row.rlnPipeLineProcessName
+                    wf.registerJob(jobId,
                                    alias=row.rlnPipeLineProcessAlias,
                                    status=row.rlnPipeLineProcessStatusLabel,
-                                   jobtype=row.rlnPipeLineProcessTypeLabel)
+                                   jobtype=row.rlnPipeLineProcessTypeLabel,
+                                   jobindex=RelionStar.job_index(jobId))
 
             if tNodes := _table('nodes'):
                 nodes = {row.rlnPipeLineNodeName: row.rlnPipeLineNodeTypeLabel

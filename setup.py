@@ -65,7 +65,8 @@ setup(
     entry_points={  # Optional
        'console_scripts': [
            'emw-motioncor = emwrap.motioncor.__main__:main',
-           'emw-aretomo = emwrap.aretomo.__main__:main'
+           'emw-aretomo = emwrap.aretomo.__main__:main',
+           'emw-relion = emwrap.relion.__main__:main'
        ],
 
     }

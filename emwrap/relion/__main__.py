@@ -1,11 +1,27 @@
+# **************************************************************************
+# *
+# * Authors:     J.M. de la Rosa Trevin (delarosatrevin@gmail.com)
+# *
+# * This program is free software; you can redistribute it and/or modify
+# * it under the terms of the GNU General Public License as published by
+# * the Free Software Foundation; either version 3 of the License, or
+# * (at your option) any later version.
+# *
+# * This program is distributed in the hope that it will be useful,
+# * but WITHOUT ANY WARRANTY; without even the implied warranty of
+# * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# * GNU General Public License for more details.
+# *
+# **************************************************************************
+
 import argparse
 from .project import RelionProject
 
 
-if __name__ == '__main__':
+def main():
     p = argparse.ArgumentParser()
     p.add_argument('path', metavar="PROJECT_PATH",
-                   help="Project path")
+                   help="Project path", default='.', nargs='?')
     g = p.add_mutually_exclusive_group()
     g.add_argument('--clean', '-c', action='store_true',
                    help="Clean project files")
@@ -25,3 +41,6 @@ if __name__ == '__main__':
         folder, cmd = args.run
         rlnProject.run(folder, cmd)
 
+
+if __name__ == '__main__':
+    main()
