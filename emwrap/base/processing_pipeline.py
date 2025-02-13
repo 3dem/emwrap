@@ -22,9 +22,9 @@ import json
 import signal
 import traceback
 import threading
-from uuid import uuid4
+from collections import defaultdict
 
-from emtools.utils import Process, Color, Pretty, FolderManager
+from emtools.utils import Process, Color, Pretty, FolderManager, Timer
 from emtools.jobs import BatchManager, Args, Pipeline
 from emtools.metadata import Table, Column, StarFile, StarMonitor, TextFile
 
@@ -52,8 +52,14 @@ class ProcessingPipeline(Pipeline, FolderManager):
         FolderManager.__init__(self, outputDir)
 
         self.tmpDir = self.join('tmp')
-        self.batchesInfo = {}  # Keep track of batches info
-        self._batchesInfoFile = self.join('batches_info.json')
+        self.info = {
+            'inputs': [],
+            'outputs': [],
+            'summary': {},
+            'batches': {},
+            'runs': []
+        }
+        self.infoFile = self.join('info.json')
         # Lock used when requiring single thread running output generation code
         self.outputLock = threading.Lock()
 
@@ -103,6 +109,12 @@ class ProcessingPipeline(Pipeline, FolderManager):
         pass
 
     def __file(self, suffix):
+        """ Generate status files with Relion convention. """
+        # First remove all previous status files
+        for fn in os.listdir(self.path):
+            if fn.startswith('RELION_JOB_'):
+                os.remove(self.join(fn))
+
         with open(self.join(f'RELION_JOB_{suffix}'), 'w'):
             pass
 
@@ -114,12 +126,19 @@ class ProcessingPipeline(Pipeline, FolderManager):
         try:
             signal.signal(signal.SIGINT, self.__abort)
             signal.signal(signal.SIGTERM, self.__abort)
+            t = Timer()
+            start = Pretty.now()
+            self.readInfo()
+            runInfo = {
+                'start': start,
+                'end': None,
+                'elapsed': None
+            }
+            self.info['runs'].append(runInfo)
+            self.writeInfo()
             self.__file('RUNNING')
             self.__create_tmp()
             self.prerun()
-            if os.path.exists(self._batchesInfoFile):
-                with open(self._batchesInfoFile) as f:
-                    self.batchesInfo = json.load(f)
             Pipeline.run(self)
             self.postrun()
             if int(os.environ.get('EMWRAP_CLEAN', 1)):
@@ -128,7 +147,16 @@ class ProcessingPipeline(Pipeline, FolderManager):
                 print(f"Temporary directory was not deleted, "
                       f"remove it with the following command: \n"
                       f"{Color.bold('rm -rf %s' % self.tmpDir)}")
+
+            # Update info.json file with end time
+            self.readInfo()
+            self.info['runs'][-1] = runInfo
+            runInfo['end'] = Pretty.now()
+            runInfo['elapsed'] = str(t.getElapsedTime())
+            self.writeInfo()
+
             self.__file('EXIT_SUCCESS')
+
         except Exception as e:
             self.__file('EXIT_FAILURE')
             traceback.print_exc()
@@ -151,9 +179,18 @@ class ProcessingPipeline(Pipeline, FolderManager):
 
     def updateBatchInfo(self, batch):
         """ Update general info with this batch and write json file. """
-        self.batchesInfo[batch.id] = batch.info
-        with open(self._batchesInfoFile, 'w') as f:
-            json.dump(self.batchesInfo, f, indent=4)
+        self.info['batches'][batch.id] = batch.info
+        self.writeInfo()
+
+    def readInfo(self):
+        if os.path.exists(self.infoFile):
+            with open(self.infoFile) as f:
+                self.info = json.load(f)
+
+    def writeInfo(self):
+        """ Write file with internal information to info.json. """
+        with open(self.infoFile, 'w') as f:
+            json.dump(self.info, f, indent=4)
 
     def fixOutputPath(self, path):
         """ Add the output prefix to a path that is relative to

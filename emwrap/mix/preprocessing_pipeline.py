@@ -75,6 +75,7 @@ class PreprocessingPipeline(ProcessingPipeline):
         self.dumpArgs(printMsg="Input args")
         self.log(f"Batch size: {Color.cyan(str(self.batchSize))}")
         self.log(f"Using GPUs: {Color.cyan(str(self.gpuList))}")
+        inputs = self.info['inputs']
 
         if '*' in self.inputStar:  # input is a pattern
             self.acq = Acquisition(self._pp_args['acquisition'])
@@ -88,8 +89,20 @@ class PreprocessingPipeline(ProcessingPipeline):
             while not os.path.exists(self.inputStar):
                 self.log(f"Waiting for input star file: {self.inputStar}")
                 time.sleep(30)  # wait until the star file is being generated
+            inputs.append({
+                'key': 'input_movies',
+                'label': 'Movies',
+                'datatype': 'MovieFilesPattern',
+                'value': self.inputStar
+            })
         else:
             self.acq = RelionStar.get_acquisition(self.inputStar)
+            inputs.append({
+                'key': 'input_movies',
+                'label': 'Movies',
+                'datatype': 'MicrographMovieGroupMetadata.star.relion',
+                'files': [self.inputStar]
+            })
 
         # Create all required output folders
         for d in ['Micrographs', 'CTFs', 'Coordinates', 'Particles', 'Logs']:
@@ -228,6 +241,17 @@ class PreprocessingPipeline(ProcessingPipeline):
                 batch.info.update({
                     'output_elapsed': str(t.getElapsedTime())
                 })
+                self.info['outputs'] = [
+                    {'label': 'Micrographs',
+                     'files': [micsStar],
+                     'datatype': 'MicrographGroupMetadata.star'},
+                    {'label': 'Coordinates',
+                     'files': [coordStar],
+                     'datatype': 'MicrographCoordsGroup.star'},
+                    {'label': 'Particles',
+                     'files': [partStar],
+                     'datatype': 'ParticleGroupMetadata.star'},
+                ]
                 self.updateBatchInfo(batch)
                 self._totalOutput += len(batch['items'])
                 percent = self._totalOutput * 100 / self._totalInput
