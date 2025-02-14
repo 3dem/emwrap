@@ -23,12 +23,8 @@ import glob
 import threading
 from datetime import datetime
 
-from emtools.utils import Color, Pretty, Path, FolderManager
-from emtools.jobs import Args
-from emtools.metadata import Table, Column, StarFile, StarMonitor, TextFile
-
-from emwrap.base import Acquisition
-from emwrap.relion import RelionStar
+from emtools.utils import Color, Pretty, FolderManager
+from emtools.metadata import Acquisition, StarFile, RelionStar
 
 
 class RelionImportMovies(FolderManager, threading.Thread):

@@ -150,9 +150,20 @@ class Relion2DPipeline(ProcessingPipeline):
             batch.log(Color.red(f"ERROR: {batch['error']}"))
         else:
             batch.log(f"Moving output files.")
-            Process.system(f"rm {batch.join('*moment.mrcs')}", print=batch.log)
-            Process.system(f"mv {batch.path} {self.join('Classes2D')}", print=batch.log)
-
+            iterFiles = RelionClassify2D().get_iter_files(batch)[0]
+            missing = [fn for fn in iterFiles.values() if not batch.exists(fn)]
+            if missing:
+                batch['error'] = f"Missing files: {missing}"
+                batch.log(Color.red(f"ERROR: {batch['error']}"))
+            else:
+                Process.system(f"rm {batch.join('*moment.mrcs')}", print=batch.log)
+                Process.system(f"mv {batch.path} {self.join('Classes2D')}", print=batch.log)
+                self.info['outputs'].append(
+                    {'label': f'Classes2D_{batch.id}',
+                     'files': [
+                         [iterFiles['data'], 'ParticleGroupMetadata.star.relion.class2d'],
+                         [iterFiles['optimiser'], 'ProcessData.star.relion.optimiser.class2d']
+                     ]})
         return batch
 
     def prerun(self):

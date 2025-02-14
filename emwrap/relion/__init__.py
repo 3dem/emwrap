@@ -14,7 +14,3 @@
 # *
 # **************************************************************************
 
-from .star import RelionStar
-from .extract import RelionExtract
-from .import_movies import RelionImportMovies
-

@@ -16,13 +16,12 @@
 
 import os
 import shlex
+import json
 import subprocess
 
 from emtools.utils import FolderManager, Process, Color
 from emtools.jobs import BatchManager, Workflow
-from emtools.metadata import Table, StarFile, StarMonitor
-
-from .star import RelionStar
+from emtools.metadata import RelionStar
 
 STATUS_LAUNCHED = 'Launched'
 STATUS_RUNNING = 'Running'
@@ -106,6 +105,14 @@ class RelionProject(FolderManager):
         # Update the Pipeline with new job
         RelionStar.workflow_to_pipeline(self._wf, self.pipeline_star)
 
+    def loadJobInfo(self, job):
+        """ Load the info.json file for a given run. """
+        jobInfoFn = self.join(job.id, 'info.json')
+        if os.path.exists(jobInfoFn):
+            with open(jobInfoFn) as f:
+                return json.load(f)
+        return None
+
     def update(self):
         """ Update status of the running jobs. """
         active = [STATUS_LAUNCHED, STATUS_RUNNING]
@@ -116,6 +123,14 @@ class RelionProject(FolderManager):
                     if self.exists(job.id, statusFile):
                         job['status'] = status
                         update = True
+
+                if jobInfo := self.loadJobInfo(job):
+                    for o in jobInfo['outputs']:
+                        for fn, datatype in o['files']:
+                            if not job.hasOutput(fn):
+                                job.registerOutput(fn, datatype=datatype)
+                                update = True
+
         if update:
             self.log(f"Updating {self.pipeline_star}")
             RelionStar.workflow_to_pipeline(self._wf, self.pipeline_star)

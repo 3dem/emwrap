@@ -93,13 +93,19 @@ class RelionClassify2D:
     def get_iter_files(cls, batch):
         """ Return results files grouped by iteration from a given folder. """
         r = re.compile("\w+_it(?P<iter>\d{3})_")
-        iterFiles = defaultdict(lambda: [])
+        iterFiles = defaultdict(lambda: {})
 
         for fn in os.listdir(batch.path):
             m = r.match(fn)
             if m is not None:
                 it = m.groupdict()['iter']
-                iterFiles[it].append(fn)
+                # Store specific files with a key, the others with their filename
+                key = fn
+                for k in ['optimiser', 'classes', 'sampling', 'model', 'data']:
+                    if k in fn:
+                        key = k
+                        break
+                iterFiles[it][key] = fn
 
         return iterFiles
 
@@ -109,7 +115,7 @@ class RelionClassify2D:
         iterFiles = cls.get_iter_files(batch)
         iterations = list(sorted(iterFiles.keys(), reverse=True))
         for it in iterations[1:]:
-            for fn in iterFiles[it]:
+            for fn in iterFiles[it].values():
                 os.remove(batch.join(fn))
 
 
