@@ -28,10 +28,9 @@ import argparse
 from pprint import pprint
 
 from emtools.utils import Color, Timer, Path, Process, FolderManager
-from emtools.metadata import Table, Column, StarFile, StarMonitor, TextFile
+from emtools.metadata import Table, StarFile, Acquisition
 
-from emwrap.base import ProcessingPipeline, Acquisition
-from emwrap.relion import RelionStar, RelionImportMovies
+from emwrap.base import ProcessingPipeline
 from .preprocessing import Preprocessing
 
 

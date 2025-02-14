@@ -17,11 +17,8 @@
 import os
 import glob
 
-from emtools.metadata import Table, StarFile
+from emtools.metadata import Table, Acquisition, StarFile, RelionStar
 from emtools.jobs import BatchManager
-
-from emwrap.base import Acquisition
-from emwrap.relion import RelionStar
 
 
 class RelionTutorial:

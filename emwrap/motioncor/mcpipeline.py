@@ -15,15 +15,13 @@
 # **************************************************************************
 
 import os
-import subprocess
 import shutil
-import sys
 import json
 import argparse
 
-from emtools.metadata import Table, Column, StarFile, StarMonitor, TextFile
-
+from emtools.metadata import Table, Column, StarFile, RelionStar
 from emwrap.base import ProcessingPipeline
+
 from .motioncor import Motioncor
 
 

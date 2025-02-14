@@ -29,13 +29,12 @@ import threading
 
 from emtools.utils import Pretty, Timer, Path
 from emtools.jobs import Batch
-from emtools.metadata import Table, Column, StarFile, StarMonitor, TextFile
+from emtools.metadata import Acquisition, StarFile, RelionStar
 
-from emwrap.base import Acquisition
 from emwrap.motioncor import Motioncor
 from emwrap.ctffind import Ctffind
 from emwrap.cryolo import CryoloPredict
-from emwrap.relion import RelionStar, RelionExtract
+from emwrap.relion.extract import RelionExtract
 
 
 class Preprocessing:

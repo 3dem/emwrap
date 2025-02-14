@@ -28,10 +28,10 @@ import argparse
 from pprint import pprint
 
 from emtools.utils import Color, Timer, Path, Process
-from emtools.metadata import Table, Column, StarFile, StarMonitor, TextFile
+from emtools.metadata import Acquisition, StarFile, RelionStar
 
-from emwrap.base import ProcessingPipeline, Acquisition
-from emwrap.relion import RelionStar, RelionImportMovies
+from emwrap.base import ProcessingPipeline
+from emwrap.relion.import_movies import RelionImportMovies
 from .preprocessing import Preprocessing
 
 
@@ -243,14 +243,14 @@ class PreprocessingPipeline(ProcessingPipeline):
                 })
                 self.info['outputs'] = [
                     {'label': 'Micrographs',
-                     'files': [micsStar],
-                     'datatype': 'MicrographGroupMetadata.star'},
-                    {'label': 'Coordinates',
-                     'files': [coordStar],
-                     'datatype': 'MicrographCoordsGroup.star'},
+                     'files': [
+                         [micsStar, 'MicrographGroupMetadata.star'],
+                         [coordStar, 'MicrographCoordsGroup.star']
+                     ]},
                     {'label': 'Particles',
-                     'files': [partStar],
-                     'datatype': 'ParticleGroupMetadata.star'},
+                     'files': [
+                         [partStar, 'ParticleGroupMetadata.star']
+                     ]},
                 ]
                 self.updateBatchInfo(batch)
                 self._totalOutput += len(batch['items'])

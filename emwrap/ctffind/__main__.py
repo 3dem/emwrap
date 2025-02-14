@@ -2,7 +2,7 @@ import argparse
 from glob import glob
 
 from .ctffind import Ctffind
-from emwrap.base import Acquisition
+from emtools.metadata import Acquisition
 
 """
             **   Welcome to Ctffind   **

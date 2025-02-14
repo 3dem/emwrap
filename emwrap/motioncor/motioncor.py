@@ -15,14 +15,11 @@
 # **************************************************************************
 
 import os
-import subprocess
 
 from emtools.utils import Color, Timer, Path
 from emtools.jobs import Args
-from emtools.metadata import Table, StarFile, TextFile
+from emtools.metadata import Table, StarFile, TextFile, Acquisition
 from emtools.image import Image
-
-from emwrap.base import Acquisition
 
 
 class Motioncor:

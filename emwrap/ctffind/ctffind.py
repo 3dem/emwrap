@@ -27,9 +27,7 @@ import argparse
 from pprint import pprint
 
 from emtools.utils import Color, Timer, Path, Process
-from emtools.metadata import Table, Column, StarFile, StarMonitor, TextFile
-
-from emwrap.base import Acquisition
+from emtools.metadata import Table, Acquisition
 
 
 class Ctffind:
