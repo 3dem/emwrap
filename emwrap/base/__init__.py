@@ -14,5 +14,4 @@
 # *
 # **************************************************************************
 
-from .data import Acquisition
 from .processing_pipeline import ProcessingPipeline

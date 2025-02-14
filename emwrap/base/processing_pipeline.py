@@ -55,9 +55,9 @@ class ProcessingPipeline(Pipeline, FolderManager):
         self.info = {
             'inputs': [],
             'outputs': [],
+            'runs': [],
             'summary': {},
-            'batches': {},
-            'runs': []
+            'batches': {}
         }
         self.infoFile = self.join('info.json')
         # Lock used when requiring single thread running output generation code
