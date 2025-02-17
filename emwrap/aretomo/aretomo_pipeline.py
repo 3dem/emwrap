@@ -14,10 +14,6 @@
 # *
 # **************************************************************************
 
-"""
-
-"""
-
 import os
 import subprocess
 import pathlib
@@ -29,7 +25,7 @@ from glob import glob
 
 from emtools.utils import Color, Timer, Path, Process
 from emtools.jobs import BatchManager
-from emtools.metadata import Mdoc
+from emtools.metadata import Mdoc, Acquisition
 
 from emwrap.base import ProcessingPipeline
 
@@ -42,7 +38,8 @@ def _baseSubframe(section):
 
 class MdocBatchManager(BatchManager):
     """ Batch manager for Tilt-series. """
-    def __init__(self, tsIterator, workingPath, suffix=None):
+
+    def __init__(self, tsIterator, workingPath, suffix=None, movies=None):
         """
         Args:
             tsIterator: input tilt-series iterator
@@ -53,10 +50,13 @@ class MdocBatchManager(BatchManager):
         BatchManager.__init__(self, 0, tsIterator, workingPath,
                               itemFileNameFunc=lambda item: item[1]['SubFramePath'])
         self._suffix = suffix
+        self._movies = movies
 
     def _subframePath(self, mdocFn, section):
-        return os.path.join(os.path.dirname(mdocFn), _baseSubframe(section))
-        section['SubFramePath'] = self.join(os.path.dirname(mdocFn), base)
+        movieFolder = self._movies or os.path.dirname(mdocFn)
+        return os.path.join(movieFolder, _baseSubframe(section))
+
+        section['SubFramePath'] = self.join(movieFolder, base)
 
     def _tsName(self, mdocFn):
         name = Path.removeBaseExt(mdocFn)
@@ -77,78 +77,68 @@ class MdocBatchManager(BatchManager):
 
 class AreTomoPipeline(ProcessingPipeline):
     """ Pipeline specific to AreTomo processing. """
+
     def __init__(self, args):
         ProcessingPipeline.__init__(self, **args)
         self.program = args.get('aretomo_path',
                                 os.environ.get('ARETOMO_PATH', None))
         self.extraArgs = args.get('aretomo_args', '')
-        self.gpuList = args['gpu_list'].split()
-        self.outputTsDir = self.join('TS')
-        self.inputMdocs = args['input_mdocs']
-        self.mdoc_suffix = args['mdoc_suffix']
+        self.gpuList = args['gpu'].split()
+        self.outputTsDir = 'TS'
+        self.inputMovies = args['in_movies']
+        self.inputMdocs = args['mdoc']
+        self.mdoc_suffix = args.get('mdoc_suffix', None)
+        self.acq = Acquisition(args['acquisition'])
 
-    def aretomo(self, gpu, batch):
-        batch_dir = batch['path']
-
-        def _path(*p):
-            return os.path.join(batch_dir, *p)
+    def aretomo(self, batch, **kwargs):
+        gpu = kwargs['gpu']
 
         tsName = batch['tsName']
-        os.mkdir(_path('output'))
-        logFn = _path('output', f'{tsName}_aretomo_log.txt')
-        args = [self.program]
+        batch.mkdir('output')
+        logFn = batch.join('output', f'{tsName}_aretomo_log.txt')
         mdoc = batch['mdoc']
-        ps = mdoc['global']['PixelSpacing']
+        ps = self.acq.pixel_size
 
         localMdoc = f"{batch['tsName']}.mdoc"
 
         # Let's write a local MDOC file with fixed filenames
         for _, section in mdoc.zvalues:
             section['SubFramePath'] = _baseSubframe(section)
-        mdoc.write(_path(localMdoc))
+        mdoc.write(batch.join(localMdoc))
 
         opts = f"-Cmd 0 -InMdoc {localMdoc} -InSuffix .mdoc -OutDir output "
         opts += f"-Gpu {gpu} -PixSize {ps} "
         # Example of extraArgs:
         # -McPatch 5 5 -McBin 2 -Group 4 8 -AtBin 4 -AtPatch 4 4
         opts += self.extraArgs
-        args.extend(opts.split())
+        args = opts.split()
 
-        batchStr = Color.cyan(f"BATCH_{batch['index']:02} - {batch['tsName']}")
-        t = Timer()
-        print(f">>> {batchStr}: Running:  {Color.green(self.program)} {Color.bold(opts)}")
-
-        with open(logFn, 'w') as logFile:
-            logFile.write(f"\n{self.program} {opts}\n\n")
-            logFile.flush()
-
-            subprocess.call(args, cwd=batch_dir, stderr=logFile, stdout=logFile)
-
-            elapsed = f"Elapsed: {t.getToc()}"
-            logFile.write(f"\n{elapsed}\n\n")
-
-        print(f">>> {batchStr}: Done! {elapsed}. "
-              f"Log file: {Color.bold(logFn)}")
+        batch.call(self.program, args)
 
         return batch
 
     def get_aretomo_proc(self, gpu):
         def _aretomo(batch):
             try:
-                batch = self.aretomo(gpu, batch)
+                batch.tic()
+                batch = self.aretomo(batch, gpu=gpu)
+                batch.toc()
             except Exception as e:
-                batch['error'] = str(e)
+                batch.error = e
+
+            self.updateBatchInfo(batch)
             return batch
 
         return _aretomo
 
     def _output(self, batch):
-        if 'error' in batch:
-            print(f"Failed batch {batch['id']}, error: {batch['error']}")
+        if batch.error:
+            batch.log(f"ERROR: {batch.error}")
         else:
             output = os.path.join(batch['path'], 'output')
-            Process.system(f"mv {output} {self.outputTsDir}/{batch['tsName']}")
-
+            batchFolder = self.join(self.outputTsDir, batch['tsName'])
+            Process.system(f"mv {output} {batchFolder}")
+        self.updateBatchInfo(batch)
         return batch
 
     def _iterMdocs(self):
@@ -160,11 +150,12 @@ class AreTomoPipeline(ProcessingPipeline):
 
     def prerun(self):
         batchMgr = MdocBatchManager(self._iterMdocs(), self.tmpDir,
-                                    suffix=self.mdoc_suffix)
-        g = self.addGenerator(batchMgr.generate)
+                                    suffix=self.mdoc_suffix,
+                                    movies=self.inputMovies)
+        g = self.addGenerator(batchMgr.generate, queueMaxSize=4)
         outputQueue = None
-        Process.system(f"mkdir -p {self.outputTsDir}")
-        print(f"Creating {len(self.gpuList)} processing threads.")
+        self.mkdir(self.outputTsDir)
+        self.log(f"Creating {len(self.gpuList)} processing threads.")
         for gpu in self.gpuList:
             p = self.addProcessor(g.outputQueue,
                                   self.get_aretomo_proc(gpu),
@@ -180,16 +171,17 @@ def main():
                    help="Input all arguments through this JSON file. "
                         "The other arguments will be ignored. ")
     p.add_argument('--in_movies', '-i')
+    p.add_argument('--mdoc', '-m',
+                   help="Pattern for Mdoc files.")
     p.add_argument('--output', '-o')
     p.add_argument('--aretomo_path', '-p')
     p.add_argument('--aretomo_args', '-a', default='')
     p.add_argument('--scratch', '-s', default='',
                    help="Scratch directory where to store intermediate "
                         "results of the processing. ")
-    p.add_argument('--batch_size', '-b', type=int, default=8)
     p.add_argument('--j', help="Just to ignore the threads option from Relion")
     p.add_argument('--gpu', default='0')
-    p.add_argument('--mdoc_suffix', '-m',
+    p.add_argument('--mdoc_suffix',
                    help="Suffix to be removed from the mdoc file names to "
                         "assign each tilt series' name. ")
 
@@ -199,18 +191,15 @@ def main():
         p.print_help()
         sys.exit(0)
 
-    if args.json:
-        raise Exception("JSON input not yet implemented.")
-    else:
-        argsDict = {
-            'input_mdocs': args.in_movies,
-            'output_dir': args.output,
-            'aretomo_args': args.aretomo_args,
-            'gpu_list': args.gpu,
-            'batch_size': args.batch_size,
-            'mdoc_suffix': args.mdoc_suffix
-        }
-        aretomo = AreTomoPipeline(argsDict)
+    with open(args.json) as f:
+        input_args = json.load(f)
+
+        for key in ['in_movies', 'output', 'scratch', 'mdoc',
+                    'aretomo_path', 'aretomo_args', 'mdoc_suffix', 'gpu']:
+            if value := getattr(args, key):
+                input_args[key] = value
+
+        aretomo = AreTomoPipeline(input_args)
         aretomo.run()
 
 
