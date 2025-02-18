@@ -37,6 +37,7 @@ from .preprocessing import Preprocessing
 
 class PreprocessingPipeline(ProcessingPipeline):
     """ Pipeline to run Preprocessing in batches. """
+
     def __init__(self, args):
         ProcessingPipeline.__init__(self, **args)
         self._args = args
@@ -139,6 +140,8 @@ class PreprocessingPipeline(ProcessingPipeline):
 
     def get_preprocessing(self, gpu):
         def _preprocessing(batch):
+            # Convert items to dict
+            batch['items'] = [row._asdict() for row in batch['items']]
             with self._particle_size_lock:
                 if self.particle_size is None:
                     batch.log(f"{Color.warn('Estimating the boxSize.')}")
@@ -163,13 +166,16 @@ class PreprocessingPipeline(ProcessingPipeline):
             t = Timer()
             # Move output files
             for d in ['Micrographs', 'CTFs', 'Coordinates']:
-                Process.system(f"mv {batch.join(d, '*')} {self.join(d)}",
-                               print=batch.log, color=Color.bold)
+                if batch.exists(d):
+                    Process.system(f"mv {batch.join(d, '*')} {self.join(d)}",
+                                   print=batch.log, color=Color.bold)
 
-            for root, dirs, files in os.walk(batch.join('Particles')):
-                for name in files:
-                    if name.endswith('.mrcs'):
-                        shutil.move(os.path.join(root, name), self.outputDirs['Particles'])
+            if batch.exists('Particles'):
+                for root, dirs, files in os.walk(batch.join('Particles')):
+                    for name in files:
+                        if name.endswith('.mrcs'):
+                            shutil.move(os.path.join(root, name),
+                                        self.outputDirs['Particles'])
 
             batch.info.update({
                 'move_elapsed': str(t.getElapsedTime())
@@ -183,6 +189,7 @@ class PreprocessingPipeline(ProcessingPipeline):
 
     def _output(self, batch):
         """ Update output STAR files. """
+
         def _pair(name):
             return self.join(name), batch.join(name)
 

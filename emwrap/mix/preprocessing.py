@@ -55,11 +55,15 @@ class Preprocessing:
     def particle_size(self, value):
         self.args['picking']['particle_size'] = value
 
+    @property
+    def picking(self):
+        return 'picking' in self.args
+
     def process_batch(self, batch, **kwargs):
         batch['Preprocessing.args'] = self.args
         batch['Preprocessing.process_batch.kwargs'] = kwargs
-        # Let's replace the items to make the rows more json-ready
-        batch['items'] = [row._asdict() for row in batch['items']]
+        # batch['items'] are expected to be a Python dict, where
+        # the keys are the relion labels from the row
         batch.dump_all()  # Write batch json to be used in sub-process
 
         # Launcher can be used in the case that we want to launch
@@ -74,7 +78,7 @@ class Preprocessing:
             # Reload any args that was set by the subprocesses
             self.args = batch['Preprocessing.process_batch.args']
         else:
-            self._process_batch(batch, kwargs)
+            batch = self._process_batch(batch, kwargs)
 
         return batch
 
@@ -88,9 +92,6 @@ class Preprocessing:
         # Motion correction
         mc = Motioncor(self.acq, **self.args['motioncor'])
         mc.process_batch(batch, gpu=gpu)
-
-        # Picking in a separate thread
-        batch.mkdir('Coordinates')
 
         old_batch = batch
         batch = Batch(old_batch)
@@ -119,19 +120,21 @@ class Preprocessing:
         acq = Acquisition(self.acq)
         origPs = self.acq.pixel_size
         acq.pixel_size = origPs * mc.args['-FtBin']
+        extra_cols = []
+        if self.picking:
+            batch.mkdir('Coordinates')
+            cryolo = CryoloPredict(**self.args['picking'])
+            cryolo.process_batch(batch, gpu=gpu, cpu=cpu)
+            if self.particle_size is None:
+                size = cryolo.get_size(batch, 75)
 
-        cryolo = CryoloPredict(**self.args['picking'])
-        cryolo.process_batch(batch, gpu=gpu, cpu=cpu)
-        if self.particle_size is None:
-            size = cryolo.get_size(batch, 75)
+                self.particle_size = round(size * acq.pixel_size)
+                print(f">>> Size for percentile 25: {size}, particle_size (A): {self.particle_size}")
 
-            self.particle_size = round(size * acq.pixel_size)
-            print(f">>> Size for percentile 25: {size}, particle_size (A): {self.particle_size}")
-
+            tCoords = RelionStar.coordinates_table()
+            extra_cols = ['rlnMicrographCoordinates', 'rlnCoordinatesNumber']
         tOptics = RelionStar.optics_table(acq, originalPixelSize=origPs)
-        tMics = RelionStar.micrograph_table(extra_cols=['rlnMicrographCoordinates',
-                                                        'rlnCoordinatesNumber'])
-        tCoords = RelionStar.coordinates_table()
+        tMics = RelionStar.micrograph_table(extra_cols=extra_cols)
 
         def _move_cryolo(micName, folder, ext):
             """ Move result box files from cryolo. """
@@ -140,20 +143,35 @@ class Preprocessing:
             shutil.move(srcCoords, batch.join(dstCoords))
             return dstCoords
 
-        for row, r in zip(batch['items'], batch['results']):
+        for i, row in enumerate(batch['items']):
+            r = batch['results'][i]
             if 'error' not in r:
                 values = r['values']
                 micName = os.path.basename(values[0])
-                values[0] = os.path.join('Micrographs', micName)
-                values[1] = row['rlnOpticsGroup']
-                values[2] = os.path.join('CTFs', os.path.basename(values[2]))
-                dstCoords = _move_cryolo(micName, 'STAR', '.star')
-                _move_cryolo(micName, 'CBOX', '.cbox')
-                values.append(dstCoords)
-                with StarFile(batch.join(dstCoords)) as sf:
-                    values.append(sf.getTableSize(''))
-                tMics.addRowValues(*values)
-                tCoords.addRowValues(values[0], dstCoords)
+                kvalues = {
+                    'rlnMicrographName': os.path.join('Micrographs', micName),
+                    'rlnOpticsGroup': row['rlnOpticsGroup'],
+                    'rlnCtfImage': os.path.join('CTFs', os.path.basename(values[2])),
+                    'rlnDefocusU': values[3],
+                    'rlnDefocusV': values[4],
+                    'rlnCtfAstigmatism': values[5],
+                    'rlnDefocusAngle': values[6],
+                    'rlnCtfFigureOfMerit': values[7],
+                    'rlnCtfMaxResolution': values[8]
+                }
+                if self.picking:
+                    dstCoords = _move_cryolo(micName, 'STAR', '.star')
+                    _move_cryolo(micName, 'CBOX', '.cbox')
+                    with StarFile(batch.join(dstCoords)) as sf:
+                        kvalues.update({
+                            'rlnMicrographCoordinates': dstCoords,
+                            'rlnCoordinatesNumber': sf.getTableSize('')
+                        })
+                tMics.addRowValues(**kvalues)
+                if self.picking:
+                    tCoords.addRowValues(values[0], dstCoords)
+            # Update results for each item
+            batch['results'][i] = kvalues
 
         # Write output STAR files, as outputs needed by extraction
         with StarFile(batch.join('micrographs.star'), 'w') as sf:
@@ -161,16 +179,17 @@ class Preprocessing:
             sf.writeTable('optics', tOptics)
             sf.writeTable('micrographs', tMics)
 
-        with StarFile(batch.join('coordinates.star'), 'w') as sf:
-            sf.writeTimeStamp()
-            sf.writeTable('coordinate_files', tCoords)
+        if self.picking:
+            with StarFile(batch.join('coordinates.star'), 'w') as sf:
+                sf.writeTimeStamp()
+                sf.writeTable('coordinate_files', tCoords)
 
-        extract = RelionExtract(acq, **self.args['extract'])
-        if '--extract_size' not in extract.args:
-            extract.update_args(self.particle_size)
-            self.args['extract']['extra_args'].update(extract.args)
+            extract = RelionExtract(acq, **self.args['extract'])
+            if '--extract_size' not in extract.args:
+                extract.update_args(self.particle_size)
+                self.args['extract']['extra_args'].update(extract.args)
 
-        extract.process_batch(batch)
+            extract.process_batch(batch)
 
         batch.info.update({
             'preprocessing_start': start,
