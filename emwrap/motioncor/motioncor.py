@@ -29,6 +29,8 @@ class Motioncor:
             self.path = path, self.version = int(kwargs['version'])
         else:
             self.path, self.version = Motioncor.__get_environ()
+        self.ctf = kwargs.get('ctf', False)
+        self.local_alignment = kwargs.get('-Patch', '1 1') != '1 1'
         self.acq = Acquisition(acq)
         self.args = self.argsFromAcq(acq)
         self.args.update(kwargs.get('extra_args', {}))
@@ -86,7 +88,7 @@ class Motioncor:
                 batch['outputs'].append(micName)
                 result['rlnMicrographName'] = micName
 
-                if '-Patch' in self.args:
+                if self.local_alignment:
                     logsFull = batch.join('log', f"{baseName}-Patch-Full.log")
                     logsPatch = batch.join('log', f"{baseName}-Patch-Patch.log")
                 else:
@@ -125,8 +127,9 @@ class Motioncor:
              ])
         x, y = Image.get_dimensions(micName)
         tGeneral.addRowValues(x, y, 1, movieName,
-                              self.args.get('-FtBin', 1), self.args['-PixSize'], 1.0, 0.0,
-                              self.args['-kV'], 1, 0)
+                              self.args.get('-FtBin', 1),
+                              self.acq.pixel_size, 1.0, 0.0,
+                              self.acq.voltage, 1, 0)
 
         t = Table(['rlnMicrographFrameNumber',
                    'rlnMicrographShiftX',
@@ -178,14 +181,15 @@ class Motioncor:
                     return line.split(':')[-1].split()
         return None
 
-    @staticmethod
-    def argsFromAcq(acq):
+    def argsFromAcq(self, acq):
         """ Define arguments from a given acquisition """
-        args = Args({
-            '-PixSize': acq.pixel_size,
-            '-kV': acq.voltage,
-            '-Cs': acq.amplitude_contrast,
-        })
+        args = Args()
+        if self.ctf:
+            args.update({
+                '-PixSize': acq.pixel_size,
+                '-kV': acq.voltage,
+                '-Cs': acq.amplitude_contrast
+            })
         if 'gain' in acq:
             args['-Gain'] = acq['gain']
 
