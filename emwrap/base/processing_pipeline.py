@@ -22,6 +22,7 @@ import json
 import signal
 import traceback
 import threading
+import argparse
 from collections import defaultdict
 
 from emtools.utils import Process, Color, Pretty, FolderManager, Timer
@@ -206,3 +207,25 @@ class ProcessingPipeline(Pipeline, FolderManager):
 
     def log(self, msg):
         print(f"{Pretty.now()}: >>> {msg}")
+
+    @staticmethod
+    def getInputArgs(progName, inputName):
+        p = argparse.ArgumentParser(prog=progName)
+        p.add_argument('--json',
+                       help="Input all arguments through this JSON file.")
+        p.add_argument(f'--{inputName}', '-i')
+        p.add_argument('--output', '-o')
+        p.add_argument('--j', help="Just to ignore the threads option from Relion")
+
+        args = p.parse_args()
+
+        with open(args.json) as f:
+            input_args = json.load(f)
+
+            if inputValue := getattr(args, inputName):
+                input_args[inputName] = inputValue
+
+            if outputValue := getattr(args, 'output'):
+                input_args['output'] = outputValue
+
+            return input_args
