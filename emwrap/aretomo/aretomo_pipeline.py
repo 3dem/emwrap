@@ -24,55 +24,10 @@ from pprint import pprint
 from glob import glob
 
 from emtools.utils import Color, Timer, Path, Process
-from emtools.jobs import BatchManager
+from emtools.jobs import MdocBatchManager
 from emtools.metadata import Mdoc, Acquisition
 
 from emwrap.base import ProcessingPipeline
-
-
-def _baseSubframe(section):
-    """ Extract the subframe base filename. """
-    subFramePath = section.get('SubFramePath', '')
-    return pathlib.PureWindowsPath(subFramePath).parts[-1]
-
-
-class MdocBatchManager(BatchManager):
-    """ Batch manager for Tilt-series. """
-
-    def __init__(self, tsIterator, workingPath, suffix=None, movies=None):
-        """
-        Args:
-            tsIterator: input tilt-series iterator
-            workingPath: path where the batches folder will be created
-            suffix: suffix to be removed from mdoc filename to generate
-                the tilt-series name
-        """
-        BatchManager.__init__(self, 0, tsIterator, workingPath,
-                              itemFileNameFunc=lambda item: item[1]['SubFramePath'])
-        self._suffix = suffix
-        self._movies = movies
-
-    def _subframePath(self, mdocFn, section):
-        movieFolder = self._movies or os.path.dirname(mdocFn)
-        return os.path.join(movieFolder, _baseSubframe(section))
-
-        section['SubFramePath'] = self.join(movieFolder, base)
-
-    def _tsName(self, mdocFn):
-        name = Path.removeBaseExt(mdocFn)
-        if self._suffix:
-            name = name.replace(self._suffix, '')
-        return name
-
-    def generate(self):
-        """ Generate batches based on the input items. """
-        for mdoc in self._items:
-            mdocFn = mdoc['MdocFile']['Path']
-            self._itemFileNameFunc = lambda item: self._subframePath(mdocFn, item[1])
-            batch = self._createBatch(mdoc.zvalues)
-            batch['mdoc'] = mdoc
-            batch['tsName'] = self._tsName(mdocFn)
-            yield batch
 
 
 class AreTomoPipeline(ProcessingPipeline):
@@ -103,7 +58,7 @@ class AreTomoPipeline(ProcessingPipeline):
 
         # Let's write a local MDOC file with fixed filenames
         for _, section in mdoc.zvalues:
-            section['SubFramePath'] = _baseSubframe(section)
+            section['SubFramePath'] = Mdoc.getSubFrameBase(section)
         mdoc.write(batch.join(localMdoc))
 
         opts = f"-Cmd 0 -InMdoc {localMdoc} -InSuffix .mdoc -OutDir output "
@@ -166,41 +121,9 @@ class AreTomoPipeline(ProcessingPipeline):
 
 
 def main():
-    p = argparse.ArgumentParser(prog='emw-aretomo')
-    p.add_argument('--json',
-                   help="Input all arguments through this JSON file. "
-                        "The other arguments will be ignored. ")
-    p.add_argument('--in_movies', '-i')
-    p.add_argument('--mdoc', '-m',
-                   help="Pattern for Mdoc files.")
-    p.add_argument('--output', '-o')
-    p.add_argument('--aretomo_path', '-p')
-    p.add_argument('--aretomo_args', '-a', default='')
-    p.add_argument('--scratch', '-s', default='',
-                   help="Scratch directory where to store intermediate "
-                        "results of the processing. ")
-    p.add_argument('--j', help="Just to ignore the threads option from Relion")
-    p.add_argument('--gpu', default='0')
-    p.add_argument('--mdoc_suffix',
-                   help="Suffix to be removed from the mdoc file names to "
-                        "assign each tilt series' name. ")
-
-    args = p.parse_args()
-
-    if len(sys.argv) == 1:
-        p.print_help()
-        sys.exit(0)
-
-    with open(args.json) as f:
-        input_args = json.load(f)
-
-        for key in ['in_movies', 'output', 'scratch', 'mdoc',
-                    'aretomo_path', 'aretomo_args', 'mdoc_suffix', 'gpu']:
-            if value := getattr(args, key):
-                input_args[key] = value
-
-        aretomo = AreTomoPipeline(input_args)
-        aretomo.run()
+    input_args = ProcessingPipeline.getInputArgs('emw-aretomo',
+                                                 'in_movies')
+    AreTomoPipeline(input_args).run()
 
 
 if __name__ == '__main__':
