@@ -148,8 +148,9 @@ class Preprocessing:
             if 'error' not in r:
                 values = r['values']
                 micName = os.path.basename(values[0])
+                micPath = os.path.join('Micrographs', micName)
                 kvalues = {
-                    'rlnMicrographName': os.path.join('Micrographs', micName),
+                    'rlnMicrographName': micPath,
                     'rlnOpticsGroup': row['rlnOpticsGroup'],
                     'rlnCtfImage': os.path.join('CTFs', os.path.basename(values[2])),
                     'rlnDefocusU': values[3],
@@ -169,7 +170,10 @@ class Preprocessing:
                         })
                 tMics.addRowValues(**kvalues)
                 if self.picking:
-                    tCoords.addRowValues(values[0], dstCoords)
+                    tCoords.addRowValues(micPath, dstCoords)
+
+            else:
+                batch.log(f"ERROR: For micrograph {micName}, {r['error']}")
             # Update results for each item
             batch['results'][i] = kvalues
 

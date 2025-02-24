@@ -42,11 +42,13 @@ class RelionExtract:
         # --part_star Extract/job008/particles.star --part_dir Extract/job008/
         # --extract --extract_size 512 --float16  --scale 128 --norm --bg_radius 27
         # --white_dust -1 --black_dust -1 --invert_contrast   --pipeline_control Extract/job008/
-
+        batch.mkdir('Particles')
+        
         args = Args({
             '--i': 'micrographs.star',
             '--coord_list': 'coordinates.star',
             '--part_star': 'particles.star',
+            '--part_dir': 'Particles/',
             '--extract': '',
             '--float16': '',
             '--norm': '',

@@ -30,10 +30,10 @@ class Motioncor:
         else:
             self.path, self.version = Motioncor.__get_environ()
         self.ctf = kwargs.get('ctf', False)
-        self.local_alignment = kwargs.get('-Patch', '1 1') != '1 1'
         self.acq = Acquisition(acq)
         self.args = self.argsFromAcq(acq)
         self.args.update(kwargs.get('extra_args', {}))
+        self.local_alignment = self.args.get('-Patch', '1 1') != '1 1'
         self.outputPrefix = "output/aligned_"
 
     def process_batch(self, batch, **kwargs):
@@ -183,13 +183,12 @@ class Motioncor:
 
     def argsFromAcq(self, acq):
         """ Define arguments from a given acquisition """
-        args = Args()
-        if self.ctf:
-            args.update({
-                '-PixSize': acq.pixel_size,
-                '-kV': acq.voltage,
-                '-Cs': acq.amplitude_contrast
-            })
+        args = Args({
+            '-PixSize': acq.pixel_size,
+            '-kV': acq.voltage,
+            '-Cs': acq.cs,
+            '-AmpCont': acq.amplitude_contrast,
+        })
         if 'gain' in acq:
             args['-Gain'] = acq['gain']
 

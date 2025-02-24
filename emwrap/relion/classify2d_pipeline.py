@@ -151,6 +151,7 @@ class Relion2DPipeline(ProcessingPipeline):
         else:
             batch.log(f"Moving output files.")
             iterFiles = RelionClassify2D().get_iter_files(batch)[0]
+            print(f">>>>> Iter files: ", iterFiles)
             missing = [fn for fn in iterFiles.values() if not batch.exists(fn)]
             if missing:
                 batch['error'] = f"Missing files: {missing}"
@@ -161,8 +162,8 @@ class Relion2DPipeline(ProcessingPipeline):
                 self.info['outputs'].append(
                     {'label': f'Classes2D_{batch.id}',
                      'files': [
-                         [iterFiles['data'], 'ParticleGroupMetadata.star.relion.class2d'],
-                         [iterFiles['optimiser'], 'ProcessData.star.relion.optimiser.class2d']
+                         [iterFiles.get('data', 'data:None'), 'ParticleGroupMetadata.star.relion.class2d'],
+                         [iterFiles.get('optimiser', 'optimiser:None'), 'ProcessData.star.relion.optimiser.class2d']
                      ]})
         return batch
 
