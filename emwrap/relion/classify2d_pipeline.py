@@ -162,9 +162,11 @@ class Relion2DPipeline(ProcessingPipeline):
                 self.info['outputs'].append(
                     {'label': f'Classes2D_{batch.id}',
                      'files': [
-                         [iterFiles.get('data', 'data:None'), 'ParticleGroupMetadata.star.relion.class2d'],
+                         [iterFiles.get('data', batch.join('data:None')), 'ParticleGroupMetadata.star.relion.class2d'],
                          [iterFiles.get('optimiser', 'optimiser:None'), 'ProcessData.star.relion.optimiser.class2d']
                      ]})
+                with self.outputLock:
+                    self.updateBatchInfo(batch)
         return batch
 
     def prerun(self):
