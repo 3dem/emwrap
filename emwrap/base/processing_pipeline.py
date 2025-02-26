@@ -205,8 +205,8 @@ class ProcessingPipeline(Pipeline, FolderManager):
         newValues = {k: self.fixOutputPath(getattr(row, k)) for k in pathKeys}
         return row._replace(**newValues)
 
-    def log(self, msg):
-        print(f"{Pretty.now()}: >>> {msg}")
+    def log(self, msg, flush=False):
+        print(f"{Pretty.now()}: >>> {msg}", flush=flush)
 
     @staticmethod
     def getInputArgs(progName, inputName):

@@ -23,8 +23,10 @@ import glob
 import threading
 from datetime import datetime
 
-from emtools.utils import Color, Pretty, FolderManager
+from emtools.utils import Color, Pretty, FolderManager, Path
 from emtools.metadata import Acquisition, StarFile, RelionStar
+
+from emwrap.base import ProcessingPipeline
 
 
 class RelionImportMovies(FolderManager, threading.Thread):
@@ -35,7 +37,7 @@ class RelionImportMovies(FolderManager, threading.Thread):
         self.acq = Acquisition(kwargs['acquisition'])
         self.pattern = kwargs['movies_pattern']
         self.wait = {
-            'new_files': 120,  # 1 hour
+            'new_files': 120,  # 2 hour
             'file_change': 60,  # 1 min
             'sleep': 30,
         }
@@ -60,10 +62,17 @@ class RelionImportMovies(FolderManager, threading.Thread):
             # TODO update if we want to consider modification time
             return fn not in allMovies
 
+        def _grid_square(fn):
+            for p in Path.splitall(fn):
+                if 'GridSquare' in p:
+                    return p
+            return 'None'
+
         # Keep monitoring for new files until the time expires
         while (now - lastUpdate).seconds < self.wait['new_files']:
             now = datetime.now()
-            newFiles = [fn for fn in glob.glob(self.pattern) if _new_file(fn)]
+            newFiles = [(fn, os.path.getmtime(fn))
+                        for fn in glob.glob(self.pattern) if _new_file(fn)]
             if newFiles:
                 print(f">>> {Pretty.now()}: found {len(newFiles)} new files")
 
@@ -71,11 +80,12 @@ class RelionImportMovies(FolderManager, threading.Thread):
                     if moviesTable is None:
                         sf.writeTimeStamp()
                         sf.writeTable('optics', RelionStar.optics_table(self.acq))
-                        moviesTable = RelionStar.movies_table()
+                        moviesTable = RelionStar.movies_table(extra_cols=['TimeStamp', 'GridSquare'])
                         sf.writeHeader('movies', moviesTable)
 
-                    for fn in newFiles:
-                        sf.writeRowValues([fn, 1])
+                    # Sort new files base on modification time
+                    for fn, mt in sorted(newFiles, key=lambda x: x[1]):
+                        sf.writeRowValues([fn, 1, mt, _grid_square(fn)])
 
                 allMovies.update(newFiles)
 

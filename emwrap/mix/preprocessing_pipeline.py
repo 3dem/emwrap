@@ -47,10 +47,11 @@ class PreprocessingPipeline(ProcessingPipeline):
         self.inputStar = args['in_movies']
         self.batchSize = args.get('batch_size', 32)
         self.inputTimeOut = args.get('input_timeout', 3600)
-        self.acq = None  # will be read later
+        self.acq = args['acquisition']
         self.moviesImport = None
         self._totalInput = self._totalOutput = 0
         self._pp_args = args['preprocessing']
+        self._pp_args['acquisition'] = Acquisition(self.acq)
 
         # Create a lock to estimate the extraction args only once,
         # for the first batch processed
@@ -75,11 +76,10 @@ class PreprocessingPipeline(ProcessingPipeline):
     def prerun(self):
         self.dumpArgs(printMsg="Input args")
         self.log(f"Batch size: {Color.cyan(str(self.batchSize))}")
-        self.log(f"Using GPUs: {Color.cyan(str(self.gpuList))}")
+        self.log(f"Using GPUs: {Color.cyan(str(self.gpuList))}", flush=True)
         inputs = self.info['inputs']
 
         if '*' in self.inputStar:  # input is a pattern
-            self.acq = Acquisition(self._pp_args['acquisition'])
             # Update some of the args for the import
             args = dict(self._args)
             args['movies_pattern'] = self.inputStar
@@ -88,8 +88,8 @@ class PreprocessingPipeline(ProcessingPipeline):
             self.moviesImport.start()
             self.inputStar = self.moviesImport.outputStar
             while not os.path.exists(self.inputStar):
-                self.log(f"Waiting for input star file: {self.inputStar}")
-                time.sleep(30)  # wait until the star file is being generated
+                self.log(f"Waiting for input star file: {self.inputStar}", flush=True)
+                time.sleep(60)  # wait until the star file is being generated
             inputs.append({
                 'key': 'input_movies',
                 'label': 'Movies',
@@ -97,7 +97,6 @@ class PreprocessingPipeline(ProcessingPipeline):
                 'value': self.inputStar
             })
         else:
-            self.acq = RelionStar.get_acquisition(self.inputStar)
             inputs.append({
                 'key': 'input_movies',
                 'label': 'Movies',
@@ -116,7 +115,7 @@ class PreprocessingPipeline(ProcessingPipeline):
         c = self.addProcessor(g.outputQueue, self._count,
                               queueMaxSize=4)
         outputQueue = None
-        self.log(f"Creating {len(self.gpuList)} processing threads.")
+        self.log(f"Creating {len(self.gpuList)} processing threads.", flush=True)
         for gpu in self.gpuList:
             p = self.addProcessor(c.outputQueue,
                                   self.get_preprocessing(gpu))
@@ -142,9 +141,11 @@ class PreprocessingPipeline(ProcessingPipeline):
         def _preprocessing(batch):
             # Convert items to dict
             batch['items'] = [row._asdict() for row in batch['items']]
+            gpuStr = Color.cyan(f"GPU = {gpu}")
             with self._particle_size_lock:
                 if self.particle_size is None:
-                    batch.log(f"{Color.warn('Estimating the boxSize.')}")
+                    batch.log(f"{Color.warn('Estimating the boxSize.')} "
+                              f"Running preprocessing {gpuStr}", flush=True)
                     pp = Preprocessing(self._pp_args)
                     result = pp.process_batch(batch, gpu=gpu)
                     # This should update particle_size and other args
@@ -153,8 +154,8 @@ class PreprocessingPipeline(ProcessingPipeline):
 
                     return result
 
-            batch.log(f"{Color.warn('Using existing boxSize.')}")
-
+            batch.log(f"{Color.warn('Using existing boxSize.')} "
+                      f"Running preprocessing {gpuStr}", flush=True)
             return Preprocessing(self._pp_args).process_batch(batch, gpu=gpu)
 
         return _preprocessing
