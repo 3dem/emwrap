@@ -39,9 +39,7 @@ class PreprocessingPipeline(ProcessingPipeline):
     """ Pipeline to run Preprocessing in batches. """
 
     def __init__(self, args):
-        ProcessingPipeline.__init__(self, **args)
-        self._args = args
-
+        ProcessingPipeline.__init__(self, args)
         self.gpuList = args['gpu'].split()
         self.outputDirs = {}
         self.inputStar = args['in_movies']
@@ -65,13 +63,6 @@ class PreprocessingPipeline(ProcessingPipeline):
     @particle_size.setter
     def particle_size(self, value):
         self._pp_args['picking']['particle_size'] = value
-
-    def dumpArgs(self, printMsg=''):
-        argStr = json.dumps(self._args, indent=4) + '\n'
-        with open(self.join('args.json'), 'w') as f:
-            f.write(argStr)
-        if printMsg:
-            self.log(f"{Color.cyan(printMsg)}: \n\t{Color.bold(argStr)}")
 
     def prerun(self):
         self.dumpArgs(printMsg="Input args")

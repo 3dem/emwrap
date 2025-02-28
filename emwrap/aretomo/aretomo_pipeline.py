@@ -34,7 +34,7 @@ class AreTomoPipeline(ProcessingPipeline):
     """ Pipeline specific to AreTomo processing. """
 
     def __init__(self, args):
-        ProcessingPipeline.__init__(self, **args)
+        ProcessingPipeline.__init__(self, args)
         self.program = args.get('aretomo_path',
                                 os.environ.get('ARETOMO_PATH', None))
         self.extraArgs = args.get('aretomo_args', '')

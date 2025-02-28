@@ -28,7 +28,7 @@ from .motioncor import Motioncor
 class McPipeline(ProcessingPipeline):
     """ Pipeline specific to Motioncor processing. """
     def __init__(self, args):
-        ProcessingPipeline.__init__(self, **args)
+        ProcessingPipeline.__init__(self, args)
         self.gpuList = args['gpu_list'].split()
         self.outputMicDir = self.join('Micrographs')
         self.inputStar = args['input_star']

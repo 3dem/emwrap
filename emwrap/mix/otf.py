@@ -29,6 +29,7 @@ from glob import glob
 
 from emtools.utils import Color, Timer, Path, Process, FolderManager
 from emtools.metadata import Table, StarFile, Acquisition
+from emtools.image import Image
 
 from emwrap.relion.project import RelionProject
 
@@ -40,7 +41,7 @@ class OTF(FolderManager):
 
     def _dumpJson(self, fn, obj):
         fullFn = self.join(fn)
-        self.log(f"Creating file: {fullFn}")
+        self.log(f"Creating file: {Color.warn(fullFn)}")
         with open(fullFn, 'w') as f:
             json.dump(obj, f, indent=4)
             f.write('\n')
@@ -51,8 +52,10 @@ class OTF(FolderManager):
 
         raw = session['extra']['raw']
 
-        if self.exists('data'):
-            os.remove(self.join('data'))
+        for e in ['data', 'args_pp.json', 'args_2d.json']:
+            if self.exists('data'):
+                self.log(f"Removing: {Color.warn(e)}")
+                os.remove(self.join('data'))
 
         os.symlink(raw['path'], self.join('data'))
 
@@ -88,11 +91,11 @@ class OTF(FolderManager):
             "launcher": "/usr/local/em/scripts/preprocess_batch.sh",
             "input_timeout": 30
         }
-
         micMap = {r['id']: r['name'] for r in resources}
         microscope = micMap[session['resource_id']]
         conf_acq = sconfig['acquisition'][microscope]
-        args_pp['in_movies'] = os.path.join('data', conf_acq['images_pattern'])
+        input_movies = os.path.join('data', conf_acq['images_pattern'])
+        args_pp['in_movies'] = input_movies
         gain_pattern = self.join('data', conf_acq['gain_pattern'].format(microscope=microscope))
         if gains := glob(gain_pattern):
             gain = gains[-1]
@@ -109,8 +112,23 @@ class OTF(FolderManager):
 
         self._dumpJson('args_pp.json', args_pp)
 
-        print("frames: ", raw['frames'])
+        args_2d = {
+            "output": "FIXME",
+            "gpu": "2,3",
+            "batch_size": 100000,
+            "in_particles": "FIXME",
+            "scratch": "/scr/",
+            "launcher": "/usr/local/em/scripts/relion_refine.sh",
+            "timeout": 3600,
+            "sleep": 120
+        }
+
+        self._dumpJson('args_2d.json', args_2d)
+
         print("raw: ", raw['path'])
+        if movies := glob(input_movies):
+            first = movies[0]
+            print(Image.get_dimensions(first))
 
     def clean(self):
         """ Create files to start from scratch. """

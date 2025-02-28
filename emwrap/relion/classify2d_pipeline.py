@@ -50,7 +50,7 @@ class StarBatchManager(FolderManager):
         self._outputPath = outputPath
         self._groupColumn = groupColumn
         self._minSize = kwargs.get('minSize', 0)
-        self._wait = kwargs.get('wait', 60)
+        self._sleep = kwargs.get('sleep', 60)
         self._timeout = timedelta(seconds=kwargs.get('timeout', 7200))
         self._lastCheck = None  # Last timestamp when input was checked
         self._lastUpdate = None  # Last timestamp when new items were found
@@ -62,14 +62,15 @@ class StarBatchManager(FolderManager):
     def generate(self):
         """ Generate batches based on the input items. """
         while not self.timedOut():
-            mTime = datetime.fromtimestamp(os.path.getmtime(self._inputStar))
-            now = datetime.now()
-            if self._lastCheck is None or mTime > self._lastCheck:
-                for batch in self._createNewBatches():
-                    self._lastUpdate = now
-                    yield batch
-            self._lastCheck = datetime.now()
-            time.sleep(self._wait)
+            if os.path.exists(self._inputStar):
+                mTime = datetime.fromtimestamp(os.path.getmtime(self._inputStar))
+                now = datetime.now()
+                if self._lastCheck is None or mTime > self._lastCheck:
+                    for batch in self._createNewBatches():
+                        self._lastUpdate = now
+                        yield batch
+                self._lastCheck = datetime.now()
+            time.sleep(self._sleep)
 
         # After timeout, let's check if there are any remaining items
         # for the last batch, it will take all remaining items
@@ -128,14 +129,16 @@ class StarBatchManager(FolderManager):
 class Relion2DPipeline(ProcessingPipeline):
     """ Pipeline specific to AreTomo processing. """
     def __init__(self, args):
-        ProcessingPipeline.__init__(self, **args)
+        ProcessingPipeline.__init__(self, args)
         self._args = args
         self.gpuList = args['gpu'].split()
 
     def get_rln2d_proc(self, gpu):
         def _rln2d(batch):
             try:
-                batch.log(f"{Color.warn('Running 2D classification')}. Items: {batch['items']}")
+                batch.log(f"{Color.warn('Running 2D classification')}. "
+                          f"Items: {batch['items']} "
+                          f"GPU = {gpu}", flush=True)
                 rln2d = RelionClassify2D()
                 rln2d.process_batch(batch, gpu=gpu)
                 rln2d.clean_iter_files(batch)
@@ -146,37 +149,44 @@ class Relion2DPipeline(ProcessingPipeline):
         return _rln2d
 
     def _output(self, batch):
-        if 'error' in batch:
-            batch.log(Color.red(f"ERROR: {batch['error']}"))
-        else:
-            batch.log(f"Moving output files.")
-            iterFiles = RelionClassify2D().get_iter_files(batch)[0]
-            print(f">>>>> Iter files: ", iterFiles)
-            missing = [fn for fn in iterFiles.values() if not batch.exists(fn)]
-            if missing:
-                batch['error'] = f"Missing files: {missing}"
+        iterFiles = {}
+        if not batch.error:
+            iterFiles = next(iter(RelionClassify2D().get_iter_files(batch).values()), {})
+            if iterFiles is None:
+                batch.error = f"No output files."
                 batch.log(Color.red(f"ERROR: {batch['error']}"))
             else:
-                Process.system(f"rm {batch.join('*moment.mrcs')}", print=batch.log)
-                Process.system(f"mv {batch.path} {self.join('Classes2D')}", print=batch.log)
-                self.info['outputs'].append(
-                    {'label': f'Classes2D_{batch.id}',
-                     'files': [
-                         [iterFiles.get('data', batch.join('data:None')), 'ParticleGroupMetadata.star.relion.class2d'],
-                         [iterFiles.get('optimiser', 'optimiser:None'), 'ProcessData.star.relion.optimiser.class2d']
-                     ]})
-                with self.outputLock:
-                    self.updateBatchInfo(batch)
+                if missing := [fn for fn in iterFiles.values() if not batch.exists(fn)]:
+                    batch.error = f"Missing files: {missing}"
+
+        if batch.error:
+            batch.log(Color.red(f"ERROR: {batch.error}"))
+        else:
+            Process.system(f"rm {batch.join('*moment.mrcs')}", print=batch.log)
+            Process.system(f"mv {batch.path} {self.join('Classes2D')}", print=batch.log)
+            self.info['outputs'].append(
+                {'label': f'Classes2D_{batch.id}',
+                 'files': [
+                     [iterFiles.get('data', batch.join('data:None')), 'ParticleGroupMetadata.star.relion.class2d'],
+                     [iterFiles.get('optimiser', 'optimiser:None'), 'ProcessData.star.relion.optimiser.class2d']
+                 ]})
+            with self.outputLock:
+                self.updateBatchInfo(batch)
+                batch.log(f"Completed batch in {batch.info['elapsed']},"
+                          f"total batches: {len(self.info['batches'])}", flush=True)
         return batch
 
     def prerun(self):
-        args = self._args  # shortcut
-        minSize = args['batch_size']
-        timeout = args.get('input_timeout', 3600)
-        self.log(f"Minimum batch size: {Color.cyan(str(minSize))}")
+        minSize = self._args['batch_size']
+        timeout = self._args.get('timeout', 3600)
+        self.dumpArgs(printMsg="Input args")
+        self.log(f"Batch size: {Color.cyan(str(minSize))}")
         self.log(f"Input timeout (s): {Color.cyan(str(timeout))}")
+        self.log(f"Using GPUs: {Color.cyan(str(self.gpuList))}", flush=True)
+
         self.mkdir('Classes2D')
-        batchMgr = StarBatchManager(self.tmpDir, args['in_particles'],
+
+        batchMgr = StarBatchManager(self.tmpDir, self._args['in_particles'],
                                     'rlnMicrographName',
                                     minSize=minSize, timeout=timeout)
         g = self.addGenerator(batchMgr.generate, queueMaxSize=4)
@@ -195,33 +205,9 @@ class Relion2DPipeline(ProcessingPipeline):
 
 
 def main():
-    p = argparse.ArgumentParser(prog='emw-rln2d-pp')
-    p.add_argument('--json',
-                   help="Input all arguments through this JSON file. "
-                        "The other arguments will be ignored. ")
-    p.add_argument('--in_particles', '-i')
-    p.add_argument('--output', '-o')
-    p.add_argument('--scratch', '-s', default='',
-                   help="Scratch directory where to store intermediate "
-                        "results of the processing. ")
-    p.add_argument('--batch_size', '-b', type=int)
-    p.add_argument('--j', help="Threads used within each 2D batch")
-    p.add_argument('--gpu', '-g', nargs='*')
-
-    args = p.parse_args()
-
-    with open(args.json) as f:
-        input_args = json.load(f)
-
-        for key in ['in_particles', 'output', 'scratch', 'batch_size']:
-            if value := getattr(args, key):
-                input_args[key] = value
-
-        if args.gpu:
-            input_args['gpu'] = ' '.join(g for g in args.gpu)
-
-        rln2d = Relion2DPipeline(input_args)
-        rln2d.run()
+    input_args = ProcessingPipeline.getInputArgs('emw-rln2d',
+                                                 'in_particles')
+    Relion2DPipeline(input_args).run()
 
 
 if __name__ == '__main__':

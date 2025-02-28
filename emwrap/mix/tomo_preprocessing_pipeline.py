@@ -31,7 +31,7 @@ from .preprocessing import Preprocessing
 class TomoPreprocessingPipeline(ProcessingPipeline):
     """ Pipeline to run Preprocessing in batches. """
     def __init__(self, args):
-        ProcessingPipeline.__init__(self, **args)
+        ProcessingPipeline.__init__(self, args)
         self._args = args
 
         self.gpuList = args['gpu'].split()
@@ -44,13 +44,6 @@ class TomoPreprocessingPipeline(ProcessingPipeline):
         self._totalInput = self._totalOutput = 0
         self._pp_args = args['preprocessing']
         self.acq = Acquisition(self._args['acquisition'])
-
-    def dumpArgs(self, printMsg=''):
-        argStr = json.dumps(self._args, indent=4) + '\n'
-        with open(self.join('args.json'), 'w') as f:
-            f.write(argStr)
-        if printMsg:
-            self.log(f"{Color.cyan(printMsg)}: \n\t{Color.bold(argStr)}")
 
     def get_preprocessing(self, gpu):
         def _preprocessing(batch):

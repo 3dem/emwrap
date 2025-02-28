@@ -38,11 +38,12 @@ class ProcessingPipeline(Pipeline, FolderManager):
     It will also add some helper functions to manipulate file
     paths relative to the working dir.
     """
-    def __init__(self, **kwargs):
-        workingDir = kwargs.pop('working_dir', os.getcwd())
-        outputDir = kwargs.pop('output', None)
-        scratchDir = kwargs.pop('scratch', None)
-        Pipeline.__init__(self, debug=kwargs.get('debug', False))
+    def __init__(self, args):
+        self._args = args
+        workingDir = args.get('working_dir', os.getcwd())
+        outputDir = args.get('output', None)
+        scratchDir = args.get('scratch', None)
+        Pipeline.__init__(self, debug=args.get('debug', False))
         self.workingDir = self.__validate(workingDir, 'working')
         self.outputDir = self.__validate(outputDir, 'output')
         self.scratchDir = self.__validate(scratchDir, 'scratch') if scratchDir else None
@@ -89,6 +90,13 @@ class ProcessingPipeline(Pipeline, FolderManager):
             Process.system(f"ln -s {scratchTmp} {self.tmpDir}")
         else:
             Process.system(f"mkdir {self.tmpDir}")
+
+    def dumpArgs(self, printMsg=''):
+        argStr = json.dumps(self._args, indent=4) + '\n'
+        with open(self.join('args.json'), 'w') as f:
+            f.write(argStr)
+        if printMsg:
+            self.log(f"{Color.cyan(printMsg)}: \n\t{Color.bold(argStr)}")
 
     def get_arg(self, argDict, key, envKey, default=None):
         """ Get an argument from the argDict or from the environment.

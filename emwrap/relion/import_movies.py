@@ -86,8 +86,7 @@ class RelionImportMovies(FolderManager, threading.Thread):
                     # Sort new files base on modification time
                     for fn, mt in sorted(newFiles, key=lambda x: x[1]):
                         sf.writeRowValues([fn, 1, mt, _grid_square(fn)])
-
-                allMovies.update(newFiles)
+                        allMovies.add(fn)
 
                 now = lastUpdate = datetime.now()
             time.sleep(self.wait['sleep'])

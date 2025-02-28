@@ -32,8 +32,6 @@ class RelionClassify2D:
         self.args = Args(kwargs.get('extra_args', {}))
 
     def process_batch(self, batch, **kwargs):
-        t = Timer()
-
         clean = kwargs.get('clean', False)
         gpu = kwargs.get('gpu', '')
 
@@ -80,11 +78,10 @@ class RelionClassify2D:
             '--j': 32
         })
         args.update(self.args)
-        batch.call(self.path, args, cwd=False)
 
-        batch.info.update({
-            '2d_elapsed': str(t.getElapsedTime())
-        })
+        batch.tic()
+        batch.call(self.path, args, cwd=False)
+        batch.toc()
 
         if clean:
             self.clean_iter_files(batch)
