@@ -28,23 +28,34 @@ from pprint import pprint
 
 from emtools.utils import Color, Timer, Path, Process
 from emtools.metadata import Table, Acquisition
+from emtools.jobs import Vars
+
+CTFFIND_PATH = 'CTFFIND_PATH'
+CTFFIND_VERSION = 'CTFFIND_VERSION'
 
 
 class Ctffind:
     def __init__(self, *args, **kwargs):
-        self.acq = acq = Acquisition(args[0])
-        self.path = kwargs.get('path', '/usr/local/em/ctffind-5.0/bin/ctffind')
-        self.version = 5
+        acq = Acquisition(args[0])
+        vars = Vars(kwargs.get('vars', {}))
+        self.path = vars.get(CTFFIND_PATH, is_path=True)
+        self.version = int(vars.get(CTFFIND_VERSION))
         _get = kwargs.get  # shortcut
         self.args = [acq.pixel_size, acq.voltage, acq.cs, acq.amplitude_contrast,
                      _get('window', 512), _get('min_res', 30.0), _get('max_res', 5.0),
                      _get('min_def', 5000.0), _get('max_def', 50000.0), _get('step_def', 100.0),
-                     'no', 'no', 'no', 'no', 'no', 'no', 'no']
+                     'no', 'no', 'no', 'no', 'no']
+        if self.version > 4:
+            self.args.extend(['no', 'no'])
 
     def process(self, micrograph, **kwargs):
         verbose = kwargs.get('verbose', False)
-        ctf_files = [Path.replaceExt(micrograph, '_ctf.mrc'),
-                     Path.replaceExt(micrograph, '_ctf_avrot.txt')]
+        output = kwargs.get('output', './')
+        def _path(suffix):
+            return os.path.join(output, Path.replaceExt(micrograph, suffix))
+
+        ctf_files = [_path('_ctf.mrc'), _path('_ctf_avrot.txt')]
+
         args = [micrograph, ctf_files[0]] + self.args
         if verbose:
             print(">>>", Color.green(self.path), Color.bold(' '.join(str(a) for a in args)))

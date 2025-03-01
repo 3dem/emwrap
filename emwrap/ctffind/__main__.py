@@ -35,6 +35,31 @@ Determine sample thickness? [No]                  :
 Do you want to set expert options? [No]            :
 """
 
+"""
+$CTFFIND << eof > mic_000033_DW_ctf.txt
+mic_000033_DW.mrc
+mic_000033_DW_ctf.mrc
+0.724000
+300.000000
+2.700000
+0.100000
+512
+30.000000
+5.000000
+5000.000000
+50000.000000
+500.000000
+no
+no
+yes
+100.000000
+no
+no
+no
+no
+eof
+"""
+
 if __name__ == '__main__':
     p = argparse.ArgumentParser(prog='emh-ctffind')
     p.add_argument('micrograph')
@@ -42,6 +67,8 @@ if __name__ == '__main__':
     p.add_argument('voltage')
     p.add_argument('spherical_aberration')
     p.add_argument('amplitude_contrast')
+    p.add_argument('--output', '-o', default='./',
+                   help="Optional output folder.")
 
     args = p.parse_args()
 
@@ -56,5 +83,5 @@ if __name__ == '__main__':
         mics = [args.micrograph]
 
     for mic in mics:
-        ctffind.process(mic, verbose=True)
+        ctffind.process(mic, verbose=True, output=args.output)
 

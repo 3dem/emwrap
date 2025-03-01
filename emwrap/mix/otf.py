@@ -14,10 +14,6 @@
 # *
 # **************************************************************************
 
-"""
-
-"""
-
 import os
 import threading
 import time
@@ -27,7 +23,7 @@ import json
 import argparse
 from glob import glob
 
-from emtools.utils import Color, Timer, Path, Process, FolderManager
+from emtools.utils import Color, Timer, Path, Process, FolderManager, Pretty
 from emtools.metadata import Table, StarFile, Acquisition
 from emtools.image import Image
 
@@ -52,6 +48,11 @@ class OTF(FolderManager):
 
         raw = session['extra']['raw']
 
+        micMap = {r['id']: r['name'] for r in resources}
+        microscope = micMap[session['resource_id']]
+        conf_acq = sconfig['acquisition'][microscope]
+        input_movies = os.path.join('data', conf_acq['images_pattern'])
+
         for e in ['data', 'args_pp.json', 'args_2d.json']:
             if self.exists('data'):
                 self.log(f"Removing: {Color.warn(e)}")
@@ -59,14 +60,29 @@ class OTF(FolderManager):
 
         os.symlink(raw['path'], self.join('data'))
 
+        print("raw: ", raw['path'])
+        if movies := glob(input_movies):
+            first = movies[0]
+            dims = Image.get_dimensions(first)
+            print(f"Dimensions from: {first}: {dims}")
+        else:
+            dims = None
+            raise Exception(f"There are not movies in: {movies}")
+
         acq = {k: float(v) for k, v in session['acquisition'].items()}
-        acq['gain'] = 'FIXME:gain.mrc'
+        gain_pattern = self.join('data', conf_acq['gain_pattern'].format(microscope=microscope))
+        if gains := glob(gain_pattern):
+            gain = gains[-1]
+        else:
+            gain = None
+        acq['gain'] = gain
+        dose = acq['dose']
 
         args_pp = {
             "output": "output",
             "gpu": "0 1",
             "batch_size": 32,
-            "in_movies": "FIXME",
+            "in_movies": input_movies,
             "scratch": "/scr/",
             "acquisition": acq,
             "preprocessing": {
@@ -75,7 +91,7 @@ class OTF(FolderManager):
                         "-FtBin": 2,
                         "-FlipGain": 1,
                         "-Patch": "7 5",
-                        "-FmDose": acq['dose']
+                        "-FmDose": dose
                     }
                 },
                 "ctf": {},
@@ -91,23 +107,22 @@ class OTF(FolderManager):
             "launcher": "/usr/local/em/scripts/preprocess_batch.sh",
             "input_timeout": 30
         }
-        micMap = {r['id']: r['name'] for r in resources}
-        microscope = micMap[session['resource_id']]
-        conf_acq = sconfig['acquisition'][microscope]
-        input_movies = os.path.join('data', conf_acq['images_pattern'])
-        args_pp['in_movies'] = input_movies
-        gain_pattern = self.join('data', conf_acq['gain_pattern'].format(microscope=microscope))
-        if gains := glob(gain_pattern):
-            gain = gains[-1]
-        else:
-            gain = None
-        args_pp['acquisition']['gain'] = gain
 
         # For the Krios02, we don't need to flip gain in Y
         # and the patches are 5x5, since it produces square images
         if microscope == 'Krios02':
             mc_args = args_pp['preprocessing']['motioncor']['extra_args']
             mc_args["-Patch"] = "5 5"
+            fmint = self.join('fmint.txt')
+            with open(fmint, 'w') as f:
+                x, y, n = dims
+                v = 25
+                d = n // v
+                r = n % v
+                f.write(f"{d * v:>8} {v:>5} {dose}\n")
+                f.write(f"{r:>8} {r:>5} {dose}\n")
+
+            mc_args["-FmIntFile"] = fmint
             del mc_args["-FlipGain"]
 
         self._dumpJson('args_pp.json', args_pp)
@@ -125,10 +140,19 @@ class OTF(FolderManager):
 
         self._dumpJson('args_2d.json', args_2d)
 
-        print("raw: ", raw['path'])
-        if movies := glob(input_movies):
-            first = movies[0]
-            print(Image.get_dimensions(first))
+        session_conf = {
+            "movies": "External/job001/movies.star",
+            "micrographs": "External/job001/micrographs.star",
+            "coordinates": "External/job001/coordinates.star",
+            "classes2d": "External/job002"
+        }
+        self._dumpJson('session.json', session_conf)
+
+        with open(self.join('README.txt'), 'w') as f:
+            f.write(f'\n# DATE: {Pretty.now()}\n')
+            f.write(f'# SESSION_ID = {session["id"]}\n\n')
+            f.write('emw-relion -r "emwrap.preprocessing" "emw-pp --json args_pp.json"\n\n')
+            f.write('emw-relion -r "emwrap.rln2d" "emw-rln2d --json args_2d.json -i External/job001/particles.star"\n\n')
 
     def clean(self):
         """ Create files to start from scratch. """

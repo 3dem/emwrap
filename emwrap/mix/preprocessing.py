@@ -101,8 +101,14 @@ class Preprocessing:
 
         # Change input items as expected by CTF job
         batch['items'] = [_item(r) for r in old_batch['results']]
-        ctf = Ctffind(self.acq, **self.args['ctf'])
-        ctf.process_batch(batch, verbose=v)
+
+        # Calculate new pixel size based on the motioncor binning option
+        acq = Acquisition(self.acq)
+        origPs = self.acq.pixel_size
+        acq.pixel_size = origPs * mc.args['-FtBin']
+
+        ctf = Ctffind(acq, **self.args['ctf'])
+        ctf.process_batch(batch, verbose=True)
         # Restore items
         batch['items'] = old_batch['items']
 
@@ -116,10 +122,6 @@ class Preprocessing:
         del old_batch['outputs']
         del batch['outputs']
 
-        # Calculate new pixel size based on the motioncor binning option
-        acq = Acquisition(self.acq)
-        origPs = self.acq.pixel_size
-        acq.pixel_size = origPs * mc.args['-FtBin']
         extra_cols = []
         if self.picking:
             batch.mkdir('Coordinates')
