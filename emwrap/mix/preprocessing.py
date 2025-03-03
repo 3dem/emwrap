@@ -71,12 +71,12 @@ class Preprocessing:
         # the launcher should load the proper environment
         # and launch this main in the batch folder
         if launcher := self.args.get('launcher', None):
-            batch.call(launcher, [os.path.abspath(batch.path)],
+            batch.call(launcher, [os.getcwd(), batch.path],
                        logfile=None, #batch.join('pp.log'),
                        verbose=True)
             batch.load_all()
             # Reload any args that was set by the subprocesses
-            self.args = batch['Preprocessing.process_batch.args']
+            self.args = batch['Preprocessing.args']
         else:
             batch = self._process_batch(batch, kwargs)
 
@@ -90,6 +90,7 @@ class Preprocessing:
         cpu = kwargs.get('cpu', 4)
 
         # Motion correction
+        batch.log("Running Motioncor", flush=True)
         mc = Motioncor(self.acq, **self.args['motioncor'])
         mc.process_batch(batch, gpu=gpu)
 
@@ -107,6 +108,7 @@ class Preprocessing:
         origPs = self.acq.pixel_size
         acq.pixel_size = origPs * mc.args['-FtBin']
 
+        batch.log("Running Ctffind", flush=True)
         ctf = Ctffind(acq, **self.args['ctf'])
         ctf.process_batch(batch, verbose=True)
         # Restore items
@@ -125,6 +127,7 @@ class Preprocessing:
         extra_cols = []
         if self.picking:
             batch.mkdir('Coordinates')
+            batch.log("Running Cryolo", flush=True)
             cryolo = CryoloPredict(**self.args['picking'])
             cryolo.process_batch(batch, gpu=gpu, cpu=cpu)
             if self.particle_size is None:
@@ -190,6 +193,7 @@ class Preprocessing:
                 sf.writeTimeStamp()
                 sf.writeTable('coordinate_files', tCoords)
 
+            batch.log("Running Particle Extraction", flush=True)
             extract = RelionExtract(acq, **self.args['extract'])
             if '--extract_size' not in extract.args:
                 extract.update_args(self.particle_size)
@@ -211,14 +215,16 @@ class Preprocessing:
 
 def main():
     p = argparse.ArgumentParser()
+    p.add_argument('project_folder',
+                   help="Project folder where to run the preprocessing")
     p.add_argument('batch_folder',
-                   help="Batch folder to run the preprocessing")
+                   help="Batch folder relative to project folder")
     args = p.parse_args()
-    os.chdir(args.batch_folder)
-    batch = Batch(path=args.batch_folder)
-    batch.load_all()
+    os.chdir(args.project_folder)
+    with open(os.path.join(args.batch_folder, 'batch.json')) as f:
+        batch = Batch(json.load(f))
+
     # Restore path value that might be corrupted after load_all
-    batch['path'] = args.batch_folder
     pp = Preprocessing(batch['Preprocessing.args'])
     pp._process_batch(batch, batch['Preprocessing.process_batch.kwargs'])
 
