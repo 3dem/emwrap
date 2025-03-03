@@ -148,11 +148,17 @@ class OTF(FolderManager):
         }
         self._dumpJson('session.json', session_conf)
 
-        with open(self.join('README.txt'), 'w') as f:
-            f.write(f'\n# DATE: {Pretty.now()}\n')
+        cmd_pp = 'emw-relion -r "emwrap.preprocessing" "emw-pp --json args_pp.json"'
+        cmd_2d = 'emw-relion -r "emwrap.rln2d" "emw-rln2d --json args_2d.json -i External/job001/particles.star"'
+
+        with open(self.join('README.txt'), 'a') as f:
+            f.write(f'\n\n# OTF LAUNCHED: {Pretty.now()}\n')
             f.write(f'# SESSION_ID = {session["id"]}\n\n')
-            f.write('emw-relion -r "emwrap.preprocessing" "emw-pp --json args_pp.json"\n\n')
-            f.write('emw-relion -r "emwrap.rln2d" "emw-rln2d --json args_2d.json -i External/job001/particles.star"\n\n')
+            f.write(f'{cmd_pp}\n\n')
+            f.write(f'{cmd_2d}\n\n')
+
+        Process.system(cmd_pp)
+        Process.system(cmd_2d)
 
     def clean(self):
         """ Create files to start from scratch. """
