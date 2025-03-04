@@ -23,38 +23,53 @@ import glob
 import threading
 from datetime import datetime
 
-from emtools.utils import Color, Pretty, FolderManager, Path
-from emtools.metadata import Acquisition, StarFile, RelionStar
+from emtools.utils import Color, Pretty, Path
+from emtools.metadata import Acquisition, StarFile, RelionStar, Table
 
 from emwrap.base import ProcessingPipeline
 
 
-class RelionImportMovies(FolderManager, threading.Thread):
-    def __init__(self, **kwargs):
-        FolderManager.__init__(self, kwargs.pop('output', None))
-        threading.Thread.__init__(self)
-        #workingDir = kwargs.pop('working_dir', os.getcwd())
-        self.acq = Acquisition(kwargs['acquisition'])
-        self.pattern = kwargs['movies_pattern']
-        self.wait = {
-            'new_files': 120,  # 2 hour
-            'file_change': 60,  # 1 min
-            'sleep': 30,
-        }
-        self.wait.update(kwargs.get('wait', {}))
-        self.outputStar = self.join('movies.star')
+class ImportMoviesPipeline(ProcessingPipeline):
+    name = 'emw-import-movies'
+    input_name = 'in_movies'
 
-    def run(self):
+    def __init__(self, args):
+        ProcessingPipeline.__init__(self, args[self.name])
+        self.acq = Acquisition(args['acquisition'])
+        im_args = args[self.name]
+
+        self.wait = {
+            'timeout': im_args.get('timeout', 120),  # 2 hour
+            'file_change': im_args.get('file_change', 60),  # 1 min
+            'sleep': im_args.get('sleep', 60),
+        }
+        self.outputStar = self.join('movies.star')
+        self.pattern = im_args[self.input_name]
+        rootParts = []
+        for p in Path.splitall(self.pattern):
+            if Path.isPattern(p):
+                break
+            rootParts.append(p)
+        self.patternRoot = Path.addslash(os.path.abspath(os.path.sep.join(rootParts)))
+
+    def prerun(self):
         allMovies = set()
         moviesTable = None
+        nextId = 0
 
         # Load already seen movies if we are continuing the job
         if os.path.exists(self.outputStar):
             moviesTable = StarFile.getTableFromFile(self.outputStar, 'movies')
             allMovies.update(row.rlnMicrographMovieName for row in moviesTable)
+            nextId = moviesTable[-1].rlnImageId
+        else:
+            self.mkdir('Movies')
+            os.symlink(self.patternRoot, self.join('Movies', 'input'))
 
-        print(f">>> Monitoring movies with pattern: {Color.cyan(self.pattern)}")
-        print(f">>> Existing movies: {Color.cyan(len(allMovies))}")
+        self.log(f"Monitoring movies with pattern: {Color.cyan(self.pattern)}")
+        self.log(f"Existing movies: {Color.cyan(len(allMovies))}")
+
+        self.log(f"Input root: {self.patternRoot}", flush=True)
 
         now = lastUpdate = datetime.now()
 
@@ -69,57 +84,44 @@ class RelionImportMovies(FolderManager, threading.Thread):
             return 'None'
 
         # Keep monitoring for new files until the time expires
-        while (now - lastUpdate).seconds < self.wait['new_files']:
+        while (now - lastUpdate).seconds < self.wait['timeout']:
             now = datetime.now()
             newFiles = [(fn, os.path.getmtime(fn))
                         for fn in glob.glob(self.pattern) if _new_file(fn)]
             if newFiles:
-                print(f">>> {Pretty.now()}: found {len(newFiles)} new files")
+                self.log(f"Found {len(newFiles)} new files", flush=True)
 
                 with StarFile(self.outputStar, 'a') as sf:
                     if moviesTable is None:
                         sf.writeTimeStamp()
                         sf.writeTable('optics', RelionStar.optics_table(self.acq))
-                        moviesTable = RelionStar.movies_table(extra_cols=['TimeStamp', 'GridSquare'])
+                        moviesTable = Table(['rlnImageId',
+                                             'rlnMicrographMovieName',
+                                             'rlnMicrographOriginalMovieName',
+                                             'rlnOpticsGroup',
+                                             'TimeStamp',
+                                             'GridSquare'])
                         sf.writeHeader('movies', moviesTable)
 
                     # Sort new files base on modification time
                     for fn, mt in sorted(newFiles, key=lambda x: x[1]):
-                        sf.writeRowValues([fn, 1, mt, _grid_square(fn)])
+                        nextId += 1
+                        ext = Path.getExt(fn)
+                        newFn = self.join('Movies', f'movie-{nextId:06}{ext}')
+                        baseName = os.path.abspath(fn).replace(self.patternRoot, '')
+                        os.symlink(os.path.join('input', baseName), newFn)
+                        sf.writeRowValues([nextId, newFn, fn, 1, mt, _grid_square(fn)])
                         allMovies.add(fn)
 
                 now = lastUpdate = datetime.now()
             time.sleep(self.wait['sleep'])
 
-        print(f">>> Exiting, no new files detected in: "
-              f"{Color.warn(Pretty.delta(now - lastUpdate))}")
+        self.log(f"Exiting, no new files detected in: "
+                 f"{Color.warn(Pretty.delta(now - lastUpdate))}", flush=True)
 
 
 def main():
-    p = argparse.ArgumentParser(prog='emw-import-movies')
-    p.add_argument('--movies_pattern', '-p',
-                   help="Movie files pattern.")
-    p.add_argument('--acquisition', '-a', nargs=4,
-                   metavar=('pixel_size', 'voltage', 'cs', 'amplitude_contrast'),
-                   help="Expected acquisition list: pixel_size voltage cs amplitude_contrast")
-    p.add_argument('--output', '-o')
-    p.add_argument('--j', help="Just to ignore the threads option from Relion")
-
-    args = p.parse_args()
-    acq = args.acquisition
-
-    argsDict = {
-        'movies_pattern': args.movies_pattern,
-        'output_dir': args.output,
-        'working_dir': os.getcwd(),
-        'acquisition': Acquisition(pixel_size=acq[0],
-                                   voltage=acq[1],
-                                   cs=acq[2],
-                                   amplitude_contrast=acq[3])
-    }
-
-    rim = RelionImportMovies(**argsDict)
-    rim.run()
+    ImportMoviesPipeline.runFromArgs()
 
 
 if __name__ == '__main__':

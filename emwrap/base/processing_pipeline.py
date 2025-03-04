@@ -230,10 +230,19 @@ class ProcessingPipeline(Pipeline, FolderManager):
         with open(args.json) as f:
             input_args = json.load(f)
 
+            prog_args = input_args[progName]
+
             if inputValue := getattr(args, inputName):
-                input_args[inputName] = inputValue
+                prog_args[inputName] = inputValue
 
             if outputValue := getattr(args, 'output'):
-                input_args['output'] = outputValue
+                prog_args['output'] = outputValue
 
             return input_args
+
+    @classmethod
+    def runFromArgs(cls):
+        print(f"ProcessingPipeline.getInputArgs({cls.name}, {cls.input_name})")
+        input_args = ProcessingPipeline.getInputArgs(cls.name, cls.input_name)
+        p = cls(input_args)
+        p.run()

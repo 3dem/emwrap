@@ -31,24 +31,26 @@ from emtools.utils import Color, Timer, Path, Process
 from emtools.metadata import Acquisition, StarFile, RelionStar
 
 from emwrap.base import ProcessingPipeline
-from emwrap.relion.import_movies import RelionImportMovies
 from .preprocessing import Preprocessing
 
 
 class PreprocessingPipeline(ProcessingPipeline):
     """ Pipeline to run Preprocessing in batches. """
+    name = 'emw-preprocessing'
+    input_name = 'in_movies'
 
-    def __init__(self, args):
+    def __init__(self, all_args):
+        args = all_args[self.name]
         ProcessingPipeline.__init__(self, args)
         self.gpuList = args['gpu'].split()
         self.outputDirs = {}
         self.inputStar = args['in_movies']
         self.batchSize = args.get('batch_size', 32)
         self.inputTimeOut = args.get('input_timeout', 3600)
-        self.acq = args['acquisition']
+        self.acq = all_args['acquisition']
         self.moviesImport = None
         self._totalInput = self._totalOutput = 0
-        self._pp_args = args['preprocessing']
+        self._pp_args = args
         self._pp_args['acquisition'] = Acquisition(self.acq)
 
         # Create a lock to estimate the extraction args only once,
@@ -69,31 +71,12 @@ class PreprocessingPipeline(ProcessingPipeline):
         self.log(f"Batch size: {Color.cyan(str(self.batchSize))}")
         self.log(f"Using GPUs: {Color.cyan(str(self.gpuList))}", flush=True)
         inputs = self.info['inputs']
-
-        if '*' in self.inputStar:  # input is a pattern
-            # Update some of the args for the import
-            args = dict(self._args)
-            args['movies_pattern'] = self.inputStar
-            args['acquisition'] = self.acq
-            self.moviesImport = RelionImportMovies(**args)
-            self.moviesImport.start()
-            self.inputStar = self.moviesImport.outputStar
-            while not os.path.exists(self.inputStar):
-                self.log(f"Waiting for input star file: {self.inputStar}", flush=True)
-                time.sleep(60)  # wait until the star file is being generated
-            inputs.append({
-                'key': 'input_movies',
-                'label': 'Movies',
-                'datatype': 'MovieFilesPattern',
-                'value': self.inputStar
-            })
-        else:
-            inputs.append({
-                'key': 'input_movies',
-                'label': 'Movies',
-                'datatype': 'MicrographMovieGroupMetadata.star.relion',
-                'files': [self.inputStar]
-            })
+        inputs.append({
+            'key': 'input_movies',
+            'label': 'Movies',
+            'datatype': 'MicrographMovieGroupMetadata.star.relion',
+            'files': [self.inputStar]
+        })
 
         # Create all required output folders
         for d in ['Micrographs', 'CTFs', 'Coordinates', 'Particles', 'Logs']:
@@ -267,35 +250,7 @@ class PreprocessingPipeline(ProcessingPipeline):
 
 
 def main():
-    p = argparse.ArgumentParser(prog='emw-preprocessing')
-    p.add_argument('--json',
-                   help="Input all arguments through this JSON file. "
-                        "Other arguments passed will override the options"
-                        "in this file. ")
-    p.add_argument('--in_movies', '-i')
-    p.add_argument('--output', '-o')
-    p.add_argument('--scratch', '-s',
-                   help="Scratch directory where to keep intermediate results. ")
-    p.add_argument('--batch_size', '-b', type=int)
-    p.add_argument('--particle_size', '-p', type=int,
-                   help="Size of the particle in A.")
-    p.add_argument('--j', help="Just to ignore the threads option from Relion")
-    p.add_argument('--gpu', '-g', nargs='*')
-
-    args = p.parse_args()
-
-    with open(args.json) as f:
-        input_args = json.load(f)
-
-        for key in ['in_movies', 'output', 'scratch', 'batch_size']:
-            if value := getattr(args, key):
-                input_args[key] = value
-
-        if args.gpu:
-            input_args['gpu'] = ' '.join(g for g in args.gpu)
-
-        mc = PreprocessingPipeline(input_args)
-        mc.run()
+    PreprocessingPipeline.runFromArgs()
 
 
 if __name__ == '__main__':

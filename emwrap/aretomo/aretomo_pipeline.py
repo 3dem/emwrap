@@ -32,8 +32,11 @@ from emwrap.base import ProcessingPipeline
 
 class AreTomoPipeline(ProcessingPipeline):
     """ Pipeline specific to AreTomo processing. """
+    name = 'emw-aretomo'
+    input_name = 'in_movies'
 
-    def __init__(self, args):
+    def __init__(self, all_args):
+        args = all_args[self.name]
         ProcessingPipeline.__init__(self, args)
         self.program = args.get('aretomo_path',
                                 os.environ.get('ARETOMO_PATH', None))
@@ -121,9 +124,7 @@ class AreTomoPipeline(ProcessingPipeline):
 
 
 def main():
-    input_args = ProcessingPipeline.getInputArgs('emw-aretomo',
-                                                 'in_movies')
-    AreTomoPipeline(input_args).run()
+    AreTomoPipeline.runFromArgs()
 
 
 if __name__ == '__main__':

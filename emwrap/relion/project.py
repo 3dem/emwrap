@@ -88,7 +88,7 @@ class RelionProject(FolderManager):
         """ Return the job folder depending on the job type. """
         return 'External'
 
-    def run(self, jobtype, cmd):
+    def run(self, cmd, jobtype):
         jobtypeFolder = self.getJobTypeFolder(jobtype)
         jobIndex = self._wf.jobNextIndex
         jobId = f'{jobtypeFolder}/job{jobIndex:03}'
@@ -146,7 +146,10 @@ def main():
                    help="Clean project files")
     g.add_argument('--update', '-u', action='store_true',
                    help="Update job status and pipeline star file.")
-    g.add_argument('--run', '-r', nargs=2, metavar=('JOB_TYPE', 'COMMAND'))
+    g.add_argument('--run', '-r', nargs='+', metavar=('COMMAND', 'JOB_TYPE'))
+    g.add_argument('-k', '--check', action='count', default=0,
+                   help='Check and/or kill processes related to this project.'
+                        'Pass more than one -k to kill processes.')
 
     args = p.parse_args()
 
@@ -157,5 +160,11 @@ def main():
     elif args.update:
         rlnProject.update()
     elif args.run:
-        folder, cmd = args.run
-        rlnProject.run(folder, cmd)
+        cmd = args.run[0]
+        jobtype = args.run[1] if len(args.run) > 1 else shlex.split(cmd)[0]
+        rlnProject.run(cmd, jobtype)
+    elif args.check > 0:
+        kill = args.check > 1
+        folderPath = os.path.abspath(args.path)
+        Process.checkChilds('emw', folderPath, kill=kill, verbose=True)
+
