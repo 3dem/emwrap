@@ -127,14 +127,19 @@ class Preprocessing:
         extra_cols = []
         if self.picking:
             batch.mkdir('Coordinates')
-            batch.log("Running Cryolo", flush=True)
-            cryolo = CryoloPredict(**self.args['picking'])
+
+            pickingArgs = dict(self.args['picking'])
+            if self.particle_size is not None:
+                pickingArgs['anchors'] = round(self.particle_size / acq.pixel_size)
+
+            batch.log(f"Running Cryolo, args: {pickingArgs}", flush=True)
+            cryolo = CryoloPredict(**pickingArgs)
             cryolo.process_batch(batch, gpu=gpu, cpu=cpu)
             if self.particle_size is None:
                 size = cryolo.get_size(batch, 75)
 
                 self.particle_size = round(size * acq.pixel_size)
-                print(f">>> Size for percentile 25: {size}, particle_size (A): {self.particle_size}")
+                print(f">>> Size for percentile 75: {size}, particle_size (A): {self.particle_size}")
 
             tCoords = RelionStar.coordinates_table()
             extra_cols = ['rlnMicrographCoordinates', 'rlnCoordinatesNumber']

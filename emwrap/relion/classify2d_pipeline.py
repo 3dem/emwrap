@@ -58,6 +58,7 @@ class StarBatchManager(FolderManager):
         self._count = 0
         self._rows = []
         self._batches = {}
+        self.log = kwargs.get('log', print)
 
     def generate(self):
         """ Generate batches based on the input items. """
@@ -66,6 +67,8 @@ class StarBatchManager(FolderManager):
                 mTime = datetime.fromtimestamp(os.path.getmtime(self._inputStar))
                 now = datetime.now()
                 if self._lastCheck is None or mTime > self._lastCheck:
+                    self.log("fReading star file: {self._inputStar}, "
+                             "checking for new batches.", flush=True)
                     for batch in self._createNewBatches():
                         self._lastUpdate = now
                         yield batch

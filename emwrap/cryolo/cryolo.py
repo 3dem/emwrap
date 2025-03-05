@@ -53,20 +53,25 @@ class CryoloPredict:
         self.model = '/usr/local/em/cryolo/cryolo_model-202005_nn_N63_c17/gmodel_phosnet_202005_nn_N63_c17.h5'
         self.janni_model = '/usr/local/em/cryolo/janni_model-20190703/gmodel_janni_20190703.h5'
         self.path = '/usr/local/em/miniconda/envs/cryolo/bin/cryolo_predict.py'
+        self.args = kwargs
 
     def process_batch(self, batch, **kwargs):
         gpu = kwargs['gpu']
         cpu = 1 #kwargs.get('cpu', 1)
 
         t = Timer()
+        model = {
+            "architecture": "PhosaurusNet",
+            "input_size": 1024,
+            "max_box_per_image": 700,
+            "norm": "STANDARD",
+            "filter": [self.janni_model, 24, 3, "cryolo_filtered/"]
+        }
+        if 'anchors' in self.args:
+            model['anchors'] = self.args['anchors']
+
         config = {
-            "model": {
-                "architecture": "PhosaurusNet",
-                "input_size": 1024,
-                "max_box_per_image": 700,
-                "norm": "STANDARD",
-                "filter": [self.janni_model, 24, 3, "cryolo_filtered/"]
-            },
+            "model": model,
             "other": {
                 "log_path": "cryolo_logs/"
             }
