@@ -78,40 +78,61 @@ class OTF(FolderManager):
         acq['gain'] = gain
         dose = acq['dose']
 
+        args_import = {
+            "in_movies": input_movies,
+            "timeout": 14400,  # 4 hours
+            "sleep": 300,
+        }
+
         args_pp = {
             "output": "output",
             "gpu": "0 1",
             "batch_size": 32,
-            "in_movies": input_movies,
+            "in_movies": "External/job001/movies.star",
             "scratch": "/scr/",
-            "acquisition": acq,
-            "preprocessing": {
-                "motioncor": {
-                    "extra_args": {
-                        "-FtBin": 2,
-                        "-FlipGain": 1,
-                        "-Patch": "7 5",
-                        "-FmDose": dose
-                    }
-                },
-                "ctf": {},
-                "picking": {
-                    "particle_size": None
-                },
-                "extract": {
-                    "extra_args": {
-                        "--scale": 100
-                    }
+            "timeout": 7200,
+            "launcher": "/usr/local/em/scripts/preprocess_batch.sh",
+            "motioncor": {
+                "extra_args": {
+                    "-FtBin": 2,
+                    "-FlipGain": 1,
+                    "-Patch": "7 5",
+                    "-FmDose": dose
                 }
             },
-            "launcher": "/usr/local/em/scripts/preprocess_batch.sh",
-            "input_timeout": 30
+            "ctf": {},
+            "picking": {
+                "particle_size": None
+            },
+            "extract": {
+                "extra_args": {
+                    "--scale": 100
+                }
+            }
+        }
+
+        args_2d = {
+            "output": "FIXME",
+            "gpu": "2,3",
+            "batch_size": 200000,
+            "in_particles": "External/job002/particles.star",
+            "scratch": "/scr/",
+            "launcher": "/usr/local/em/scripts/relion_refine.sh",
+            "timeout": 7200,
+            "sleep": 300
+        }
+
+        args = {
+            "acquisition": acq,
+            "emw-import-movies": args_import,
+            "emw-preprocessing": args_pp,
+            "emw-rln2d": args_2d
         }
 
         # For the Krios02, we don't need to flip gain in Y
         # and the patches are 5x5, since it produces square images
         if microscope == 'Krios02':
-            mc_args = args_pp['preprocessing']['motioncor']['extra_args']
+            mc_args = args_pp['motioncor']['extra_args']
             mc_args["-Patch"] = "5 5"
             fmint = self.join('fmint.txt')
             with open(fmint, 'w') as f:
@@ -124,41 +145,32 @@ class OTF(FolderManager):
 
             mc_args["-FmIntFile"] = fmint
             del mc_args["-FlipGain"]
+        elif microscope == 'Arctica01':
+            args_2d['batch_size'] = 100000
 
-        self._dumpJson('args_pp.json', args_pp)
-
-        args_2d = {
-            "output": "FIXME",
-            "gpu": "2,3",
-            "batch_size": 100000,
-            "in_particles": "FIXME",
-            "scratch": "/scr/",
-            "launcher": "/usr/local/em/scripts/relion_refine.sh",
-            "timeout": 3600,
-            "sleep": 120
-        }
-
-        self._dumpJson('args_2d.json', args_2d)
+        self._dumpJson('args.json', args)
 
         session_conf = {
             "movies": "External/job001/movies.star",
-            "micrographs": "External/job001/micrographs.star",
-            "coordinates": "External/job001/coordinates.star",
-            "classes2d": "External/job002"
+            "micrographs": "External/job002/micrographs.star",
+            "coordinates": "External/job002/coordinates.star",
+            "classes2d": "External/job003"
         }
         self._dumpJson('session.json', session_conf)
 
-        cmd_pp = 'emw-relion -r "emwrap.preprocessing" "emw-pp --json args_pp.json"'
-        cmd_2d = 'emw-relion -r "emwrap.rln2d" "emw-rln2d --json args_2d.json -i External/job001/particles.star"'
+        cmd_import = 'emw-relion -r "emw-import-movies --json args.json"'
+        cmd_pp = 'emw-relion -r "emw-preprocessing --json args.json -i External/job001/movies.star"'
+        cmd_2d = 'emw-relion -r "emw-rln2d --json args_2d.json -i External/job002/particles.star"'
 
         with open(self.join('README.txt'), 'a') as f:
             f.write(f'\n\n# OTF LAUNCHED: {Pretty.now()}\n')
             f.write(f'# SESSION_ID = {session["id"]}\n\n')
+            f.write(f'{cmd_import}\n\n')
             f.write(f'{cmd_pp}\n\n')
             f.write(f'{cmd_2d}\n\n')
 
-        Process.system(cmd_pp)
-        Process.system(cmd_2d)
+        #Process.system(cmd_pp)
+        #Process.system(cmd_2d)
 
     def clean(self):
         """ Create files to start from scratch. """
