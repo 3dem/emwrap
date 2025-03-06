@@ -130,7 +130,8 @@ class Preprocessing:
 
             pickingArgs = dict(self.args['picking'])
             if self.particle_size is not None:
-                pickingArgs['anchors'] = round(self.particle_size / acq.pixel_size)
+                a = round(self.particle_size / acq.pixel_size)
+                pickingArgs['anchors'] = [a, a]
 
             batch.log(f"Running Cryolo, args: {pickingArgs}", flush=True)
             cryolo = CryoloPredict(**pickingArgs)
