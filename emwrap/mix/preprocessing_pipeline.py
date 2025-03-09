@@ -85,7 +85,7 @@ class PreprocessingPipeline(ProcessingPipeline):
         # Define the current pipeline with generator and processors
         g = self.addMoviesGenerator(self.inputStar, self.batchSize,
                                     inputTimeOut=self.inputTimeOut,
-                                    queueMaxSize=4)
+                                    queueMaxSize=4, createBatch=False)
         c = self.addProcessor(g.outputQueue, self._count,
                               queueMaxSize=4)
         outputQueue = None
@@ -93,9 +93,7 @@ class PreprocessingPipeline(ProcessingPipeline):
         for gpu in self.gpuList:
             p = self.addProcessor(c.outputQueue,
                                   self.get_preprocessing(gpu))
-            m = self.addProcessor(p.outputQueue,
-                                  self._move, outputQueue=outputQueue)
-            outputQueue = m.outputQueue
+            outputQueue = p.outputQueue
 
         self.addProcessor(outputQueue, self._output)
 
@@ -121,7 +119,9 @@ class PreprocessingPipeline(ProcessingPipeline):
                     batch.log(f"{Color.warn('Estimating the boxSize.')} "
                               f"Running preprocessing {gpuStr}", flush=True)
                     pp = Preprocessing(self._pp_args)
-                    result = pp.process_batch(batch, gpu=gpu)
+                    result = pp.process_batch(batch, gpu=gpu,
+                                              outputFolder=self.path,
+                                              tmpFolder=self.tmpDir)
                     # This should update particle_size and other args
                     self._pp_args.update(pp.args)
                     self.dumpArgs('Updated args')
@@ -130,43 +130,17 @@ class PreprocessingPipeline(ProcessingPipeline):
 
             batch.log(f"{Color.warn('Using existing boxSize.')} "
                       f"Running preprocessing {gpuStr}", flush=True)
-            return Preprocessing(self._pp_args).process_batch(batch, gpu=gpu)
+            return Preprocessing(self._pp_args).process_batch(batch, gpu=gpu,
+                                                              outputFolder=self.path,
+                                                              tmpFolder=self.tmpDir)
 
         return _preprocessing
-
-    def _move(self, batch):
-        try:
-            """ Move output files from the batch to the final destination. """
-            batch.log("Moving results.")
-            t = Timer()
-            # Move output files
-            for d in ['Micrographs', 'CTFs', 'Coordinates']:
-                if batch.exists(d):
-                    Process.system(f"mv {batch.join(d, '*')} {self.join(d)}",
-                                   print=batch.log, color=Color.bold)
-
-            if batch.exists('Particles'):
-                for root, dirs, files in os.walk(batch.join('Particles')):
-                    for name in files:
-                        if name.endswith('.mrcs'):
-                            shutil.move(os.path.join(root, name),
-                                        self.outputDirs['Particles'])
-
-            batch.info.update({
-                'move_elapsed': str(t.getElapsedTime())
-            })
-            return batch
-        except Exception as e:
-            print(Color.red('ERROR: ' + str(e)))
-            import traceback
-            traceback.print_exc()
-            sys.exit(1)
 
     def _output(self, batch):
         """ Update output STAR files. """
 
         def _pair(name):
-            return self.join(name), batch.join(name)
+            return self.join(name), self.join(f"{batch.id}_{name}")
 
         try:
             batch.log("Storing outputs.")
@@ -191,6 +165,7 @@ class PreprocessingPipeline(ProcessingPipeline):
                                                           'rlnMicrographName',
                                                           'rlnCtfImage',
                                                           'rlnMicrographCoordinates'))
+                    os.remove(micsStarBatch)
 
                 # Update coordinates.star
                 coordStar, coordStarBatch = _pair('coordinates.star')
@@ -204,6 +179,7 @@ class PreprocessingPipeline(ProcessingPipeline):
                             sf.writeRow(self.fixOutputRow(row,
                                                           'rlnMicrographName',
                                                           'rlnMicrographCoordinates'))
+                        os.remove(coordStarBatch)
 
                 # Update particles.star
                 partStar, partStarBatch = _pair('particles.star')
@@ -219,6 +195,7 @@ class PreprocessingPipeline(ProcessingPipeline):
                             i = row.rlnImageName.split('@')[0]
                             sf.writeRow(row._replace(rlnImageName=f"{i}@{partStack[micName]}",
                                                      rlnMicrographName=self.fixOutputPath(micName)))
+                    os.remove(partStarBatch)
 
                 batch.info.update({
                     'output_elapsed': str(t.getElapsedTime())

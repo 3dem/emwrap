@@ -131,6 +131,10 @@ class ProcessingPipeline(Pipeline, FolderManager):
         self.__file('EXIT_ABORTED')
         sys.exit(0)
 
+    @staticmethod
+    def do_clean():
+        return int(os.environ.get('EMWRAP_CLEAN', 1)) > 0
+
     def run(self):
         try:
             signal.signal(signal.SIGINT, self.__abort)
@@ -150,7 +154,7 @@ class ProcessingPipeline(Pipeline, FolderManager):
             self.prerun()
             Pipeline.run(self)
             self.postrun()
-            if int(os.environ.get('EMWRAP_CLEAN', 1)):
+            if ProcessingPipeline.do_clean():
                 self.__clean_tmp()
             else:
                 print(f"Temporary directory was not deleted, "
@@ -171,7 +175,8 @@ class ProcessingPipeline(Pipeline, FolderManager):
             traceback.print_exc()
 
     def addMoviesGenerator(self, inputStar, batchSize,
-                           inputTimeOut=3600, queueMaxSize=None):
+                           inputTimeOut=3600, queueMaxSize=None,
+                           createBatch=True):
         """ Add a generator that monitor input movies from a
         given STAR file and group in batches. """
         def _movie_filename(row):
@@ -181,7 +186,8 @@ class ProcessingPipeline(Pipeline, FolderManager):
                               _movie_filename, timeout=inputTimeOut)
 
         batchMgr = BatchManager(batchSize, monitor.newItems(), self.tmpDir,
-                                itemFileNameFunc=_movie_filename)
+                                itemFileNameFunc=_movie_filename,
+                                createBatch=createBatch)
 
         return self.addGenerator(batchMgr.generate,
                                  queueMaxSize=queueMaxSize)

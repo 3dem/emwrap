@@ -160,7 +160,7 @@ class OTF(FolderManager):
 
         cmd_import = 'emw-relion -r "emw-import-movies --json args.json"'
         cmd_pp = 'emw-relion -r "emw-preprocessing --json args.json -i External/job001/movies.star"'
-        cmd_2d = 'emw-relion -r "emw-rln2d --json args_2d.json -i External/job002/particles.star"'
+        cmd_2d = 'emw-relion -r "emw-rln2d --json args.json -i External/job002/particles.star"'
 
         with open(self.join('README.txt'), 'a') as f:
             f.write(f'\n\n# OTF LAUNCHED: {Pretty.now()}\n')

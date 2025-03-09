@@ -14,10 +14,6 @@
 # *
 # **************************************************************************
 
-"""
-
-"""
-
 import os
 import subprocess
 import shutil
@@ -25,12 +21,13 @@ import sys
 import json
 import argparse
 from pprint import pprint
-import threading
+import tempfile
 
-from emtools.utils import Pretty, Timer, Path
+from emtools.utils import Pretty, Timer, Path, FolderManager, Color, Process
 from emtools.jobs import Batch
 from emtools.metadata import Acquisition, StarFile, RelionStar
 
+from emwrap.base import ProcessingPipeline
 from emwrap.motioncor import Motioncor
 from emwrap.ctffind import Ctffind
 from emwrap.cryolo import CryoloPredict
@@ -60,29 +57,61 @@ class Preprocessing:
         return 'picking' in self.args
 
     def process_batch(self, batch, **kwargs):
-        batch['Preprocessing.args'] = self.args
-        batch['Preprocessing.process_batch.kwargs'] = kwargs
-        # batch['items'] are expected to be a Python dict, where
-        # the keys are the relion labels from the row
-        batch.dump_all()  # Write batch json to be used in sub-process
-
         # Launcher can be used in the case that we want to launch
         # processing of a batch to the cluster
         # the launcher should load the proper environment
-        # and launch this main in the batch folder
+        # and launch this main in the project folder
         if launcher := self.args.get('launcher', None):
-            batch.call(launcher, [os.getcwd(), batch.path],
-                       logfile=None, #batch.join('pp.log'),
-                       verbose=True)
-            batch.load_all()
+            outputFolder = FolderManager(kwargs['outputFolder'])
+            logsPrefix = outputFolder.join('Logs', batch.id)
+            batchJson = os.path.abspath(logsPrefix + '.json')
+            batch['Preprocessing.args'] = self.args
+            batch['Preprocessing.process_batch.kwargs'] = kwargs
+            # batch['items'] are expected to be a Python dict, where
+            # the keys are the relion labels from the row
+            batch.dump_all(batchJson)  # Write batch json to be used in sub-process
+
+            batch.call(launcher, [os.getcwd(), batchJson], cwd=False,
+                       logfile=logsPrefix + '.log', verbose=True)
+            batch.load_all(batchJson)
             # Reload any args that was set by the subprocesses
             self.args = batch['Preprocessing.args']
         else:
             batch = self._process_batch(batch, kwargs)
+            # Also clean the batch folder if not running with a launcher
+            if ProcessingPipeline.do_clean():
+                shutil.rmtree(batch.path)
 
         return batch
 
     def _process_batch(self, batch, kwargs):
+        """ Real processing work is done here. This function is called either
+        directly from the Pipeline process or through an external 'launcher'
+        script. The launcher script is the way to submit this job to a cluster.
+        """
+        # Folder where intermediate result from the batch will be copied
+        # the outputFolder should be a location that is visible by the
+        # main process running the pipeline and the worker process running
+        # the batch
+        outputFolder = FolderManager(kwargs['outputFolder'])
+
+        # Where the temporary batch folder will be created
+        # This is a local, fast storage in the worker process
+        tmpFolder = '/scr/'  # FIXME
+        tmpPrefix = os.path.join(tmpFolder, f'emwap_{batch.id}')
+
+        # The batch will be created in the temporary local storage for
+        # intermediate results and only the relevant ones will be copied
+        # to the outputFolder
+        batch.path = tempfile.mkdtemp(prefix=tmpPrefix)
+        batch.log(f"batch.path (from mkdtemp): {batch.path}", flush=True)
+
+        # Let's create symbolic links to the input movies
+        for item in batch['items']:
+            movFn = item['rlnMicrographMovieName']
+            baseName = os.path.basename(movFn)
+            os.symlink(os.path.abspath(movFn), batch.join(baseName))
+
         t = Timer()
         start = Pretty.now()
         v = kwargs.get('verbose', False)
@@ -96,6 +125,7 @@ class Preprocessing:
 
         old_batch = batch
         batch = Batch(old_batch)
+        batch.path = old_batch.path  # FIXME bath.path is not copied as dict key
 
         def _item(r):
             return None if 'error' in r else r['rlnMicrographName']
@@ -156,9 +186,9 @@ class Preprocessing:
 
         for i, row in enumerate(batch['items']):
             r = batch['results'][i]
+            values = r['values']
+            micName = os.path.basename(values[0])
             if 'error' not in r:
-                values = r['values']
-                micName = os.path.basename(values[0])
                 micPath = os.path.join('Micrographs', micName)
                 kvalues = {
                     'rlnMicrographName': micPath,
@@ -189,15 +219,21 @@ class Preprocessing:
             batch['results'][i] = kvalues
 
         # Write output STAR files, as outputs needed by extraction
-        with StarFile(batch.join('micrographs.star'), 'w') as sf:
+        batchMicStar = batch.join('micrographs.star')
+        with StarFile(batchMicStar, 'w') as sf:
             sf.writeTimeStamp()
             sf.writeTable('optics', tOptics)
             sf.writeTable('micrographs', tMics)
+        # Copy batch's micrograph star file to the outputFolder
+        shutil.copy(batchMicStar, outputFolder.join(f"{batch.id}_micrographs.star"))
 
         if self.picking:
-            with StarFile(batch.join('coordinates.star'), 'w') as sf:
+            batchCoordStar = batch.join('coordinates.star')
+            with StarFile(batchCoordStar, 'w') as sf:
                 sf.writeTimeStamp()
                 sf.writeTable('coordinate_files', tCoords)
+            # Copy batch's coordinates star file to the outputFolder
+            shutil.copy(batchCoordStar, outputFolder.join(f"{batch.id}_coordinates.star"))
 
             batch.log("Running Particle Extraction", flush=True)
             extract = RelionExtract(acq, **self.args['extract'])
@@ -206,6 +242,9 @@ class Preprocessing:
                 self.args['extract']['extra_args'].update(extract.args)
 
             extract.process_batch(batch)
+            # Copy batch's coordinates star file to the outputFolder
+            shutil.copy(batch.join('particles.star'),
+                        outputFolder.join(f"{batch.id}_particles.star"))
 
         batch.info.update({
             'preprocessing_start': start,
@@ -213,26 +252,64 @@ class Preprocessing:
             'preprocessing_elapsed': str(t.getElapsedTime())
         })
 
+        self._move(batch, outputFolder)
         batch['Preprocessing.args'] = self.args
+        batch.log(f"Batch path is: {batch.path}", flush=True)
         batch.dump_all()
 
+
         return batch
+
+    def _move(self, batch, outputFolder):
+        """ Move processing results to output folder. """
+        try:
+            """ Move output files from the batch to the final destination. """
+            batch.log("Moving results.")
+            t = Timer()
+            # Move output files
+            for d in ['Micrographs', 'CTFs', 'Coordinates']:
+                if batch.exists(d):
+                    Process.system(f"mv {batch.join(d, '*')} {outputFolder.join(d)}",
+                                   print=batch.log, color=Color.bold)
+
+            if batch.exists('Particles'):
+                for root, dirs, files in os.walk(batch.join('Particles')):
+                    for name in files:
+                        if name.endswith('.mrcs'):
+                            shutil.move(os.path.join(root, name),
+                                        outputFolder.join('Particles'))
+
+            batch.info.update({
+                'move_elapsed': str(t.getElapsedTime())
+            })
+            return batch
+        except Exception as e:
+            print(Color.red('ERROR: ' + str(e)))
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
 
 
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('project_folder',
                    help="Project folder where to run the preprocessing")
-    p.add_argument('batch_folder',
-                   help="Batch folder relative to project folder")
+    p.add_argument('batch_json',
+                   help="Json file with batch info")
     args = p.parse_args()
     os.chdir(args.project_folder)
-    with open(os.path.join(args.batch_folder, 'batch.json')) as f:
+    with open(args.batch_json) as f:
         batch = Batch(json.load(f))
 
     # Restore path value that might be corrupted after load_all
     pp = Preprocessing(batch['Preprocessing.args'])
     pp._process_batch(batch, batch['Preprocessing.process_batch.kwargs'])
+
+    # Copy back the resulting .json file to the input one
+    shutil.copy(batch.join('batch.json'), args.batch_json)
+
+    if ProcessingPipeline.do_clean():
+        shutil.rmtree(batch.path)
 
 
 if __name__ == '__main__':
