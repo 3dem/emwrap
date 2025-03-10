@@ -14,10 +14,6 @@
 # *
 # **************************************************************************
 
-"""
-
-"""
-
 import os
 import threading
 import time
@@ -29,6 +25,7 @@ from pprint import pprint
 
 from emtools.utils import Color, Timer, Path, Process
 from emtools.metadata import Acquisition, StarFile, RelionStar
+from emtools.jobs import Batch
 
 from emwrap.base import ProcessingPipeline
 from .preprocessing import Preprocessing
@@ -48,7 +45,6 @@ class PreprocessingPipeline(ProcessingPipeline):
         self.batchSize = args.get('batch_size', 32)
         self.inputTimeOut = args.get('input_timeout', 3600)
         self.acq = all_args['acquisition']
-        self.moviesImport = None
         self._totalInput = self._totalOutput = 0
         self._pp_args = args
         self._pp_args['acquisition'] = Acquisition(self.acq)
@@ -86,53 +82,45 @@ class PreprocessingPipeline(ProcessingPipeline):
         g = self.addMoviesGenerator(self.inputStar, self.batchSize,
                                     inputTimeOut=self.inputTimeOut,
                                     queueMaxSize=4, createBatch=False)
-        c = self.addProcessor(g.outputQueue, self._count,
-                              queueMaxSize=4)
         outputQueue = None
         self.log(f"Creating {len(self.gpuList)} processing threads.", flush=True)
         for gpu in self.gpuList:
-            p = self.addProcessor(c.outputQueue,
-                                  self.get_preprocessing(gpu))
+            p = self.addProcessor(g.outputQueue,
+                                  self.get_preprocessing(gpu),
+                                  outputQueue=outputQueue)
             outputQueue = p.outputQueue
 
         self.addProcessor(outputQueue, self._output)
-
-    def postrun(self):
-        """ This method will be called after the run. """
-        if self.moviesImport is not None:
-            self.moviesImport.join()
-
-    def _count(self, batch):
-        """ Just count input items. """
-        with self.outputLock:
-            self._totalInput += len(batch['items'])
-
-        return batch
 
     def get_preprocessing(self, gpu):
         def _preprocessing(batch):
             # Convert items to dict
             batch['items'] = [row._asdict() for row in batch['items']]
             gpuStr = Color.cyan(f"GPU = {gpu}")
+            result = None
+
+            def _runPP():
+                pp = Preprocessing(self._pp_args)
+                return pp, pp.process_batch(batch, gpu=gpu,
+                                            outputFolder=self.path,
+                                            tmpFolder=self.tmpDir)
             with self._particle_size_lock:
                 if self.particle_size is None:
                     batch.log(f"{Color.warn('Estimating the boxSize.')} "
                               f"Running preprocessing {gpuStr}", flush=True)
-                    pp = Preprocessing(self._pp_args)
-                    result = pp.process_batch(batch, gpu=gpu,
-                                              outputFolder=self.path,
-                                              tmpFolder=self.tmpDir)
+                    pp, result = _runPP()
                     # This should update particle_size and other args
                     self._pp_args.update(pp.args)
                     self.dumpArgs('Updated args')
 
-                    return result
+            if result is None:
+                batch.log(f"{Color.warn('Using existing boxSize.')} "
+                          f"Running preprocessing {gpuStr}", flush=True)
 
-            batch.log(f"{Color.warn('Using existing boxSize.')} "
-                      f"Running preprocessing {gpuStr}", flush=True)
-            return Preprocessing(self._pp_args).process_batch(batch, gpu=gpu,
-                                                              outputFolder=self.path,
-                                                              tmpFolder=self.tmpDir)
+                _, result = _runPP()
+
+            batch.log(f"Preprocessing done.", flush=True)
+            return result
 
         return _preprocessing
 
@@ -143,7 +131,7 @@ class PreprocessingPipeline(ProcessingPipeline):
             return self.join(name), self.join(f"{batch.id}_{name}")
 
         try:
-            batch.log("Storing outputs.")
+            batch.log("Storing outputs.", flush=True)
             t = Timer()
             with self.outputLock:
                 micsStar, micsStarBatch = _pair('micrographs.star')
@@ -165,6 +153,7 @@ class PreprocessingPipeline(ProcessingPipeline):
                                                           'rlnMicrographName',
                                                           'rlnCtfImage',
                                                           'rlnMicrographCoordinates'))
+                    batch.log(f"Removing {micsStarBatch}", flush=True)
                     os.remove(micsStarBatch)
 
                 # Update coordinates.star
@@ -179,7 +168,8 @@ class PreprocessingPipeline(ProcessingPipeline):
                             sf.writeRow(self.fixOutputRow(row,
                                                           'rlnMicrographName',
                                                           'rlnMicrographCoordinates'))
-                        os.remove(coordStarBatch)
+                    batch.log(f"Removing {coordStarBatch}", flush=True)
+                    os.remove(coordStarBatch)
 
                 # Update particles.star
                 partStar, partStarBatch = _pair('particles.star')
@@ -195,6 +185,7 @@ class PreprocessingPipeline(ProcessingPipeline):
                             i = row.rlnImageName.split('@')[0]
                             sf.writeRow(row._replace(rlnImageName=f"{i}@{partStack[micName]}",
                                                      rlnMicrographName=self.fixOutputPath(micName)))
+                    batch.log(f"Removing {partStarBatch}", flush=True)
                     os.remove(partStarBatch)
 
                 batch.info.update({
@@ -211,14 +202,24 @@ class PreprocessingPipeline(ProcessingPipeline):
                          [partStar, 'ParticleGroupMetadata.star']
                      ]},
                 ]
-                self.updateBatchInfo(batch)
+
+                batch.log(f"No call: Updating batchInfo", flush=True)
+                # 2025/03/10 JMRT: Calling this function makes the thread lock here
+                self.updateBatchInfo(Batch(batch))
+                # self.info['batches'][batch.id] = batch.info
+                # with open(self.infoFile, 'w') as f:
+                #     json.dump(self.info, f, indent=4)
+
+                with StarFile(self.inputStar) as sf:
+                    self._totalInput = sf.getTableSize('movies')
                 self._totalOutput += len(batch['items'])
                 percent = self._totalOutput * 100 / self._totalInput
-                print(f">>> Processed {Color.green(str(self._totalOutput))} out of "
-                      f"{Color.red(str(self._totalInput))} "
-                      f"({Color.bold('%0.2f' % percent)} %)")
+                self.log(f">>> Processed {Color.green(str(self._totalOutput))} out of "
+                         f"{Color.red(str(self._totalInput))} "
+                         f"({Color.bold('%0.2f' % percent)} %)", flush=True)
 
-            return batch
+                batch.log(f"Storing outputs. FINISHED", flush=True)
+                return batch
         except Exception as e:
             print(Color.red('ERROR: ' + str(e)))
             import traceback
