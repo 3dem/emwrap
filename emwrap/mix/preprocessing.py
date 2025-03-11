@@ -98,7 +98,7 @@ class Preprocessing:
         # Where the temporary batch folder will be created
         # This is a local, fast storage in the worker process
         tmpFolder = '/scr/'  # FIXME
-        tmpPrefix = os.path.join(tmpFolder, f'emwap_{batch.id}')
+        tmpPrefix = os.path.join(tmpFolder, f'emwrap_{batch.id}')
 
         # The batch will be created in the temporary local storage for
         # intermediate results and only the relevant ones will be copied

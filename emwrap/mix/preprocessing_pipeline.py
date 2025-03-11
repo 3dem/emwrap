@@ -140,19 +140,19 @@ class PreprocessingPipeline(ProcessingPipeline):
                 # Update micrographs.star
                 with StarFile(micsStar, 'a') as sf:
                     with StarFile(micsStarBatch) as sfBatch:
-                        micsTable = sfBatch.getTable('micrographs')
-                        if firstTime:
-                            sf.writeTimeStamp()
-                            sf.writeTable('optics', sfBatch.getTable('optics'))
-                            sf.writeHeader('micrographs', micsTable)
-                        for row in micsTable:
-                            micName = row.rlnMicrographName
-                            stackName = os.path.join('Particles', Path.replaceBaseExt(micName, '.mrcs'))
-                            partStack[micName] = self.fixOutputPath(stackName)
-                            sf.writeRow(self.fixOutputRow(row,
-                                                          'rlnMicrographName',
-                                                          'rlnCtfImage',
-                                                          'rlnMicrographCoordinates'))
+                        if micsTable := sfBatch.getTable('micrographs'):
+                            if firstTime:
+                                sf.writeTimeStamp()
+                                sf.writeTable('optics', sfBatch.getTable('optics'))
+                                sf.writeHeader('micrographs', micsTable)
+                            for row in micsTable:
+                                micName = row.rlnMicrographName
+                                stackName = os.path.join('Particles', Path.replaceBaseExt(micName, '.mrcs'))
+                                partStack[micName] = self.fixOutputPath(stackName)
+                                sf.writeRow(self.fixOutputRow(row,
+                                                              'rlnMicrographName',
+                                                              'rlnCtfImage',
+                                                              'rlnMicrographCoordinates'))
                     batch.log(f"Removing {micsStarBatch}", flush=True)
                     os.remove(micsStarBatch)
 
@@ -160,14 +160,14 @@ class PreprocessingPipeline(ProcessingPipeline):
                 coordStar, coordStarBatch = _pair('coordinates.star')
                 with StarFile(coordStar, 'a') as sf:
                     with StarFile(coordStarBatch) as sfBatch:
-                        coordsTable = sfBatch.getTable('coordinate_files')
-                        if firstTime:
-                            sf.writeTimeStamp()
-                            sf.writeHeader('coordinate_files', coordsTable)
-                        for row in coordsTable:
-                            sf.writeRow(self.fixOutputRow(row,
-                                                          'rlnMicrographName',
-                                                          'rlnMicrographCoordinates'))
+                        if coordsTable := sfBatch.getTable('coordinate_files'):
+                            if firstTime:
+                                sf.writeTimeStamp()
+                                sf.writeHeader('coordinate_files', coordsTable)
+                            for row in coordsTable:
+                                sf.writeRow(self.fixOutputRow(row,
+                                                              'rlnMicrographName',
+                                                              'rlnMicrographCoordinates'))
                     batch.log(f"Removing {coordStarBatch}", flush=True)
                     os.remove(coordStarBatch)
 
@@ -175,16 +175,16 @@ class PreprocessingPipeline(ProcessingPipeline):
                 partStar, partStarBatch = _pair('particles.star')
                 with StarFile(partStar, 'a') as sf:
                     with StarFile(partStarBatch) as sfBatch:
-                        partTable = sfBatch.getTable('particles')
-                        if firstTime:
-                            sf.writeTimeStamp()
-                            sf.writeTable('optics', sfBatch.getTable('optics'))
-                            sf.writeHeader('particles', partTable)
-                        for row in partTable:
-                            micName = row.rlnMicrographName
-                            i = row.rlnImageName.split('@')[0]
-                            sf.writeRow(row._replace(rlnImageName=f"{i}@{partStack[micName]}",
-                                                     rlnMicrographName=self.fixOutputPath(micName)))
+                        if partTable := sfBatch.getTable('particles'):
+                            if firstTime:
+                                sf.writeTimeStamp()
+                                sf.writeTable('optics', sfBatch.getTable('optics'))
+                                sf.writeHeader('particles', partTable)
+                            for row in partTable:
+                                micName = row.rlnMicrographName
+                                i = row.rlnImageName.split('@')[0]
+                                sf.writeRow(row._replace(rlnImageName=f"{i}@{partStack[micName]}",
+                                                         rlnMicrographName=self.fixOutputPath(micName)))
                     batch.log(f"Removing {partStarBatch}", flush=True)
                     os.remove(partStarBatch)
 
