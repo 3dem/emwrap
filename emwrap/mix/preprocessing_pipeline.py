@@ -204,21 +204,15 @@ class PreprocessingPipeline(ProcessingPipeline):
                 ]
 
                 batch.log(f"No call: Updating batchInfo", flush=True)
-                # 2025/03/10 JMRT: Calling this function makes the thread lock here
                 self.updateBatchInfo(Batch(batch))
-                # self.info['batches'][batch.id] = batch.info
-                # with open(self.infoFile, 'w') as f:
-                #     json.dump(self.info, f, indent=4)
 
                 with StarFile(self.inputStar) as sf:
                     self._totalInput = sf.getTableSize('movies')
                 self._totalOutput += len(batch['items'])
                 percent = self._totalOutput * 100 / self._totalInput
-                self.log(f">>> Processed {Color.green(str(self._totalOutput))} out of "
-                         f"{Color.red(str(self._totalInput))} "
-                         f"({Color.bold('%0.2f' % percent)} %)", flush=True)
-
-                batch.log(f"Storing outputs. FINISHED", flush=True)
+                batch.log(f">>> Processed {Color.green(str(self._totalOutput))} out of "
+                          f"{Color.red(str(self._totalInput))} "
+                          f"({Color.bold('%0.2f' % percent)} %)", flush=True)
                 return batch
         except Exception as e:
             print(Color.red('ERROR: ' + str(e)))

@@ -48,7 +48,7 @@ class StarBatchManager(FolderManager):
         FolderManager.__init__(self, outputPath)
         self._inputStar = inputStar
         self._outputPath = outputPath
-        self._groupColumn = groupColumn
+
         self._minSize = kwargs.get('minSize', 0)
         self._sleep = kwargs.get('sleep', 60)
         self._timeout = timedelta(seconds=kwargs.get('timeout', 7200))
@@ -59,6 +59,8 @@ class StarBatchManager(FolderManager):
         self._rows = []
         self._batches = {}
         self.log = kwargs.get('log', print)
+        self._groupColumn = groupColumn
+        self._lastValue = None  # used with groupColum to create new batches
 
     def generate(self):
         """ Generate batches based on the input items. """
@@ -82,23 +84,37 @@ class StarBatchManager(FolderManager):
         for batch in self._createNewBatches(last=True):
             yield batch
 
+    def _batchCondition(self, row, rows):
+        if self._groupColumn is not None:
+            value = getattr(row, self._groupColumn)
+            r = (self._lastValue is not None and
+                 self._lastValue != value and
+                 len(rows) > self._minSize)
+            self._lastValue = value
+        else:  # We are not grouping by any column in this case
+            len(rows) > self._minSize
+
+        return r
+
     def _createNewBatches(self, last=False):
         with StarFile(self._inputStar) as sf:
             tOptics = sf.getTable('optics')
             tParticles = sf.getTableInfo('particles')
-            rows = []
-            lastValue = None
 
-            for i, row in enumerate(sf.iterTable('particles', start=self._startIndex)):
-                value = getattr(row, self._groupColumn)
-                if lastValue is not None and lastValue != value and len(rows) > self._minSize:
-                    yield self._createBatch(tOptics, tParticles, rows)
-                    rows = []
-                rows.append(row)
-                lastValue = value
-
-            if rows and last:
+            if self._groupColumn is None and self._minSize == 0:  # Take all
+                rows = [row for row in sf.iterTable('particles', start=self._startIndex)]
                 yield self._createBatch(tOptics, tParticles, rows)
+            else:
+                rows = []
+
+                for row in enumerate(sf.iterTable('particles', start=self._startIndex)):
+                    if self._batchCondition(row, rows):
+                        yield self._createBatch(tOptics, tParticles, rows)
+                        rows = []
+                    rows.append(row)
+
+                if rows and last:
+                    yield self._createBatch(tOptics, tParticles, rows)
 
     def _createBatch(self, tOptics, tParticles, rows):
         self._count += 1
@@ -194,7 +210,7 @@ class Relion2DPipeline(ProcessingPipeline):
         self.mkdir('Classes2D')
 
         batchMgr = StarBatchManager(self.tmpDir, self._args['in_particles'],
-                                    'rlnMicrographName',
+                                    self._args.get('group_column', None),
                                     minSize=minSize, timeout=timeout)
         g = self.addGenerator(batchMgr.generate, queueMaxSize=4)
         outputQueue = None
@@ -212,9 +228,7 @@ class Relion2DPipeline(ProcessingPipeline):
 
 
 def main():
-    input_args = ProcessingPipeline.getInputArgs('emw-rln2d',
-                                                 'in_particles')
-    Relion2DPipeline(input_args).run()
+    Relion2DPipeline.runFromArgs()
 
 
 if __name__ == '__main__':

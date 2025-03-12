@@ -175,7 +175,7 @@ class Preprocessing:
             tCoords = RelionStar.coordinates_table()
             extra_cols = ['rlnMicrographCoordinates', 'rlnCoordinatesNumber']
         tOptics = RelionStar.optics_table(acq, originalPixelSize=origPs)
-        tMics = RelionStar.micrograph_table(extra_cols=extra_cols)
+        tMics = RelionStar.micrograph_table(image_id='rlnImageId', extra_cols=extra_cols)
 
         def _move_cryolo(micName, folder, ext):
             """ Move result box files from cryolo. """
@@ -191,6 +191,7 @@ class Preprocessing:
             if 'error' not in r:
                 micPath = os.path.join('Micrographs', micName)
                 kvalues = {
+                    'rlnImageId': row['rlnImageId'],  # Propagate the id
                     'rlnMicrographName': micPath,
                     'rlnOpticsGroup': row['rlnOpticsGroup'],
                     'rlnCtfImage': os.path.join('CTFs', os.path.basename(values[2])),
@@ -256,7 +257,6 @@ class Preprocessing:
         batch['Preprocessing.args'] = self.args
         batch.log(f"Batch path is: {batch.path}", flush=True)
         batch.dump_all()
-
 
         return batch
 
