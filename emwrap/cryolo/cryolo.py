@@ -84,7 +84,7 @@ class CryoloPredict:
             '-c': 'config.json',
             '-w': self.model,
             '-i': 'Micrographs/',
-            '-t': 0.2,
+            '-t': 0.05,
             '-nc': cpu,
             '-g': gpu,
             '-o': 'cryolo_boxfiles/'
