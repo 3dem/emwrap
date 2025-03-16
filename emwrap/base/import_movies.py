@@ -19,11 +19,11 @@ import os
 import argparse
 import shutil
 import time
-import glob
+from glob import glob
 import threading
 from datetime import datetime
 
-from emtools.utils import Color, Pretty, Path
+from emtools.utils import Color, Pretty, Path, FolderManager
 from emtools.metadata import Acquisition, StarFile, RelionStar, Table
 
 from emwrap.base import ProcessingPipeline
@@ -64,6 +64,8 @@ class ImportMoviesPipeline(ProcessingPipeline):
             nextId = moviesTable[-1].rlnImageId
         else:
             self.mkdir('Movies')
+            xmlFolder = FolderManager(self.mkdir('EPU', 'XML'))
+            gsFolder = FolderManager(self.mkdir('EPU', 'GridSquares'))
             os.symlink(self.patternRoot, self.join('Movies', 'input'))
 
         self.log(f"Monitoring movies with pattern: {Color.cyan(self.pattern)}")
@@ -87,7 +89,7 @@ class ImportMoviesPipeline(ProcessingPipeline):
         while (now - lastUpdate).seconds < self.wait['timeout']:
             now = datetime.now()
             newFiles = [(fn, os.path.getmtime(fn))
-                        for fn in glob.glob(self.pattern) if _new_file(fn)]
+                        for fn in glob(self.pattern) if _new_file(fn)]
             if newFiles:
                 self.log(f"Found {len(newFiles)} new files", flush=True)
 
@@ -103,15 +105,30 @@ class ImportMoviesPipeline(ProcessingPipeline):
                                              'GridSquare'])
                         sf.writeHeader('movies', moviesTable)
 
+                    copiedGs = set()
                     # Sort new files base on modification time
                     for fn, mt in sorted(newFiles, key=lambda x: x[1]):
                         nextId += 1
                         ext = Path.getExt(fn)
-                        newFn = self.join('Movies', f'movie-{nextId:06}{ext}')
-                        baseName = os.path.abspath(fn).replace(self.patternRoot, '')
+                        newPrefix = f'movie-{nextId:06}'
+                        newFn = self.join('Movies', f'{newPrefix}{ext}')
+                        absFn = os.path.abspath(fn)
+                        baseName = absFn.replace(self.patternRoot, '')
                         os.symlink(os.path.join('input', baseName), newFn)
-                        sf.writeRowValues([nextId, newFn, fn, 1, mt, _grid_square(fn)])
+                        gs = _grid_square(fn)
+                        sf.writeRowValues([nextId, newFn, fn, 1, mt, gs])
                         allMovies.add(fn)
+                        absXml = absFn.replace('_fractions.tiff', '.xml')
+
+                        if os.path.exists(absXml):
+                            shutil.copy(absXml, xmlFolder.join(f'{newPrefix}.xml'))
+                        if gs not in copiedGs:
+                            if gsFiles := glob(os.path.join(self.patternRoot, '*', gs, 'GridSquare_*.???')):
+                                gsSubFolder = gsFolder.mkdir(gs)
+                                for gsFn in gsFiles:
+                                    print(f"   Copying: {gsFn} to {gsSubFolder}")
+                                    shutil.copy(gsFn, gsSubFolder)
+                                copiedGs.add(gs)
 
                 now = lastUpdate = datetime.now()
             time.sleep(self.wait['sleep'])
