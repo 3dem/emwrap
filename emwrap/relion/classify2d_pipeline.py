@@ -92,7 +92,7 @@ class StarBatchManager(FolderManager):
                  len(rows) > self._minSize)
             self._lastValue = value
         else:  # We are not grouping by any column in this case
-            len(rows) > self._minSize
+            r = len(rows) > self._minSize
 
         return r
 
@@ -107,7 +107,7 @@ class StarBatchManager(FolderManager):
             else:
                 rows = []
 
-                for row in enumerate(sf.iterTable('particles', start=self._startIndex)):
+                for row in sf.iterTable('particles', start=self._startIndex):
                     if self._batchCondition(row, rows):
                         yield self._createBatch(tOptics, tParticles, rows)
                         rows = []
@@ -162,7 +162,7 @@ class Relion2DPipeline(ProcessingPipeline):
                 batch.log(f"{Color.warn('Running 2D classification')}. "
                           f"Items: {batch['items']} "
                           f"GPU = {gpu}", flush=True)
-                rln2d = RelionClassify2D()
+                rln2d = RelionClassify2D(**self._args)
                 rln2d.process_batch(batch, gpu=gpu)
                 rln2d.clean_iter_files(batch)
             except Exception as e:
@@ -174,7 +174,7 @@ class Relion2DPipeline(ProcessingPipeline):
     def _output(self, batch):
         iterFiles = {}
         if not batch.error:
-            iterFiles = next(iter(RelionClassify2D().get_iter_files(batch).values()), {})
+            iterFiles = next(iter(RelionClassify2D(**self._args).get_iter_files(batch).values()), {})
             if iterFiles is None:
                 batch.error = f"No output files."
                 batch.log(Color.red(f"ERROR: {batch['error']}"))

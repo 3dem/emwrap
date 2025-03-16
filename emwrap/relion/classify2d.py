@@ -28,7 +28,7 @@ from emtools.metadata import Table, Column, StarFile, StarMonitor, TextFile
 
 class RelionClassify2D:
     def __init__(self, **kwargs):
-        self.path = '/usr/local/em/scripts/relion_refine.sh'
+        self.path = kwargs['launcher']  # '/usr/local/em/scripts/relion_refine.sh'
         self.args = Args(kwargs.get('extra_args', {}))
 
     def process_batch(self, batch, **kwargs):
@@ -56,7 +56,7 @@ class RelionClassify2D:
             '--particle_diameter': 209,
             '--ctf': '',
             '--zero_mask': '',
-            '--K': 50,
+            '--K': 200,
             '--grad': '',
             '--grad_write_iter': 10,
             '--class_inactivity_threshold': 0.1,
