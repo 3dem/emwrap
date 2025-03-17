@@ -63,6 +63,13 @@ class PreprocessingPipeline(ProcessingPipeline):
         self._pp_args['picking']['particle_size'] = value
 
     def prerun(self):
+        # Debugging option when there are processing outputs that were processed
+        # but not registered in the output. In this case we will load the batch
+        # and update output STAR files with missing elements
+        if self._pp_args.get('only_output'):
+            self._only_output()
+            return
+
         self.dumpArgs(printMsg="Input args")
         self.log(f"Batch size: {Color.cyan(str(self.batchSize))}")
         self.log(f"Using GPUs: {Color.cyan(str(self.gpuList))}", flush=True)
@@ -215,10 +222,23 @@ class PreprocessingPipeline(ProcessingPipeline):
                           f"({Color.bold('%0.2f' % percent)} %)", flush=True)
                 return batch
         except Exception as e:
-            print(Color.red('ERROR: ' + str(e)))
+            batch.log(Color.red('ERROR: ' + str(e)))
             import traceback
             traceback.print_exc()
-            sys.exit(1)
+
+    def _only_output(self):
+        logs = self.join('Logs')
+        stars = ['micrographs.star', 'particles.star', 'coordinates.star']
+        batches = []
+        for fn in sorted(os.listdir(logs)):
+            if fn.endswith('.json'):
+                with open(os.path.join(logs, fn)) as f:
+                    batches.append(Batch(json.load(f)))
+
+        for batch in sorted(batches, key=lambda b: b.index):
+            print(f">>> Batch id: {Color.bold(batch.id)}")
+            if all(self.exists(f"{batch.id}_{name}") for name in stars):
+                self._output(batch)
 
 
 def main():
