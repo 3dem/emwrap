@@ -35,7 +35,7 @@ predict_config = {
   "path": "path/to/your/model/model_name.tar.gz",
   "even": "/path/to/even.rec",
   "odd": "/path/to/odd.rec",
-  "n_tiles": [1, 1, 1],
+  "n_tiles": [2, 2, 2],
   "output": "./",
   "overwrite": True,
   "gpu_id": 0

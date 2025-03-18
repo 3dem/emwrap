@@ -122,6 +122,7 @@ class ImportMoviesPipeline(ProcessingPipeline):
                         sf.writeRowValues([nextId, newFn, fn, 1, mt, gs])
                         if unwritten == 100:  # Update star file to allow streaming
                             sf.flush()
+                            unwritten = 0
                         allMovies.add(fn)
                         absXml = absFn.replace('_fractions.tiff', '.xml')
 
