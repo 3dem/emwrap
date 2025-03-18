@@ -220,11 +220,14 @@ class PreprocessingPipeline(ProcessingPipeline):
                 batch.log(f">>> Processed {Color.green(str(self._totalOutput))} out of "
                           f"{Color.red(str(self._totalInput))} "
                           f"({Color.bold('%0.2f' % percent)} %)", flush=True)
-                return batch
+
         except Exception as e:
             batch.log(Color.red('ERROR: ' + str(e)))
+            batch.error = str(e)
             import traceback
             traceback.print_exc()
+
+        return batch
 
     def _only_output(self):
         logs = self.join('Logs')

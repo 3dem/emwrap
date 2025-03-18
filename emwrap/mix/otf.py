@@ -34,6 +34,11 @@ class OTF(FolderManager):
     """ Pipeline to run Preprocessing in batches. """
     def __init__(self, path, **kwargs):
         FolderManager.__init__(self, path)
+        self.cmds = [
+            'emw-relion -r "emw-import-movies --json args.json"',
+            'emw-relion -r "emw-preprocessing --json args.json -i External/job001/movies.star"',
+            'emw-relion -r "emw-rln2d --json args.json -i External/job002/particles.star"'
+        ]
 
     def _dumpJson(self, fn, obj):
         fullFn = self.join(fn)
@@ -86,12 +91,12 @@ class OTF(FolderManager):
 
         args_pp = {
             "output": "output",
-            "gpu": "0 1",
+            "gpu": "0 0 0 0",
             "batch_size": 32,
             "in_movies": "External/job001/movies.star",
             "scratch": "/scr/",
             "timeout": 7200,
-            "launcher": "/usr/local/em/scripts/preprocess_batch.sh",
+            "launcher": "/usr/local/em/scripts/preprocess_batch_slurm.sh",
             "motioncor": {
                 "extra_args": {
                     "-FtBin": 2,
@@ -113,11 +118,10 @@ class OTF(FolderManager):
 
         args_2d = {
             "output": "FIXME",
-            "gpu": "2,3",
-            "batch_size": 200000,
+            "gpu": "0,1 0,1",
+            "batch_size": 100000,
             "in_particles": "External/job002/particles.star",
-            "scratch": "/scr/",
-            "launcher": "/usr/local/em/scripts/relion_refine.sh",
+            "launcher": "/usr/local/em/scripts/relion_refine_slurm.sh",
             "timeout": 7200,
             "sleep": 300
         }
@@ -158,16 +162,12 @@ class OTF(FolderManager):
         }
         self._dumpJson('session.json', session_conf)
 
-        cmd_import = 'emw-relion -r "emw-import-movies --json args.json"'
-        cmd_pp = 'emw-relion -r "emw-preprocessing --json args.json -i External/job001/movies.star"'
-        cmd_2d = 'emw-relion -r "emw-rln2d --json args.json -i External/job002/particles.star"'
-
         with open(self.join('README.txt'), 'a') as f:
             f.write(f'\n\n# OTF LAUNCHED: {Pretty.now()}\n')
             f.write(f'# SESSION_ID = {session["id"]}\n\n')
-            f.write(f'{cmd_import}\n\n')
-            f.write(f'{cmd_pp}\n\n')
-            f.write(f'{cmd_2d}\n\n')
+            f.write(f'{self.cmds[0]}\n\n')
+            f.write(f'{self.cmds[1]}\n\n')
+            f.write(f'{self.cmds[2]}\n\n')
 
         #Process.system(cmd_pp)
         #Process.system(cmd_2d)
@@ -177,9 +177,25 @@ class OTF(FolderManager):
         pass
 
     def run(self):
-        """
-        /tmp/TestPreprocessing.test_pipeline_multigpu__ip9v_n14/output2d/test
-        """
+        # Run the import
+        Process.system(self.cmds[0])
+
+        def _movies():
+            try:
+                with StarFile("External/job001/movies.star") as sf:
+                    return sf.getTableSize('movies')
+            except:
+                return 0
+        # Wait until there are some movies in the star file
+        # to launch the preprocessing part
+        while not _movies():
+            time.sleep(30)
+
+        # Run preprocessing
+        Process.system(self.cmds[1])
+
+        # Run 2D
+        Process.system(self.cmds[2])
 
 
 def main():
@@ -189,7 +205,7 @@ def main():
                    help="Create new OTF project, previous files will be cleaned.")
     # g.add_argument('--update', '-u', action='store_true',
     #                help="Update job status and pipeline star file.")
-    # g.add_argument('--run', '-r', nargs=2, metavar=('JOB_TYPE', 'COMMAND'))
+    g.add_argument('--run', '-r', action='store_true')
 
     args = p.parse_args()
 
@@ -204,11 +220,8 @@ def main():
             resources = dc.get('resources').json()
         otf.create(session, sconfig, resources)
 
-    # elif args.update:
-    #     rlnProject.update()
-    # elif args.run:
-    #     folder, cmd = args.run
-    #     rlnProject.run(folder, cmd)
+    elif args.run:
+        otf.run()
 
 
 if __name__ == '__main__':

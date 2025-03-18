@@ -93,6 +93,8 @@ class ImportMoviesPipeline(ProcessingPipeline):
             if newFiles:
                 self.log(f"Found {len(newFiles)} new files", flush=True)
 
+                unwritten = 0
+
                 with StarFile(self.outputStar, 'a') as sf:
                     if moviesTable is None:
                         sf.writeTimeStamp()
@@ -109,6 +111,7 @@ class ImportMoviesPipeline(ProcessingPipeline):
                     # Sort new files base on modification time
                     for fn, mt in sorted(newFiles, key=lambda x: x[1]):
                         nextId += 1
+                        unwritten += 1
                         ext = Path.getExt(fn)
                         newPrefix = f'movie-{nextId:06}'
                         newFn = self.join('Movies', f'{newPrefix}{ext}')
@@ -117,6 +120,8 @@ class ImportMoviesPipeline(ProcessingPipeline):
                         os.symlink(os.path.join('input', baseName), newFn)
                         gs = _grid_square(fn)
                         sf.writeRowValues([nextId, newFn, fn, 1, mt, gs])
+                        if unwritten == 100:  # Update star file to allow streaming
+                            sf.flush()
                         allMovies.add(fn)
                         absXml = absFn.replace('_fractions.tiff', '.xml')
 
