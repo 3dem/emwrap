@@ -48,8 +48,10 @@ class OTF(FolderManager):
             f.write('\n')
 
     def create(self, session, sconfig, resources):
+        cwd = os.getcwd()
         project = RelionProject(self.path)
         project.clean()
+        os.chdir(self.path)
 
         raw = session['extra']['raw']
 
@@ -72,7 +74,7 @@ class OTF(FolderManager):
             print(f"Dimensions from: {first}: {dims}")
         else:
             dims = None
-            raise Exception(f"There are not movies in: {movies}")
+            raise Exception(f"There are not movies in: {input_movies}")
 
         acq = {k: float(v) for k, v in session['acquisition'].items()}
         gain_pattern = self.join('data', conf_acq['gain_pattern'].format(microscope=microscope))
@@ -123,7 +125,10 @@ class OTF(FolderManager):
             "in_particles": "External/job002/particles.star",
             "launcher": "/usr/local/em/scripts/relion_refine_slurm.sh",
             "timeout": 7200,
-            "sleep": 300
+            "sleep": 300,
+            "extra_args": {
+                "-K": 100
+            }
         }
 
         args = {
@@ -141,11 +146,11 @@ class OTF(FolderManager):
             fmint = self.join('fmint.txt')
             with open(fmint, 'w') as f:
                 x, y, n = dims
-                v = 25
+                v = n // 40
                 d = n // v
                 r = n % v
-                f.write(f"{d * v:>8} {v:>5} {dose}\n")
-                f.write(f"{r:>8} {r:>5} {dose}\n")
+                f.write(f"{v * (d - 1):>8} {v:>5} {dose}\n")
+                f.write(f"{r + v:>8} {r + v:>5} {dose}\n")
 
             mc_args["-FmIntFile"] = fmint
             del mc_args["-FlipGain"]
@@ -169,6 +174,7 @@ class OTF(FolderManager):
             f.write(f'{self.cmds[1]}\n\n')
             f.write(f'{self.cmds[2]}\n\n')
 
+        os.chdir(cwd)
         #Process.system(cmd_pp)
         #Process.system(cmd_2d)
 
@@ -197,6 +203,37 @@ class OTF(FolderManager):
         # Run 2D
         Process.system(self.cmds[2])
 
+    def status(self):
+        def _log(logFn):
+            msg = 'missing'
+            if os.path.exists(logFn):
+                s = os.stat(logFn)
+                msg = f"{Pretty.size(s.st_size)}, {Pretty.elapsed(s.st_mtime)}"
+            return f"{logFn} ({msg})"
+
+        with open('session.json') as f:
+            session = json.load(f)
+            for k in ['movies', 'micrographs']:
+                starFn = session[k]
+                runDir = os.path.dirname(starFn)
+                if not os.path.exists(starFn):
+                    color = Color.red
+                    msg = 'missing'
+                else:
+                    t = None
+                    with StarFile(starFn) as sf:
+                        t = sf.getTable(k)
+                    n = len(t) if t else 0
+                    color = Color.green if n else Color.cyan
+                    msg = f"{n} items"
+
+                runOut = _log(os.path.join(runDir, 'run.out'))
+                runErr = _log(os.path.join(runDir, 'run.err'))
+                print(f"- {Color.bold(k): <20}\n"
+                      f"   {starFn:<35} {color(msg):<20}\n"
+                      f"   {runOut:<40}\n"
+                      f"   {runErr:<40}")
+
 
 def main():
     p = argparse.ArgumentParser()
@@ -206,6 +243,7 @@ def main():
     # g.add_argument('--update', '-u', action='store_true',
     #                help="Update job status and pipeline star file.")
     g.add_argument('--run', '-r', action='store_true')
+    g.add_argument('--status', '-s', action='store_true')
 
     args = p.parse_args()
 
@@ -222,6 +260,9 @@ def main():
 
     elif args.run:
         otf.run()
+
+    elif args.status:
+        otf.status()
 
 
 if __name__ == '__main__':
