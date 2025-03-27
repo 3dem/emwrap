@@ -127,7 +127,7 @@ class OTF(FolderManager):
             "timeout": 7200,
             "sleep": 300,
             "extra_args": {
-                "-K": 100
+                "-K": 50
             }
         }
 
