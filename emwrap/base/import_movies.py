@@ -117,7 +117,11 @@ class ImportMoviesPipeline(ProcessingPipeline):
                         newFn = self.join('Movies', f'{newPrefix}{ext}')
                         absFn = os.path.abspath(fn)
                         baseName = absFn.replace(self.patternRoot, '')
-                        os.symlink(os.path.join('input', baseName), newFn)
+                        # JMRT: 2024/04/04 The newFn should not exist, but some sessions
+                        # (e.g. 1815) crashed due to error in movies import, reporting
+                        # the target link already existed
+                        if not os.path.exists(newFn):
+                            os.symlink(os.path.join('input', baseName), newFn)
                         gs = _grid_square(fn)
                         sf.writeRowValues([nextId, newFn, fn, 1, mt, gs])
                         if unwritten == 100:  # Update star file to allow streaming
