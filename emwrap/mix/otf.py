@@ -24,7 +24,7 @@ import argparse
 from glob import glob
 
 from emtools.utils import Color, Timer, Path, Process, FolderManager, Pretty
-from emtools.metadata import Table, StarFile, Acquisition
+from emtools.metadata import Table, StarFile, Acquisition, EPU
 from emtools.image import Image
 
 from emwrap.relion.project import RelionProject
@@ -93,8 +93,8 @@ class OTF(FolderManager):
 
         args_pp = {
             "output": "output",
-            "gpu": "0 0 0 0",
-            "batch_size": 32,
+            "gpu": "0 0 0 0 0 0 0 0",
+            "batch_size": 8,
             "in_movies": "External/job001/movies.star",
             "scratch": "/scr/",
             "timeout": 7200,
@@ -127,7 +127,7 @@ class OTF(FolderManager):
             "timeout": 7200,
             "sleep": 300,
             "extra_args": {
-                "--K": 100
+                "--K": 50
             }
         }
 
@@ -235,11 +235,42 @@ class OTF(FolderManager):
                       f"   {runErr:<40}")
 
 
+def monitorSessionFolder(session_id):
+    from emhub.client import open_client
+    with open_client() as dc:
+        session = dc.get_session(session_id)
+        raw = session['extra']['raw']
+        sconfig = dc.get_config('sessions')
+        attrs = {"attrs": {"id": session_id}}
+        users = dc.request('get_session_users', jsonData=attrs).json()['session_users']
+        group = users['group']
+        gscemRoot = Path.addslash(os.path.join(sconfig['raw']['root'], group))
+        gscemPath = raw['path']
+        dataPath = gscemPath.replace(gscemRoot, '')
+        judeRootDefault = sconfig['raw']['jude_group_folder'].format(group=group)
+        judeRoot = sconfig['raw']['jude_group_mapping'].get(group, judeRootDefault)
+        judePath = os.path.join(judeRoot, dataPath)
+        dirs = [raw['frames'], gscemPath, judePath]
+        # print("Frames: ", raw['frames'])
+        # print("GSCEM: ", gscemPath)
+        # print("Jude: ", judePath)
+        maxlen = max(len(d) for d in dirs)
+
+        def _pad(s):
+            return (maxlen - len(s)) * ' ' + s
+        fill = "=" * 10
+        print('\n', _pad(f"{fill} SESSION {session_id} {fill}"))
+        for d in dirs:
+            print(f"{_pad(d)}: {EPU.count_movies(d):>8}")
+
+
 def main():
     p = argparse.ArgumentParser()
     g = p.add_mutually_exclusive_group()
     g.add_argument('--create', '-c', metavar='SESSION_ID',
                    help="Create new OTF project, previous files will be cleaned.")
+    g.add_argument('--monitor', '-m', metavar='SESSION_IDS', nargs='+',
+                   help="Monitor data transfer for one of several sessions.")
     # g.add_argument('--update', '-u', action='store_true',
     #                help="Update job status and pipeline star file.")
     g.add_argument('--run', '-r', action='store_true')
@@ -257,6 +288,10 @@ def main():
             sconfig = dc.get_config('sessions')
             resources = dc.get('resources').json()
         otf.create(session, sconfig, resources)
+
+    elif args.monitor:
+        for m in args.monitor:
+            monitorSessionFolder(int(m))
 
     elif args.run:
         otf.run()
