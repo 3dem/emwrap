@@ -23,7 +23,8 @@ import argparse
 from pprint import pprint
 import tempfile
 
-from emtools.utils import Pretty, Timer, Path, FolderManager, Color, Process
+from emtools.utils import (Pretty, Timer, Path, FolderManager, Color,
+                           Process, System)
 from emtools.jobs import Batch
 from emtools.metadata import Acquisition, StarFile, RelionStar
 
@@ -107,9 +108,11 @@ class Preprocessing:
         batch.log(f"batch.path (from mkdtemp): {batch.path}", flush=True)
 
         # Let's create symbolic links to the input movies
+        allBase = []
         for item in batch['items']:
             movFn = item['rlnMicrographMovieName']
             baseName = os.path.basename(movFn)
+            allBase.append(baseName)
             os.symlink(os.path.abspath(movFn), batch.join(baseName))
 
         t = Timer()
@@ -118,8 +121,15 @@ class Preprocessing:
         gpu = kwargs['gpu']
         cpu = kwargs.get('cpu', 4)
 
+        # Check that symlink already exist due to crazy stuff with jude
+        while not all(batch.exists(bn) for bn in allBase):
+            batch.log("Unexpected missing links after creation, sleeping 10s")
+            time.sleep(10)
+
         # Motion correction
-        batch.log("Running Motioncor", flush=True)
+        msg = f"Running Motioncor in Host: {System.hostname()}"
+        batch.log(msg, flush=True)
+        print(msg, flush=True)
         mc = Motioncor(self.acq, **self.args['motioncor'])
         mc.process_batch(batch, gpu=gpu)
 
