@@ -231,5 +231,54 @@ def main():
     Relion2DPipeline.runFromArgs()
 
 
+def create_subset():
+    pattern = os.path.join('Classes2D', 'batch*', 'run_it*model.star')
+    missing = Color.red('MISSING')
+
+    files = glob(pattern)
+    files.sort()
+
+    sfOut = StarFile('particles.star', 'w')
+    firstTime = True
+
+    for fn in files:
+        print("Found model: ", fn)
+        ptsFn = fn.replace('_model', '_data')
+        if os.path.exists(ptsFn):
+            print("   Data: ", ptsFn)
+        else:
+            print("   Data: ", missing)
+        selFn = fn + '.selection'
+        if os.path.exists(selFn):
+            with open(selFn) as f:
+                selection = json.load(f)
+            print("   Selection: ", selFn, f"({len(selection)} classes)")
+
+        else:
+            print("   Selection: ", missing)
+            selection = []
+
+        with StarFile(ptsFn) as sf:
+            if partTable := sf.getTable('particles'):
+                if firstTime:
+                    sfOut.writeTimeStamp()
+                    sfOut.writeTable('optics', sf.getTable('optics'))
+                    sfOut.writeHeader('particles', partTable)
+                discarded = 0
+                for row in partTable:
+                    clsNumber = int(row.rlnClassNumber)
+                    if not selection or clsNumber in selection:
+                        sfOut.writeRow(row)
+                    else:
+                        discarded += 1
+                print(f">>> Discarded {Color.red(discarded)} particles")
+        firstTime = False
+
+    sfOut.close()
+
+
 if __name__ == '__main__':
-    main()
+    if '--create_subset' in sys.argv:
+        create_subset()
+    else:
+        main()
