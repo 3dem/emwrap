@@ -66,7 +66,7 @@ class PreprocessingPipeline(ProcessingPipeline):
         # Debugging option when there are processing outputs that were processed
         # but not registered in the output. In this case we will load the batch
         # and update output STAR files with missing elements
-        if self._pp_args.get('only_output'):
+        if self._pp_args.get('DEBUG_only_output'):
             self._only_output()
             return
 
@@ -86,7 +86,12 @@ class PreprocessingPipeline(ProcessingPipeline):
             self.outputDirs[d] = self.mkdir(d)
 
         # Define the current pipeline with generator and processors
-        g = self.addMoviesGenerator(self.inputStar, self.batchSize,
+        outputMicStar = self.join('micrographs.star')
+        if os.path.exists(outputMicStar):
+            with StarFile(outputMicStar) as sf:
+                self._totalOutput = sf.getTableSize('micrographs')
+
+        g = self.addMoviesGenerator(self.inputStar, outputMicStar, self.batchSize,
                                     inputTimeOut=self.inputTimeOut,
                                     queueMaxSize=4, createBatch=False)
         outputQueue = None

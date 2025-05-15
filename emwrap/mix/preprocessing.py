@@ -121,11 +121,6 @@ class Preprocessing:
         gpu = kwargs['gpu']
         cpu = kwargs.get('cpu', 4)
 
-        # Check that symlink already exist due to crazy stuff with jude
-        while not all(batch.exists(bn) for bn in allBase):
-            batch.log("Unexpected missing links after creation, sleeping 10s")
-            time.sleep(10)
-
         # Motion correction
         msg = f"Running Motioncor in Host: {System.hostname()}"
         batch.log(msg, flush=True)
@@ -196,9 +191,9 @@ class Preprocessing:
 
         for i, row in enumerate(batch['items']):
             r = batch['results'][i]
-            values = r['values']
+            values = r.get('values', None)
             micName = os.path.basename(values[0])
-            if 'error' not in r:
+            if values and 'error' not in r:
                 micPath = os.path.join('Micrographs', micName)
                 kvalues = {
                     'rlnImageId': row['rlnImageId'],  # Propagate the id
@@ -225,6 +220,8 @@ class Preprocessing:
                     tCoords.addRowValues(micPath, dstCoords)
 
             else:
+                if values is None and 'error' not in r:
+                    r['error'] = 'Values not produces and not ERROR logged!'
                 batch.log(f"ERROR: For micrograph {micName}, {r['error']}")
             # Update results for each item
             batch['results'][i] = kvalues

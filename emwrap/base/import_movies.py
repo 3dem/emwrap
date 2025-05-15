@@ -60,15 +60,18 @@ class ImportMoviesPipeline(ProcessingPipeline):
         # Load already seen movies if we are continuing the job
         if os.path.exists(self.outputStar):
             moviesTable = StarFile.getTableFromFile(self.outputStar, 'movies')
-            allMovies.update(row.rlnMicrographMovieName for row in moviesTable)
+            allMovies.update(row.rlnMicrographOriginalMovieName for row in moviesTable)
             nextId = moviesTable[-1].rlnImageId
         else:
             self.mkdir('Movies')
-            xmlFolder = FolderManager(self.mkdir('EPU', 'XML'))
-            gsFolder = FolderManager(self.mkdir('EPU', 'GridSquares'))
+            self.mkdir('EPU', 'XML')
+            self.mkdir('EPU', 'GridSquares')
             os.symlink(self.patternRoot, self.join('Movies', 'input'))
 
-        self.log(f"Monitoring movies with pattern: {Color.cyan(self.pattern)}")
+        xmlFolder = FolderManager(self.join('EPU', 'XML'))
+        gsFolder = FolderManager(self.join('EPU', 'GridSquares'))
+
+        self.log(f">>>> STARTING RUN: Monitoring movies with pattern: {Color.cyan(self.pattern)}")
         self.log(f"Existing movies: {Color.cyan(len(allMovies))}")
 
         self.log(f"Input root: {self.patternRoot}", flush=True)

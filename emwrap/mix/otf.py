@@ -211,27 +211,36 @@ class OTF(FolderManager):
                 msg = f"{Pretty.size(s.st_size)}, {Pretty.elapsed(s.st_mtime)}"
             return f"{logFn} ({msg})"
 
+        def _check_starfile(starFn, tableName):
+            if not os.path.exists(starFn):
+                color = Color.red
+                msg = 'missing'
+            else:
+                with StarFile(starFn) as sf:
+                    if tableName in sf.getTableNames():
+                        n = sf.getTableSize(tableName)
+                    else:
+                        n = 0
+                color = Color.green if n else Color.cyan
+                msg = f"{n} items"
+            return starFn, color(msg)
+
         with open('session.json') as f:
             session = json.load(f)
             for k in ['movies', 'micrographs']:
                 starFn = session[k]
                 runDir = os.path.dirname(starFn)
-                if not os.path.exists(starFn):
-                    color = Color.red
-                    msg = 'missing'
-                else:
-                    t = None
-                    with StarFile(starFn) as sf:
-                        t = sf.getTable(k)
-                    n = len(t) if t else 0
-                    color = Color.green if n else Color.cyan
-                    msg = f"{n} items"
+                starMsgs = [_check_starfile(starFn, k)]
+                if k == 'micrographs':
+                    partStar = os.path.join(runDir, 'particles.star')
+                    starMsgs.append(_check_starfile(partStar, 'particles'))
 
                 runOut = _log(os.path.join(runDir, 'run.out'))
                 runErr = _log(os.path.join(runDir, 'run.err'))
-                print(f"- {Color.bold(k): <20}\n"
-                      f"   {starFn:<35} {color(msg):<20}\n"
-                      f"   {runOut:<40}\n"
+                print(f"- {Color.bold(k): <20}")
+                for starFn, msg in starMsgs:
+                    print(f"   {starFn:<35} {msg:<20}")
+                print(f"   {runOut:<40}\n"
                       f"   {runErr:<40}")
 
 

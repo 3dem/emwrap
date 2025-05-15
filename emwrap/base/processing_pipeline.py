@@ -23,6 +23,7 @@ import signal
 import traceback
 import threading
 import argparse
+import re
 from collections import defaultdict
 
 from emtools.utils import Process, Color, Pretty, FolderManager, Timer
@@ -38,6 +39,8 @@ class ProcessingPipeline(Pipeline, FolderManager):
     It will also add some helper functions to manipulate file
     paths relative to the working dir.
     """
+    MIC_ID = re.compile('(?P<prefix>\w+)-(?P<id>\d{6})')
+
     def __init__(self, args):
         self._args = args
         workingDir = args.get('working_dir', os.getcwd())
@@ -174,19 +177,52 @@ class ProcessingPipeline(Pipeline, FolderManager):
             self.__file('EXIT_FAILURE')
             traceback.print_exc()
 
-    def addMoviesGenerator(self, inputStar, batchSize,
+    @staticmethod
+    def micId(filePath):
+        if m := ProcessingPipeline.MIC_ID.search(filePath):
+            return m.groupdict()['id']
+        return None
+
+    def addMoviesGenerator(self, inputStar, outputStar, batchSize,
                            inputTimeOut=3600, queueMaxSize=None,
                            createBatch=True):
-        """ Add a generator that monitor input movies from a
-        given STAR file and group in batches. """
-        def _movie_filename(row):
+        """
+        Add a generator that monitor input movies from a
+        given STAR file and group in batches.
+
+        Args:
+            inputStar: input STAR file that will be monitored for incoming data
+            outputStar: output STAR that will be used in the resume mode to avoid
+                reprocessing already processed items
+            batchSize: number of items that will trigger a new batch
+            inputTimeOut: if there are no changes in the input STAR file after
+                this number of seconds, the monitor will trigger the last batch.
+            queueMaxSize: maximum number of batch that can be waiting
+            createBatch: if True, the BatchManager will create the batch folder
+        """
+        def _movie_fn(row):
             return row.rlnMicrographMovieName
 
-        monitor = StarMonitor(inputStar, 'movies',
-                              _movie_filename, timeout=inputTimeOut)
+        def _movie_micrograph_key(row):
+            """ Return the id from movie or micrograph row. """
+            for label in ['rlnMicrographName', 'rlnMicrographMovieName']:
+                if value := getattr(row, label, None):
+                    return ProcessingPipeline.micId(value)
+
+        # Get the micrographs IDs to avoid processing again that movies
+        # and use it for the StarMonitor blacklist
+        if os.path.exists(outputStar):
+            with StarFile(outputStar) as sf:
+                blacklist = sf.getTable('micrographs')
+        else:
+            blacklist = []
+
+        monitor = StarMonitor(inputStar, 'movies', _movie_micrograph_key,
+                              timeout=inputTimeOut,
+                              blacklist=blacklist)
 
         batchMgr = BatchManager(batchSize, monitor.newItems(), self.tmpDir,
-                                itemFileNameFunc=_movie_filename,
+                                itemFileNameFunc=_movie_fn,
                                 createBatch=createBatch)
 
         return self.addGenerator(batchMgr.generate,
