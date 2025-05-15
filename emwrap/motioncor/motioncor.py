@@ -16,7 +16,7 @@
 
 import os
 
-from emtools.utils import Color, Timer, Path
+from emtools.utils import Color, Timer, Path, FolderManager
 from emtools.jobs import Args
 from emtools.metadata import Table, StarFile, TextFile, Acquisition
 from emtools.image import Image
@@ -39,8 +39,8 @@ class Motioncor:
     def process_batch(self, batch, **kwargs):
         gpu = kwargs['gpu']
 
-        batch.mkdir('output')
-        batch.mkdir('log')
+        outputDir = batch.mkdir('output')
+        logDir = batch.mkdir('log')
         ext = Path.getExt(batch['items'][0]['rlnMicrographMovieName'])
         extLower = ext.lower()
 
@@ -58,7 +58,7 @@ class Motioncor:
         else:
             raise Exception(f"Unsupported movie format: {ext}")
 
-        kwargs[inArg] = './'
+        kwargs[inArg] = './movie'
         kwargs.update(self.args)
 
         t = Timer()
@@ -73,14 +73,24 @@ class Motioncor:
         batch['outputs'] = []
         total = 0
 
+        def _rename(output, outputPrefix):
+            """ Rename files in that directory. """
+            fm = FolderManager(output)
+            for fn in fm.listdir():
+                if fn.startswith(outputPrefix):
+                    fm.rename(fn, fn.replace(outputPrefix, 'micrograph-'))
+
+        _rename(outputDir, 'aligned_-')
+        _rename(logDir, 'movie-')
+
         for row in batch['items']:
             result = {}
             try:
                 movieName = row['rlnMicrographMovieName']
-                baseName = Path.removeBaseExt(movieName)
+                baseName = Path.removeBaseExt(movieName).replace('movie-', 'micrograph-')
                 suffix = '_DW' if '-FmDose' in self.args else ''
                 # TODO: Allow an option to save non-DW movies if required
-                micName = batch.join('output', f"aligned_{baseName}{suffix}.mrc")
+                micName = batch.join('output', f"{baseName}{suffix}.mrc")
 
                 # Check that the expected output micrograph file exists
                 # and move it to the final output directory
