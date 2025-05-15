@@ -194,6 +194,8 @@ class Relion2DPipeline(ProcessingPipeline):
                      [iterFiles.get('optimiser', 'optimiser:None'), 'ProcessData.star.relion.optimiser.class2d']
                  ]})
             with self.outputLock:
+                batch.info['items'] = batch['items']
+                batch.info['path'] = batch['path']
                 self.updateBatchInfo(batch)
                 batch.log(f"Completed batch in {batch.info['elapsed']},"
                           f"total batches: {len(self.info['batches'])}", flush=True)
