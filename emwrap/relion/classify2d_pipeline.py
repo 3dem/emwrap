@@ -57,7 +57,6 @@ class StarBatchManager(FolderManager):
         self._startIndex = 0  # FIXME We might read this value for restarting
         self._count = 0
         self._rows = []
-        self._batches = {}
         self.log = kwargs.get('log', print)
         self._groupColumn = groupColumn
         self._lastValue = None  # used with groupColum to create new batches
@@ -194,29 +193,59 @@ class Relion2DPipeline(ProcessingPipeline):
                      [iterFiles.get('optimiser', 'optimiser:None'), 'ProcessData.star.relion.optimiser.class2d']
                  ]})
             with self.outputLock:
+                batch.info['index'] = batch['index']
                 batch.info['items'] = batch['items']
-                batch.info['path'] = batch['path']
+                batch.info['path'] = self.join('Classes2D', os.pathb.basename(batch['path']))
                 self.updateBatchInfo(batch)
                 batch.log(f"Completed batch in {batch.info['elapsed']},"
                           f"total batches: {len(self.info['batches'])}", flush=True)
         return batch
 
-    def prerun(self):
-        minSize = self._args['batch_size']
-        timeout = self._args.get('timeout', 3600)
-        self.dumpArgs(printMsg="Input args")
-        self.log(f"Batch size: {Color.cyan(str(minSize))}")
-        self.log(f"Input timeout (s): {Color.cyan(str(timeout))}")
-        self.log(f"Using GPUs: {Color.cyan(str(self.gpuList))}", flush=True)
-
-        self.mkdir('Classes2D')
-
+    def generate_batches(self):
+        """ Use a StarBatchManager to generate processing batches from the input
+        StarFile. If a given batch was already processed, we will skip it. """
         batchMgr = StarBatchManager(self.tmpDir, self._args['in_particles'],
                                     self._args.get('group_column', None),
-                                    minSize=minSize, timeout=timeout)
-        g = self.addGenerator(batchMgr.generate, queueMaxSize=4)
-        outputQueue = None
+                                    minSize=self._minSize,
+                                    timeout=self._timeout)
 
+        batches = {b for b in self.info.get('batches', {})}
+
+        for batch in batchMgr.generate():
+            if batch is None:
+                break
+
+            if batch['id'] in batches:
+                self.log(f"Skipping batch ID: {batch['id']} because it is "
+                         f"already processed.")
+            else:
+                yield batch
+
+    def prerun(self):
+        self._minSize = self._args['batch_size']
+        self._timeout = self._args.get('timeout', 3600)
+        self.dumpArgs(printMsg="Input args")
+        self.log(f"Batch size: {Color.cyan(str(self._minSize))}")
+        self.log(f"Input timeout (s): {Color.cyan(str(self._timeout))}")
+        self.log(f"Using GPUs: {Color.cyan(str(self.gpuList))}", flush=True)
+
+        g = self.addGenerator(self.generate_batches, queueMaxSize=4)
+
+        if self.exists('Classes2D'):
+            if batches := self.info['batches']:
+                self.log(f"Existing output batches: {len(batches)}")
+
+                # # DEBUGGING
+                # def fake_processing(batch):
+                #     self.log(f"Processing batch: {str(batch)}")
+                #     time.sleep(30)
+                #     return batch
+                # self.addProcessor(g.outputQueue, fake_processing)
+                # return
+        else:
+            self.mkdir('Classes2D')
+
+        outputQueue = None
         self.log(f"Creating {len(self.gpuList)} processing threads.")
         for gpu in self.gpuList:
             self.log(f"Creating processor for gpu: {gpu}")
@@ -279,8 +308,33 @@ def create_subset():
     sfOut.close()
 
 
+def register_outputs():
+    run = FolderManager(os.getcwd())
+
+    with open('info.json') as f:
+        info = json.load(f)
+
+    for batchFolder in sorted(os.listdir(run.join('tmp'))):
+        clsBatch = run.join('Classes2D', batchFolder)
+        tmpBatch = run.join('tmp', batchFolder)
+        classes = os.path.join(tmpBatch, 'run_it200_classes.mrcs')
+        if not os.path.exists(clsBatch) and os.path.exists(classes):
+            cmd = f"mv {tmpBatch} {clsBatch}"
+            print(cmd)
+            os.system(cmd)
+            info['batches'][batchFolder] = {
+                'path': clsBatch
+            }
+
+    print("Writing info to info2.json")
+    with open('info2.json', 'w') as f:
+        json.dump(info, f, indent=4)
+
+
 if __name__ == '__main__':
     if '--create_subset' in sys.argv:
         create_subset()
+    elif '--register_outputs' in sys.argv:
+        register_outputs()
     else:
         main()
