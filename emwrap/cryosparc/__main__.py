@@ -195,13 +195,18 @@ def cryosparc_prepare(sessionFile, particlesStar):
 
 
 def cryosparc_import(projId, dataRoot):
+    if ':' in projId:
+        projId, wksId = projId.split(':')
+    else:
+        wksId = 'W1'
+
     # FIXME!!!
-    total_dose = 60
-    amp_contrast = 2.7
     acq = {
         "psize_A": 1.297,  # 0.724,
         "accel_kv": 300,
         "cs_mm": 0.1,
+        "total_dose_e_per_A2": 60,
+        "amp_contrast": 2.7
     }
 
     cs = CryoSparc(projId)
@@ -211,7 +216,6 @@ def cryosparc_import(projId, dataRoot):
 
     args = {
         "blob_paths": f"{csRoot}/Micrographs/mic_*.mrc",
-        "total_dose_e_per_A2": total_dose,
         "parse_xml_files": True,
         "xml_paths": f"{csRoot}/XML/movie-*.xml",
         "mov_cut_prefix_xml": 4,
@@ -220,7 +224,9 @@ def cryosparc_import(projId, dataRoot):
         "xml_cut_suffix_xml": 4
     }
     args.update(acq)
-    micsImport = cs.job_run("W1", "import_micrographs", args)
+    del args['amp_contrast']  # This param is only valid for importing particles
+
+    micsImport = cs.job_run(wksId, "import_micrographs", args)
 
     time.sleep(5)  # FIXME: wait for job completion
     args = {
@@ -234,7 +240,7 @@ def cryosparc_import(projId, dataRoot):
         "amp_contrast": amp_contrast,
     }
     args.update(acq)
-    ptsImport = cs.job_run("W1", "import_particles", args,
+    ptsImport = cs.job_run(wksId, "import_particles", args,
                           {'micrographs': f'{micsImport}.imported_micrographs'})
 
 
@@ -246,7 +252,7 @@ def main():
     p.add_argument('--prepare', '-p', metavar=('SESSION_JSON', 'PARTICLES_STAR'), nargs=2,
                    help="Prepare a folder CS to be used to import movies, micrographs "
                         "and particles into CryoSparc. ")
-    p.add_argument('--import_data', '-i', metavar='CRYOSPARC_PROJECT_ID DATA_ROOT', nargs=2,
+    p.add_argument('--import_data', '-i', metavar=('CRYOSPARC_PROJECT_ID', 'DATA_ROOT'), nargs=2,
                    help="Import data from the CS folder into a "
                         "cryosparc project. ")
 
