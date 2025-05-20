@@ -195,7 +195,7 @@ class Relion2DPipeline(ProcessingPipeline):
             with self.outputLock:
                 batch.info['index'] = batch['index']
                 batch.info['items'] = batch['items']
-                batch.info['path'] = self.join('Classes2D', os.pathb.basename(batch['path']))
+                batch.info['path'] = self.join('Classes2D', os.path.basename(batch['path']))
                 self.updateBatchInfo(batch)
                 batch.log(f"Completed batch in {batch.info['elapsed']},"
                           f"total batches: {len(self.info['batches'])}", flush=True)
@@ -234,14 +234,6 @@ class Relion2DPipeline(ProcessingPipeline):
         if self.exists('Classes2D'):
             if batches := self.info['batches']:
                 self.log(f"Existing output batches: {len(batches)}")
-
-                # # DEBUGGING
-                # def fake_processing(batch):
-                #     self.log(f"Processing batch: {str(batch)}")
-                #     time.sleep(30)
-                #     return batch
-                # self.addProcessor(g.outputQueue, fake_processing)
-                # return
         else:
             self.mkdir('Classes2D')
 
