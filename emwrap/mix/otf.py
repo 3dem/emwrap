@@ -87,7 +87,7 @@ class OTF(FolderManager):
 
         args_import = {
             "in_movies": input_movies,
-            "timeout": 14400,  # 4 hours
+            "timeout": 28800,  # 8 hours
             "sleep": 300,
         }
 
@@ -97,7 +97,7 @@ class OTF(FolderManager):
             "batch_size": 8,
             "in_movies": "External/job001/movies.star",
             "scratch": "/scr/",
-            "timeout": 7200,
+            "timeout": 28800,
             "launcher": "/usr/local/em/scripts/preprocess_batch_slurm.sh",
             "motioncor": {
                 "extra_args": {
@@ -124,7 +124,7 @@ class OTF(FolderManager):
             "batch_size": 100000,
             "in_particles": "External/job002/particles.star",
             "launcher": "/usr/local/em/scripts/relion_refine_slurm.sh",
-            "timeout": 7200,
+            "timeout": 28800,
             "sleep": 300,
             "extra_args": {
                 "--K": 50
