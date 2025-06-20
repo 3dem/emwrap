@@ -1,0 +1,222 @@
+
+=================== Import TS ================================
+
+[jdela80@splprhpc12 EMPIAR-10164_relion_tomo_training]$ cat Import/job001/tilt_series.star
+# Created by the starfile Python package (version 0.5.10) at 14:03:00 on 28/04/2025
+
+
+data_global
+
+loop_
+_rlnTomoName #1
+_rlnTomoTiltSeriesStarFile #2
+_rlnVoltage #3
+_rlnSphericalAberration #4
+_rlnAmplitudeContrast #5
+_rlnMicrographOriginalPixelSize #6
+_rlnTomoHand #7
+_rlnMtfFileName #8
+_rlnOpticsGroupName #9
+TS_01	Import/job001/tilt_series/TS_01.star	300.000000	2.700000	0.100000	0.675000	-1	.	optics1
+TS_03	Import/job001/tilt_series/TS_03.star	300.000000	2.700000	0.100000	0.675000	-1	.	optics1
+TS_43	Import/job001/tilt_series/TS_43.star	300.000000	2.700000	0.100000	0.675000	-1	.	optics1
+TS_45	Import/job001/tilt_series/TS_45.star	300.000000	2.700000	0.100000	0.675000	-1	.	optics1
+TS_54	Import/job001/tilt_series/TS_54.star	300.000000	2.700000	0.100000	0.675000	-1	.	optics1
+
+
+=================== Output TS after MC ================================
+
+[jdela80@splprhpc12 EMPIAR-10164_relion_tomo_training]$ cat MotionCorr/job020/corrected_tilt_series.star
+
+# version 50001
+
+data_global
+
+loop_
+_rlnTomoName #1
+_rlnTomoTiltSeriesStarFile #2
+_rlnVoltage #3
+_rlnSphericalAberration #4
+_rlnAmplitudeContrast #5
+_rlnMicrographOriginalPixelSize #6
+_rlnTomoHand #7
+_rlnMtfFileName #8
+_rlnOpticsGroupName #9
+_rlnTomoTiltSeriesPixelSize #10
+     TS_01 MotionCorr/job020/tilt_series/TS_01.star   300.000000     2.700000     0.100000     0.675000     -1.00000          .    optics1     1.350000
+     TS_03 MotionCorr/job020/tilt_series/TS_03.star   300.000000     2.700000     0.100000     0.675000     -1.00000          .    optics1     1.350000
+     TS_43 MotionCorr/job020/tilt_series/TS_43.star   300.000000     2.700000     0.100000     0.675000     -1.00000          .    optics1     1.350000
+     TS_45 MotionCorr/job020/tilt_series/TS_45.star   300.000000     2.700000     0.100000     0.675000     -1.00000          .    optics1     1.350000
+     TS_54 MotionCorr/job020/tilt_series/TS_54.star   300.000000     2.700000     0.100000     0.675000     -1.00000          .    optics1     1.350000
+
+
+
+[jdela80@splprhpc12 EMPIAR-10164_relion_tomo_training]$ head -30 MotionCorr/job020/tilt_series/TS_01.star
+
+# version 50001
+
+data_TS_01
+
+loop_
+_rlnMicrographMovieName #1
+_rlnTomoTiltMovieFrameCount #2
+_rlnTomoNominalStageTiltAngle #3
+_rlnTomoNominalTiltAxisAngle #4
+_rlnMicrographPreExposure #5
+_rlnTomoNominalDefocus #6
+_rlnMicrographNameEven #7
+_rlnMicrographNameOdd #8
+_rlnMicrographName #9
+_rlnMicrographMetadata #10
+_rlnAccumMotionTotal #11
+_rlnAccumMotionEarly #12
+_rlnAccumMotionLate #13
+frames/TS_01_000_0.0.mrc            8     0.001000    85.000000     0.000000     -4.00000 MotionCorr/job020/frames/TS_01_000_0_0_EVN.mrc MotionCorr/job020/frames/TS_01_000_0_0_ODD.mrc MotionCorr/job020/frames/TS_01_000_0_0.mrc MotionCorr/job020/frames/TS_01_000_0_0.star     1.370947     0.971694     0.399253
+frames/TS_01_001_3.0.mrc            8     3.001130    85.000000     3.000000     -4.00000 MotionCorr/job020/frames/TS_01_001_3_0_EVN.mrc MotionCorr/job020/frames/TS_01_001_3_0_ODD.mrc MotionCorr/job020/frames/TS_01_001_3_0.mrc MotionCorr/job020/frames/TS_01_001_3_0.star     0.863669     0.000000     0.863669
+frames/TS_01_002_-3.0.mrc            8     -2.99863    85.000000     6.000000     -4.00000 MotionCorr/job020/frames/TS_01_002_-3_0_EVN.mrc MotionCorr/job020/frames/TS_01_002_-3_0_ODD.mrc MotionCorr/job020/frames/TS_01_002_-3_0.mrc MotionCorr/job020/frames/TS_01_002_-3_0.star     1.523863     0.000000     1.523863
+frames/TS_01_003_-6.0.mrc            8     -5.99876    85.000000     9.000000     -4.00000 MotionCorr/job020/frames/TS_01_003_-6_0_EVN.mrc MotionCorr/job020/frames/TS_01_003_-6_0_ODD.mrc MotionCorr/job020/frames/TS_01_003_-6_0.mrc MotionCorr/job020/frames/TS_01_003_-6_0.star     1.084959     0.000000     1.084959
+frames/TS_01_004_6.0.mrc            8     6.001260    85.000000    12.000000     -4.00000 MotionCorr/job020/frames/TS_01_004_6_0_EVN.mrc MotionCorr/job020/frames/TS_01_004_6_0_ODD.mrc MotionCorr/job020/frames/TS_01_004_6_0.mrc MotionCorr/job020/frames/TS_01_004_6_0.star     1.228751     0.000000     1.228751
+frames/TS_01_005_9.0.mrc            8     9.001400    85.000000    15.000000     -4.00000 MotionCorr/job020/frames/TS_01_005_9_0_EVN.mrc MotionCorr/job020/frames/TS_01_005_9_0_ODD.mrc MotionCorr/job020/frames/TS_01_005_9_0.mrc MotionCorr/job020/frames/TS_01_005_9_0.star     1.439271     0.000000     1.439271
+frames/TS_01_006_-9.0.mrc            8     -8.99890    85.000000    18.000000     -4.00000 MotionCorr/job020/frames/TS_01_006_-9_0_EVN.mrc MotionCorr/job020/frames/TS_01_006_-9_0_ODD.mrc MotionCorr/job020/frames/TS_01_006_-9_0.mrc MotionCorr/job020/frames/TS_01_006_-9_0.star     1.893632     0.000000     1.893632
+frames/TS_01_007_-12.0.mrc            8    -11.99850    85.000000    21.000000     -4.00000 MotionCorr/job020/frames/TS_01_007_-12_0_EVN.mrc MotionCorr/job020/frames/TS_01_007_-12_0_ODD.mrc MotionCorr/job020/frames/TS_01_007_-12_0.mrc MotionCorr/job020/frames/TS_01_007_-12_0.star     1.903056     0.000000     1.903056
+frames/TS_01_008_12.0.mrc            8    12.000500    85.000000    24.000000     -4.00000 MotionCorr/job020/frames/TS_01_008_12_0_EVN.mrc MotionCorr/job020/frames/TS_01_008_12_0_ODD.mrc MotionCorr/job020/frames/TS_01_008_12_0.mrc MotionCorr/job020/frames/TS_01_008_12_0.star     1.598095     0.000000     1.598095
+frames/TS_01_009_15.0.mrc            8    15.000700    85.000000    27.000000     -4.00000 MotionCorr/job020/frames/TS_01_009_15_0_EVN.mrc MotionCorr/job020/frames/TS_01_009_15_0_ODD.mrc MotionCorr/job020/frames/TS_01_009_15_0.mrc MotionCorr/job020/frames/TS_01_009_15_0.star     2.303575     0.000000     2.303575
+frames/TS_01_010_-15.0.mrc            8    -14.99870    85.000000    30.000000     -4.00000 MotionCorr/job020/frames/TS_01_010_-15_0_EVN.mrc MotionCorr/job020/frames/TS_01_010_-15_0_ODD.mrc MotionCorr/job020/frames/TS_01_010_-15_0.mrc MotionCorr/job020/frames/TS_01_010_-15_0.star     2.325307     0.000000     2.325307
+
+
+
+[jdela80@splprhpc12 EMPIAR-10164_relion_tomo_training]$ head -50 MotionCorr/job020/frames/TS_01_000_0_0.star
+
+# version 50001
+
+data_general
+
+_rlnImageSizeX                                     7420
+_rlnImageSizeY                                     7676
+_rlnImageSizeZ                                        8
+_rlnMicrographMovieName                    frames/TS_01_000_0.0.mrc
+_rlnMicrographBinning                          2.000000
+_rlnMicrographOriginalPixelSize                0.675000
+_rlnMicrographDoseRate                         1.000000
+_rlnMicrographPreExposure                      0.000000
+_rlnVoltage                                  300.000000
+_rlnMicrographStartFrame                              1
+_rlnMotionModelVersion                                0
+
+
+# version 50001
+
+data_global_shift
+
+loop_
+_rlnMicrographFrameNumber #1
+_rlnMicrographShiftX #2
+_rlnMicrographShiftY #3
+           1     0.000000     0.000000
+           2     -0.37000     0.240000
+           3     -0.59000     0.460000
+           4     -0.70000     0.650000
+           5     -0.74000     0.810000
+           6     -0.72000     0.900000
+           7     -0.66000     0.950000
+           8     -0.61000     0.990000
+
+
+[jdela80@splprhpc12 EMPIAR-10164_relion_tomo_training]$ head -50 MotionCorr/job020/frames/TS_01_002_-3_0.star
+
+# version 50001
+
+data_general
+
+_rlnImageSizeX                                     7420
+_rlnImageSizeY                                     7676
+_rlnImageSizeZ                                        8
+_rlnMicrographMovieName                    frames/TS_01_002_-3.0.mrc
+_rlnMicrographBinning                          2.000000
+_rlnMicrographOriginalPixelSize                0.675000
+_rlnMicrographDoseRate                         1.000000
+_rlnMicrographPreExposure                      6.000000
+_rlnVoltage                                  300.000000
+_rlnMicrographStartFrame                              1
+_rlnMotionModelVersion                                0
+
+
+# version 50001
+
+data_global_shift
+
+loop_
+_rlnMicrographFrameNumber #1
+_rlnMicrographShiftX #2
+_rlnMicrographShiftY #3
+           1     0.000000     0.000000
+           2     -0.41000     0.190000
+           3     -0.65000     0.380000
+           4     -0.76000     0.530000
+           5     -0.83000     0.630000
+           6     -0.88000     0.710000
+           7     -0.98000     0.810000
+           8     -1.16000     0.940000
+
+[jdela80@splprhpc12 EMPIAR-10164_relion_tomo_training]$ head -30 MotionCorr/job020/frames/TS_01_000_0_0.star
+
+# version 50001
+
+data_general
+
+_rlnImageSizeX                                     7420
+_rlnImageSizeY                                     7676
+_rlnImageSizeZ                                        8
+_rlnMicrographMovieName                    frames/TS_01_000_0.0.mrc
+_rlnMicrographBinning                          2.000000
+_rlnMicrographOriginalPixelSize                0.675000
+_rlnMicrographDoseRate                         1.000000
+_rlnMicrographPreExposure                      0.000000
+_rlnVoltage                                  300.000000
+_rlnMicrographStartFrame                              1
+_rlnMotionModelVersion                                0
+
+
+# version 50001
+
+data_global_shift
+
+loop_
+_rlnMicrographFrameNumber #1
+_rlnMicrographShiftX #2
+_rlnMicrographShiftY #3
+           1     0.000000     0.000000
+           2     -0.37000     0.240000
+           3     -0.59000     0.460000
+           4     -0.70000     0.650000
+[jdela80@splprhpc12 EMPIAR-10164_relion_tomo_training]$ head -30 MotionCorr/job020/tilt_series/TS_01.star
+
+# version 50001
+
+data_TS_01
+
+loop_
+_rlnMicrographMovieName #1
+_rlnTomoTiltMovieFrameCount #2
+_rlnTomoNominalStageTiltAngle #3
+_rlnTomoNominalTiltAxisAngle #4
+_rlnMicrographPreExposure #5
+_rlnTomoNominalDefocus #6
+_rlnMicrographNameEven #7
+_rlnMicrographNameOdd #8
+_rlnMicrographName #9
+_rlnMicrographMetadata #10
+_rlnAccumMotionTotal #11
+_rlnAccumMotionEarly #12
+_rlnAccumMotionLate #13
+frames/TS_01_000_0.0.mrc            8     0.001000    85.000000     0.000000     -4.00000 MotionCorr/job020/frames/TS_01_000_0_0_EVN.mrc MotionCorr/job020/frames/TS_01_000_0_0_ODD.mrc MotionCorr/job020/frames/TS_01_000_0_0.mrc MotionCorr/job020/frames/TS_01_000_0_0.star     1.370947     0.971694     0.399253
+frames/TS_01_001_3.0.mrc            8     3.001130    85.000000     3.000000     -4.00000 MotionCorr/job020/frames/TS_01_001_3_0_EVN.mrc MotionCorr/job020/frames/TS_01_001_3_0_ODD.mrc MotionCorr/job020/frames/TS_01_001_3_0.mrc MotionCorr/job020/frames/TS_01_001_3_0.star     0.863669     0.000000     0.863669
+frames/TS_01_002_-3.0.mrc            8     -2.99863    85.000000     6.000000     -4.00000 MotionCorr/job020/frames/TS_01_002_-3_0_EVN.mrc MotionCorr/job020/frames/TS_01_002_-3_0_ODD.mrc MotionCorr/job020/frames/TS_01_002_-3_0.mrc MotionCorr/job020/frames/TS_01_002_-3_0.star     1.523863     0.000000     1.523863
+frames/TS_01_003_-6.0.mrc            8     -5.99876    85.000000     9.000000     -4.00000 MotionCorr/job020/frames/TS_01_003_-6_0_EVN.mrc MotionCorr/job020/frames/TS_01_003_-6_0_ODD.mrc MotionCorr/job020/frames/TS_01_003_-6_0.mrc MotionCorr/job020/frames/TS_01_003_-6_0.star     1.084959     0.000000     1.084959
+frames/TS_01_004_6.0.mrc            8     6.001260    85.000000    12.000000     -4.00000 MotionCorr/job020/frames/TS_01_004_6_0_EVN.mrc MotionCorr/job020/frames/TS_01_004_6_0_ODD.mrc MotionCorr/job020/frames/TS_01_004_6_0.mrc MotionCorr/job020/frames/TS_01_004_6_0.star     1.228751     0.000000     1.228751
+frames/TS_01_005_9.0.mrc            8     9.001400    85.000000    15.000000     -4.00000 MotionCorr/job020/frames/TS_01_005_9_0_EVN.mrc MotionCorr/job020/frames/TS_01_005_9_0_ODD.mrc MotionCorr/job020/frames/TS_01_005_9_0.mrc MotionCorr/job020/frames/TS_01_005_9_0.star     1.439271     0.000000     1.439271
+frames/TS_01_006_-9.0.mrc            8     -8.99890    85.000000    18.000000     -4.00000 MotionCorr/job020/frames/TS_01_006_-9_0_EVN.mrc MotionCorr/job020/frames/TS_01_006_-9_0_ODD.mrc MotionCorr/job020/frames/TS_01_006_-9_0.mrc MotionCorr/job020/frames/TS_01_006_-9_0.star     1.893632     0.000000     1.893632
+frames/TS_01_007_-12.0.mrc            8    -11.99850    85.000000    21.000000     -4.00000 MotionCorr/job020/frames/TS_01_007_-12_0_EVN.mrc MotionCorr/job020/frames/TS_01_007_-12_0_ODD.mrc MotionCorr/job020/frames/TS_01_007_-12_0.mrc MotionCorr/job020/frames/TS_01_007_-12_0.star     1.903056     0.000000     1.903056
+frames/TS_01_008_12.0.mrc            8    12.000500    85.000000    24.000000     -4.00000 MotionCorr/job020/frames/TS_01_008_12_0_EVN.mrc MotionCorr/job020/frames/TS_01_008_12_0_ODD.mrc MotionCorr/job020/frames/TS_01_008_12_0.mrc MotionCorr/job020/frames/TS_01_008_12_0.star     1.598095     0.000000     1.598095
+frames/TS_01_009_15.0.mrc            8    15.000700    85.000000    27.000000     -4.00000 MotionCorr/job020/frames/TS_01_009_15_0_EVN.mrc MotionCorr/job020/frames/TS_01_009_15_0_ODD.mrc MotionCorr/job020/frames/TS_01_009_15_0.mrc MotionCorr/job020/frames/TS_01_009_15_0.star     2.303575     0.000000     2.303575
+frames/TS_01_010_-15.0.mrc            8    -14.99870    85.000000    30.000000     -4.00000 MotionCorr/job020/frames/TS_01_010_-15_0_EVN.mrc MotionCorr/job020/frames/TS_01_010_-15_0_ODD.mrc MotionCorr/job020/frames/TS_01_010_-15_0.mrc MotionCorr/job020/frames/TS_01_010_-15_0.star     2.325307     0.000000     2.325307

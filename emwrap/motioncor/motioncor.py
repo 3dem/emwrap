@@ -33,8 +33,15 @@ class Motioncor:
         self.acq = Acquisition(acq)
         self.args = self.argsFromAcq(acq)
         self.args.update(kwargs.get('extra_args', {}))
-        self.local_alignment = self.args.get('-Patch', '1 1') != '1 1'
         self.outputPrefix = "output/aligned_"
+
+    @property
+    def bin(self):
+        return self.args.get('-FtBin', 1.0)
+
+    @property
+    def local_alignment(self):
+        return self.args.get('-Patch', '1 1') != '1 1'
 
     def process_batch(self, batch, **kwargs):
         gpu = kwargs['gpu']
@@ -87,7 +94,14 @@ class Motioncor:
             result = {}
             try:
                 movieName = row['rlnMicrographMovieName']
-                baseName = Path.removeBaseExt(movieName).replace('movie-', 'micrograph-')
+                baseName = Path.removeBaseExt(movieName)
+                # For tomo, we rename the links, but the movie names do not
+                # start with 'movie'
+                if baseName.startswith('movie-'):
+                    baseName = baseName.replace('movie-', 'micrograph-')
+                else:
+                    baseName = 'micrograph-' + baseName
+
                 suffix = '_DW' if '-FmDose' in self.args else ''
                 # TODO: Allow an option to save non-DW movies if required
                 micName = batch.join('output', f"{baseName}{suffix}.mrc")
@@ -137,7 +151,7 @@ class Motioncor:
              ])
         x, y = Image.get_dimensions(micName)
         tGeneral.addRowValues(x, y, 1, movieName,
-                              self.args.get('-FtBin', 1),
+                              self.bin,
                               self.acq.pixel_size, 1.0, 0.0,
                               self.acq.voltage, 1, 0)
 

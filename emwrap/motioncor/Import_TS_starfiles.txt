@@ -1,0 +1,90 @@
+
+=================== Import TS ================================
+
+[jdela80@splprhpc12 EMPIAR-10164_relion_tomo_training]$ cat Import/job001/tilt_series.star
+# Created by the starfile Python package (version 0.5.10) at 14:03:00 on 28/04/2025
+
+
+data_global
+
+loop_
+_rlnTomoName #1
+_rlnTomoTiltSeriesStarFile #2
+_rlnVoltage #3
+_rlnSphericalAberration #4
+_rlnAmplitudeContrast #5
+_rlnMicrographOriginalPixelSize #6
+_rlnTomoHand #7
+_rlnMtfFileName #8
+_rlnOpticsGroupName #9
+TS_01	Import/job001/tilt_series/TS_01.star	300.000000	2.700000	0.100000	0.675000	-1	.	optics1
+TS_03	Import/job001/tilt_series/TS_03.star	300.000000	2.700000	0.100000	0.675000	-1	.	optics1
+TS_43	Import/job001/tilt_series/TS_43.star	300.000000	2.700000	0.100000	0.675000	-1	.	optics1
+TS_45	Import/job001/tilt_series/TS_45.star	300.000000	2.700000	0.100000	0.675000	-1	.	optics1
+TS_54	Import/job001/tilt_series/TS_54.star	300.000000	2.700000	0.100000	0.675000	-1	.	optics1
+
+
+[jdela80@cryo-em-wkst08 20250414_Thermo_ApoF_Subset]$ cat  Import/job001/tilt_series/Position_47.star
+# Created by the starfile Python package (version 0.5.10) at 11:27:46 on 11/06/2025
+
+
+data_Position_47
+
+loop_
+_rlnMicrographMovieName #1
+_rlnTomoTiltMovieFrameCount #2
+_rlnTomoNominalStageTiltAngle #3
+_rlnTomoNominalTiltAxisAngle #4
+_rlnMicrographPreExposure #5
+_rlnTomoNominalDefocus #6
+data/EER_Frames/Position_47_001_-11.00_20250416_010250_EER.eer  1       -11.010000      -95.000000      0.000000        -3.000000
+data/EER_Frames/Position_47_002_-8.00_20250416_010311_EER.eer   1       -8.000000       -95.000000      3.500000        -3.000000
+data/EER_Frames/Position_47_003_-14.00_20250416_010339_EER.eer  1       -14.010000      -95.000000      7.000000        -3.000000
+data/EER_Frames/Position_47_004_-17.00_20250416_010402_EER.eer  1       -17.000000      -95.000000      10.500000       -3.000000
+data/EER_Frames/Position_47_005_-5.00_20250416_010430_EER.eer   1       -5.000000       -95.000000      14.000000       -3.000000
+data/EER_Frames/Position_47_006_-2.00_20250416_010451_EER.eer   1       -2.000000       -95.000000      17.500000       -3.000000
+data/EER_Frames/Position_47_007_-20.00_20250416_010520_EER.eer  1       -20.000000      -95.000000      21.000000       -3.000000
+data/EER_Frames/Position_47_008_-23.00_20250416_010545_EER.eer  1       -23.000000      -95.000000      24.500000       -3.000000
+data/EER_Frames/Position_47_009_1.00_20250416_010614_EER.eer    1       1.000000        -95.000000      28.000000       -3.000000
+data/EER_Frames/Position_47_010_4.00_20250416_010635_EER.eer    1       4.000000        -95.000000      31.500000       -3.000000
+data/EER_Frames/Position_47_011_-26.00_20250416_010705_EER.eer  1       -26.010000      -95.000000      35.000000       -3.000000
+data/EER_Frames/Position_47_012_-29.00_20250416_010728_EER.eer  1       -29.010000      -95.000000      38.500000       -3.000000
+data/EER_Frames/Position_47_013_7.00_20250416_010756_EER.eer    1       6.990000        -95.000000      42.000000       -3.000000
+data/EER_Frames/Position_47_014_10.00_20250416_010818_EER.eer   1       10.000000       -95.000000      45.500000       -3.000000
+data/EER_Frames/Position_47_015_-32.00_20250416_010848_EER.eer  1       -32.010000      -95.000000      49.000000       -3.000000
+data/EER_Frames/Position_47_016_-35.00_20250416_010911_EER.eer  1       -35.010000      -95.000000      52.500000       -3.000000
+data/EER_Frames/Position_47_017_13.00_20250416_010940_EER.eer   1       12.990000       -95.000000      56.000000       -3.000000
+data/EER_Frames/Position_47_018_16.00_20250416_011001_EER.eer   1       15.990000       -95.000000      59.500000       -3.000000
+data/EER_Frames/Position_47_019_-38.00_20250416_011032_EER.eer  1       -38.010000      -95.000000      63.000000       -3.000000
+data/EER_Frames/Position_47_020_-41.00_20250416_011058_EER.eer  1       -41.010000      -95.000000      66.500000       -3.000000
+data/EER_Frames/Position_47_021_19.00_20250416_011127_EER.eer   1       18.990000       -95.000000      70.000000       -3.000000
+data/EER_Frames/Position_47_022_22.00_20250416_011149_EER.eer   1       21.990000       -95.000000      73.500000       -3.000000
+data/EER_Frames/Position_47_023_-44.00_20250416_011220_EER.eer  1       -44.010000      -95.000000      77.000000       -3.000000
+data/EER_Frames/Position_47_024_-47.00_20250416_011243_EER.eer  1       -47.010000      -95.000000      80.500000       -3.000000
+data/EER_Frames/Position_47_025_25.00_20250416_011312_EER.eer   1       24.990000       -95.000000      84.000000       -3.000000
+data/EER_Frames/Position_47_026_28.00_20250416_011334_EER.eer   1       27.990000       -95.000000      87.500000       -3.000000
+data/EER_Frames/Position_47_027_-50.00_20250416_011405_EER.eer  1       -50.010000      -95.000000      91.000000       -3.000000
+data/EER_Frames/Position_47_028_-53.00_20250416_011428_EER.eer  1       -53.000000      -95.000000      94.500000       -3.000000
+data/EER_Frames/Position_47_029_31.00_20250416_011458_EER.eer   1       30.990000       -95.000000      98.000000       -3.000000
+data/EER_Frames/Position_47_030_34.00_20250416_011520_EER.eer   1       33.990000       -95.000000      101.500000      -3.000000
+data/EER_Frames/Position_47_031_-56.00_20250416_011554_EER.eer  1       -56.000000      -95.000000      105.000000      -3.000000
+data/EER_Frames/Position_47_032_-59.00_20250416_011617_EER.eer  1       -59.000000      -95.000000      108.500000      -3.000000
+data/EER_Frames/Position_47_033_37.00_20250416_011648_EER.eer   1       36.990000       -95.000000      112.000000      -3.000000
+data/EER_Frames/Position_47_034_40.00_20250416_011709_EER.eer   1       39.990000       -95.000000      115.500000      -3.000000
+data/EER_Frames/Position_47_035_-62.00_20250416_011741_EER.eer  1       -62.000000      -95.000000      119.000000      -3.000000
+data/EER_Frames/Position_47_036_-65.00_20250416_011803_EER.eer  1       -65.000000      -95.000000      122.500000      -3.000000
+data/EER_Frames/Position_47_037_43.00_20250416_011834_EER.eer   1       42.990000       -95.000000      126.000000      -3.000000
+
+
+-rwx------. 1 jdela80 domain users  1049600 Jun 13 15:02 micrograph-Position_47_036_-65.00_20250416_011803_EER_Ctf.mrc
+-rwx------. 1 jdela80 domain users      293 Jun 13 15:02 micrograph-Position_47_036_-65.00_20250416_011803_EER_Ctf.txt
+-rwx------. 1 jdela80 domain users 16778240 Jun 13 15:02 micrograph-Position_47_036_-65.00_20250416_011803_EER_DW.mrc
+-rwx------. 1 jdela80 domain users 16778240 Jun 13 15:02 micrograph-Position_47_036_-65.00_20250416_011803_EER_DWS.mrc
+-rwx------. 1 jdela80 domain users     1081 Jun 13 15:04 micrograph-Position_47_036_-65.00_20250416_011803_EER_DW.star
+-rwx------. 1 jdela80 domain users 16778240 Jun 13 15:02 micrograph-Position_47_036_-65.00_20250416_011803_EER.mrc
+-rwx------. 1 jdela80 domain users  1049600 Jun 13 15:02 micrograph-Position_47_037_43.00_20250416_011834_EER_Ctf.mrc
+-rwx------. 1 jdela80 domain users      293 Jun 13 15:02 micrograph-Position_47_037_43.00_20250416_011834_EER_Ctf.txt
+-rwx------. 1 jdela80 domain users 16778240 Jun 13 15:02 micrograph-Position_47_037_43.00_20250416_011834_EER_DW.mrc
+-rwx------. 1 jdela80 domain users 16778240 Jun 13 15:02 micrograph-Position_47_037_43.00_20250416_011834_EER_DWS.mrc
+-rwx------. 1 jdela80 domain users     1080 Jun 13 15:04 micrograph-Position_47_037_43.00_20250416_011834_EER_DW.star
+-rwx------. 1 jdela80 domain users 16778240 Jun 13 15:02 micrograph-Position_47_037_43.00_20250416_011834_EER.mrc
