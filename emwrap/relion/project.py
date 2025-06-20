@@ -20,7 +20,7 @@ import json
 import subprocess
 import argparse
 
-from emtools.utils import FolderManager, Process, Color
+from emtools.utils import FolderManager, Process, Color, Path
 from emtools.jobs import BatchManager, Workflow
 from emtools.metadata import RelionStar
 
@@ -84,19 +84,22 @@ class RelionProject(FolderManager):
 
         self.__create()
 
+    def _saveCmd(self, cmd, jobId):
+        """ Write command.txt file to be used for restart. """
+        with open(self.join(jobId, 'command.txt'), 'w') as f:
+            f.write(f"{cmd}\n")
+
+    def _loadCmd(self, jobId):
+        with open(self.join(jobId, 'command.txt')) as f:
+            return f.readline().strip()
+
     def getJobTypeFolder(self, jobtype):
         """ Return the job folder depending on the job type. """
         return 'External'
 
-    def run(self, cmd, jobtype):
-        jobtypeFolder = self.getJobTypeFolder(jobtype)
-        jobIndex = self._wf.jobNextIndex
-        jobId = f'{jobtypeFolder}/job{jobIndex:03}'
-        self.mkdir(jobId)
-        job = self._wf.registerJob(jobId,
-                                   status='Launched', alias='None', jobtype=jobtype)
+    def _runCmd(self, cmd, jobId):
+        self._saveCmd(cmd, jobId)
         args = shlex.split(cmd)
-        args.extend(['--output', jobId])
         stdout = open(self.join(jobId, 'run.out'), 'a')
         stderr = open(self.join(jobId, 'run.err'), 'a')
         cmd = self.log(f"{Color.green(args[0])} {Color.bold(' '.join(args[1:]))}")
@@ -105,6 +108,31 @@ class RelionProject(FolderManager):
         p = subprocess.Popen(args, stdout=stdout, stderr=stderr, close_fds=True)
         # Update the Pipeline with new job
         RelionStar.workflow_to_pipeline(self._wf, self.pipeline_star)
+
+    def run(self, cmd, jobtype):
+        jobtypeFolder = self.getJobTypeFolder(jobtype)
+        jobIndex = self._wf.jobNextIndex
+        jobId = f'{jobtypeFolder}/job{jobIndex:03}'
+        self.mkdir(jobId)
+        job = self._wf.registerJob(jobId, status='Launched',
+                                   alias='None', jobtype=jobtype)
+        cmd += f" --output {jobId}"
+        self._runCmd(cmd, jobId)
+
+    def restart(self, jobId, clean=False):
+        if not self._wf.hasJob(jobId):
+            raise Exception(f"There is not job with id: '{jobId}'")
+
+        if not self.exists(jobId):
+            raise Exception(f"Missing folder for job: '{jobId}'")
+
+        job = self._wf.getJob(jobId)
+        job['status'] = 'Launched'
+        cmd = self._loadCmd(jobId)
+        if clean:
+            FolderManager(self.join(jobId)).create()
+
+        self._runCmd(cmd, jobId)
 
     def loadJobInfo(self, job):
         """ Load the info.json file for a given run. """
@@ -146,7 +174,12 @@ def main():
                    help="Clean project files")
     g.add_argument('--update', '-u', action='store_true',
                    help="Update job status and pipeline star file.")
-    g.add_argument('--run', '-r', nargs='+', metavar=('COMMAND', 'JOB_TYPE'))
+    g.add_argument('--run', '-r', nargs='+',
+                   metavar=('COMMAND_OR_FOLDER', 'RUN_MODE'),
+                   help="Input a command (new job) or an existing job folder. "
+                        "In the case of the existing job folder, the special "
+                        "'clean' mode can be passed to delete previous run "
+                        "data.")
     g.add_argument('-k', '--check', action='count', default=0,
                    help='Check and/or kill processes related to this project.'
                         'Pass more than one -k to kill processes.')
@@ -160,9 +193,15 @@ def main():
     elif args.update:
         rlnProject.update()
     elif args.run:
-        cmd = args.run[0]
-        jobtype = args.run[1] if len(args.run) > 1 else shlex.split(cmd)[0]
-        rlnProject.run(cmd, jobtype)
+        first = args.run[0]
+        if os.path.exists(first):
+            mode = args.run[1] if len(args.run) > 1 else None
+            # Make sure we get the jobId without ending slash
+            jobId = Path.rmslash(first)
+            rlnProject.restart(jobId, mode == 'clean')
+        else:
+            jobType = first.split()[0]
+            rlnProject.run(first, jobType)
     elif args.check > 0:
         kill = args.check > 1
         folderPath = os.path.abspath(args.path)
