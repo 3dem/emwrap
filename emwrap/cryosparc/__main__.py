@@ -237,7 +237,6 @@ def cryosparc_import(projId, dataRoot):
         "source_cut_suff": 4,
         "enable_validation": True,
         "location_exists": True,
-        "amp_contrast": amp_contrast,
     }
     args.update(acq)
     ptsImport = cs.job_run(wksId, "import_particles", args,
