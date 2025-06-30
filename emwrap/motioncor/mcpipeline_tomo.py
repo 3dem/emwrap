@@ -24,6 +24,7 @@ import sys
 from emtools.utils import Color, FolderManager, Path
 from emtools.metadata import Table, Column, StarFile, RelionStar
 from emtools.jobs import TsStarBatchManager
+from emtools.image import Image
 from emwrap.base import ProcessingPipeline
 
 from .motioncor import Motioncor
@@ -45,7 +46,8 @@ class McPipelineTomo(ProcessingPipeline):
         self.outputTsDir = 'TS'
         self.acqInfo = all_args['acquisition']
         self._DEBUG_only_output = 'DEBUG_only_output' in args
-        self.bin = float(self._args['motioncor'].get('-FtBin', 1.0))
+        extra = self._args['motioncor']['extra_args']
+        self.bin = float(extra.get('-FtBin', 1.0))
 
     def get_motioncor_proc(self, gpu):
         def _motioncor(batch):
@@ -67,10 +69,10 @@ class McPipelineTomo(ProcessingPipeline):
                 os.symlink(os.path.join('frames', baseName), batch.join('movie-' + baseName))
 
             # Link the gain reference
-            input_gain = self.acqInfo['gain']
-            base_gain = os.path.basename(input_gain)
-            os.symlink(os.path.abspath(input_gain), batch.join(base_gain))
-            self.acq['gain'] = base_gain
+            if input_gain := self.acqInfo.get('gain', None):
+                base_gain = os.path.basename(input_gain)
+                os.symlink(os.path.abspath(input_gain), batch.join(base_gain))
+                self.acq['gain'] = base_gain
 
             mc = Motioncor(self.acq, **self._args['motioncor'])
             mc.process_batch(batch, gpu=gpu)
@@ -105,12 +107,16 @@ class McPipelineTomo(ProcessingPipeline):
                                          "rlnAccumMotionLate"])
                 sfOut.writeTimeStamp()
                 sfOut.writeHeader(tsName, tsTable)
+                movieDimensions = None
 
                 for item in batch['items']:
                     values = dict(item)  # take initial values from input row
-                    # FIXME: _rlnTomoTiltMovieFrameCount might be wrong for EER
-
                     movName = item['rlnMicrographMovieName']
+
+                    # Read image dimensions only once
+                    if movieDimensions is None:
+                        movieDimensions = Image.get_dimensions(movName)
+
                     baseName = Path.removeBaseExt(movName)
                     files = {}
                     for suffix in ['', '_ODD', '_EVN']:
@@ -139,7 +145,12 @@ class McPipelineTomo(ProcessingPipeline):
                     with StarFile(inMovStar) as sf:
                         with StarFile(micStar, 'w') as sfOut2:
                             sfOut2.writeTimeStamp()
-                            sfOut2.writeTable('general', sf.getTable('general'))
+                            t = sf.getTable('general')
+                            row = t[0]._replace(rlnImageSizeX=movieDimensions[0],
+                                                rlnImageSizeY=movieDimensions[1],
+                                                rlnImageSizeZ=movieDimensions[2])
+                            # Update some values of the first (only) row of general
+                            sfOut2.writeSingleRow('general', row)
                             sfOut2.writeTable('global_shift', sf.getTable('global_shift'))
 
                     sfOut.writeRowValues(values)
@@ -172,6 +183,10 @@ class McPipelineTomo(ProcessingPipeline):
         cols = inputTs.getColumnNames()
         outTs = Table(cols + ['rlnTomoTiltSeriesPixelSize'])
         newPixelSize = self.acq.pixel_size * self.bin
+
+        self.log(f"DEBUG >>> corrected TS>>> ps: {self.acq.pixel_size} "
+                 f"bin: {self.bin} new_ps: {newPixelSize}")
+
         with StarFile(self.join('corrected_tilt_series.star'), 'w') as sfOut:
             sfOut.writeTimeStamp()
             sfOut.writeHeader('global', outTs)
@@ -181,7 +196,7 @@ class McPipelineTomo(ProcessingPipeline):
                 tsStarName = f"{tsFolder.path}.star"
                 if os.path.exists(tsStarName):
                     values = row._asdict()
-                    values.update(rlnTomoTiltSeriesStarFile=tsFolder.join(tsStarName),
+                    values.update(rlnTomoTiltSeriesStarFile=tsStarName,
                                   rlnTomoTiltSeriesPixelSize=newPixelSize)
                     sfOut.writeRowValues(values)
 
@@ -196,7 +211,6 @@ class McPipelineTomo(ProcessingPipeline):
         inputTs = self._getInputTsTable()
         self.acq = RelionStar.get_acquisition(inputTs)
         batchMgr = TsStarBatchManager(inputTs, self.tmpDir)
-
         g = self.addGenerator(batchMgr.generate)
         outputQueue = None
         self.mkdir(self.outputTsDir)

@@ -26,7 +26,8 @@ class Motioncor:
     """ Motioncor wrapper to run in a batch folder. """
     def __init__(self, acq, **kwargs):
         if path := kwargs.get('path', None):
-            self.path = path, self.version = int(kwargs['version'])
+            self.path = path
+            self.version = int(kwargs['version'])
         else:
             self.path, self.version = Motioncor.__get_environ()
         self.ctf = kwargs.get('ctf', False)
@@ -213,7 +214,7 @@ class Motioncor:
             '-Cs': acq.cs,
             '-AmpCont': acq.amplitude_contrast,
         })
-        if 'gain' in acq:
-            args['-Gain'] = acq['gain']
+        if gain := acq.get('gain', None):
+            args['-Gain'] = gain
 
         return args
