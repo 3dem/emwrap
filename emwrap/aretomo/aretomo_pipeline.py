@@ -25,7 +25,7 @@ from glob import glob
 
 from emtools.utils import Color, Timer, Path, Process
 from emtools.jobs import MdocBatchManager, Args
-from emtools.metadata import Mdoc, Acquisition
+from emtools.metadata import Mdoc, Acquisition, StarFile
 
 from emwrap.base import ProcessingPipeline
 
