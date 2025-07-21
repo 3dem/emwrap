@@ -149,12 +149,12 @@ def cryosparc_prepare(sessionFile, particlesStar):
     movTable = StarFile.getTableFromFile(movStar, 'movies')
     micTable = StarFile.getTableFromFile(micStar, 'micrographs')
 
-    r = re.compile('movie-(\d{6})')
+    r = re.compile('(movie|micrograph)-(\d{6})')
 
     def _micKey(fn):
         """ Return movie/micrograph id from the name. """
         if m := r.search(fn):
-            return m.groups()[0]
+            return m.groups()[1]
 
     micDict = {_micKey(row.rlnMicrographName): row for row in micTable}
 
@@ -168,6 +168,7 @@ def cryosparc_prepare(sessionFile, particlesStar):
         for rowMov in sorted(movTable, key=lambda r: r.TimeStamp):
             movFn = rowMov.rlnMicrographMovieName
             movKey = _micKey(movFn)
+            print(f"{movKey} -> {movFn}")
             micRow = micDict.get(movKey, None)
             if micRow is None:
                 print(Color.red(f'No micrograph found for movie: {movFn}'))
