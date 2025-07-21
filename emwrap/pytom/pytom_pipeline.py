@@ -68,19 +68,17 @@ class PyTomPipeline(ProcessingPipeline):
     def _getInputTomograms(self):
         """ Create a generator for input tomograms. """
         # Let's assume that at the same level, there is a warp_tiltseries folder
-        tiltseriesFolder = os.path.join(os.path.dirname(self.inputTomograms),
-                                        'warp_tiltseries')
-        reconstructionFolder = os.path.join(tiltseriesFolder, 'reconstruction')
-        tomoPattern = os.path.join(reconstructionFolder, '*Apx.mrc')
+        baseDir = os.path.dirname(Path.rmslash(self.inputTomograms))
+        tiltseriesFolder = os.path.join(baseDir, 'warp_tiltseries')
+        recFolder = os.path.join(tiltseriesFolder, 'reconstruction')
+        tomoPattern = os.path.join(recFolder, '*Apx.mrc')
         tomograms = [os.path.basename(fn) for fn in glob(tomoPattern)]
+        self.log(f">>> Tomograms pattern: {tomoPattern}")
 
-        def _findTomo(tomoName):
-            prefix = f'{tomoName}_'
-            for fn in tomograms:
-                if fn.startswith(prefix):
-                    return os.path.join(reconstructionFolder, fn)
-            return None
-
+        # Get tomo suffix to remove from filenames and get the matching tsName
+        tomoSuffix = tomograms[0].split('_')[-1]
+        tomoDict = {t.replace(tomoSuffix, ''): os.path.join(recFolder, t)
+                    for t in tomograms}
         counter = 0
         # For now, let input with the tomostar folder
         pattern = os.path.join(self.inputTomograms, '*.tomostar')
@@ -91,15 +89,15 @@ class PyTomPipeline(ProcessingPipeline):
             nowPrefix = datetime.now().strftime('%y%m%d-%H%M%S')
             counter += 1
             batchId = f"{nowPrefix}_{counter:02}_{tsName}"
-            if tomoFn := _findTomo(tsName):
+            if tomoFn := tomoDict.get(f'{tsName}_', None):
                 # Let's read the tilt_angles and the dose_accumulation from the .tomostar file
                 with StarFile(fn) as sf:
-                    t = sf.getTable('')
+                    t = sf.getTable('', guessType=False)
                 yield Batch(id=batchId, index=counter,
                             path=os.path.join(self.tmpDir, batchId),
                             tsName=tsName, tomogram=tomoFn,
-                            tilt_angles=[row.wrpAngleTilt for row in t],
-                            dose_accumulation=[row.wrpDose for row in t])
+                            tilt_angles=[float(row.wrpAngleTilt) for row in t],
+                            dose_accumulation=[float(row.wrpDose) for row in t])
             else:
                 self.log(f"ERROR: Reconstructed tomogram was not found "
                          f"for name: {tsName}")

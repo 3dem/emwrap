@@ -15,4 +15,3 @@
 # **************************************************************************
 
 from .pytom import PyTom
-from .pytom_pipeline import PyTomPipeline

@@ -25,18 +25,11 @@ from emtools.image import Image
 class PyTom:
     """ PyTom wrapper to run in a batch folder. """
     def __init__(self, acq, **kwargs):
-        self.path = None  # FIXME: PyTom.__get_environ(kwargs)
         self.acq = Acquisition(acq)
         self.args = self.argsFromAcq(acq)
         self.args.update(kwargs.get('extra_args', {}))
-        from pprint import pprint
-        pprint(self.args)
 
     def process_batch(self, batch, **kwargs):
-        def _link(fn):
-            base = os.path.basename(fn)
-            os.symlink(os.path.abspath(fn), batch.join(base))
-            return base
 
         def _write_list(key, ext):
             fn = f"{batch['tsName']}_{key}.{ext}"
@@ -53,7 +46,7 @@ class PyTom:
         args = {
             '--destination': 'output',
             '--voxel-size-angstrom': 9.52,  # FIXME: This should be taken from input
-            '--tomogram': _link(batch['tomogram']),
+            '--tomogram': batch.link(batch['tomogram']),
             '--tilt-angles': _write_list('tilt_angles', 'rawtlt'),
             '--dose-accumulation': _write_list('dose_accumulation', 'txt'),
             '-g': kwargs['gpu'].split()
@@ -61,7 +54,7 @@ class PyTom:
         args.update(self.args)
         # Let's create some relative symbolic links and update arguments
         for a in ['--template', '--mask']:
-            args[a] = _link(args[a])
+            args[a] = batch.link(args[a])
 
         # Let's fix some arguments that need to be a list
         for a in ['-s']:
@@ -69,7 +62,7 @@ class PyTom:
                 args[a] = args[a].split()
 
         with batch.execute('pytom_match'):
-            batch.call('pytom_match_template.py', args)
+            batch.call(PyTom.get_program("PYTOM_MATCH"), args)
 
         def _rename_star(newSuffix):
             """ Rename output star files to avoid overwrite. """
@@ -88,29 +81,19 @@ class PyTom:
         }
 
         with batch.execute('pytom_extract'):
-            batch.call("pytom_extract_candidates.py", args)
+            pytom_extract = PyTom.get_program("PYTOM_EXTRACT")
+            batch.call(pytom_extract, args)
             _rename_star('default')
             args.update({
                 '--tophat-filter': "",
                 '--tophat-connectivity': 1
             })
-            batch.call("pytom_extract_candidates.py", args)
+            batch.call(pytom_extract, args)
             _rename_star('tophat')
 
     @staticmethod
-    def __get_environ(kwargs):
-        if path := kwargs.get('path', None):
-            program = path
-        else:
-            varPath = 'PYTOM_PATH'
-
-            if program := os.environ.get(varPath, None):
-                if not os.path.exists(program):
-                    raise Exception(f"PyTom path ({varPath}={program}) does not exists.")
-            else:
-                raise Exception(f"PyTom path variable {varPath} is not defined.")
-
-        return program
+    def get_program(var):
+        return os.environ.get(var, None)
 
     def argsFromAcq(self, acq):
         """ Define arguments from a given acquisition """
