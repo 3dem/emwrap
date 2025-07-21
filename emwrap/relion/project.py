@@ -97,7 +97,7 @@ class RelionProject(FolderManager):
         """ Return the job folder depending on the job type. """
         return 'External'
 
-    def _runCmd(self, cmd, jobId):
+    def _runCmd(self, cmd, jobId, wait=False):
         self._saveCmd(cmd, jobId)
         args = shlex.split(cmd)
         stdout = open(self.join(jobId, 'run.out'), 'a')
@@ -105,11 +105,17 @@ class RelionProject(FolderManager):
         cmd = self.log(f"{Color.green(args[0])} {Color.bold(' '.join(args[1:]))}")
         stdout.write(f"\n\n{cmd}\n")
         stdout.flush()
+
+        # Run the command
         p = subprocess.Popen(args, stdout=stdout, stderr=stderr, close_fds=True)
+
         # Update the Pipeline with new job
         RelionStar.workflow_to_pipeline(self._wf, self.pipeline_star)
 
-    def run(self, cmd, jobtype):
+        if wait:
+            p.wait()
+
+    def run(self, cmd, jobtype, wait=False):
         jobtypeFolder = self.getJobTypeFolder(jobtype)
         jobIndex = self._wf.jobNextIndex
         jobId = f'{jobtypeFolder}/job{jobIndex:03}'
@@ -117,9 +123,9 @@ class RelionProject(FolderManager):
         job = self._wf.registerJob(jobId, status='Launched',
                                    alias='None', jobtype=jobtype)
         cmd += f" --output {jobId}"
-        self._runCmd(cmd, jobId)
+        self._runCmd(cmd, jobId, wait=wait)
 
-    def restart(self, jobId, clean=False):
+    def restart(self, jobId, clean=False, wait=False):
         if not self._wf.hasJob(jobId):
             raise Exception(f"There is not job with id: '{jobId}'")
 
@@ -132,7 +138,7 @@ class RelionProject(FolderManager):
         if clean:
             FolderManager(self.join(jobId)).create()
 
-        self._runCmd(cmd, jobId)
+        self._runCmd(cmd, jobId, wait=wait)
 
     def loadJobInfo(self, job):
         """ Load the info.json file for a given run. """
@@ -180,9 +186,14 @@ def main():
                         "In the case of the existing job folder, the special "
                         "'clean' mode can be passed to delete previous run "
                         "data.")
-    g.add_argument('-k', '--check', action='count', default=0,
+    p.add_argument('-k', '--check', action='count', default=0,
                    help='Check and/or kill processes related to this project.'
                         'Pass more than one -k to kill processes.')
+
+    p.add_argument('--wait', '-w', action='store_true',
+                   help="Works with --run and make the project waits for "
+                        "the sub-process to complete. Useful for scripting "
+                        "and benchmarking.")
 
     args = p.parse_args()
 
@@ -198,10 +209,11 @@ def main():
             mode = args.run[1] if len(args.run) > 1 else None
             # Make sure we get the jobId without ending slash
             jobId = Path.rmslash(first)
-            rlnProject.restart(jobId, mode == 'clean')
+            clean = mode == 'clean'
+            rlnProject.restart(jobId, clean=clean, wait=args.wait)
         else:
             jobType = first.split()[0]
-            rlnProject.run(first, jobType)
+            rlnProject.run(first, jobType, wait=args.wait)
     elif args.check > 0:
         kill = args.check > 1
         folderPath = os.path.abspath(args.path)

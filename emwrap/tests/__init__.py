@@ -15,5 +15,3 @@
 # **************************************************************************
 
 from .datasets import RelionTutorial
-from .tests_motioncor import TestMotioncor
-from .tests_preprocessing import TestPreprocessing
