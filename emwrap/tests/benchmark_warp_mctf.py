@@ -43,7 +43,7 @@ ngpus = len(gpus)
 gpuConfigs = []
 
 ngpus = os.environ.get('EMWRAP_TEST_NGPUS', "4")
-angular_search = int(os.environ.get('EMWRAP_TEST_ANGULAR_SEARCH', 10))
+angular_search = int(os.environ.get('EMWRAP_TEST_ANGULAR_SEARCH', 12))
 
 for n in ngpus.split(':'):
     gpuConfigs.append(list(range(int(n))))
@@ -220,11 +220,11 @@ def main():
     if args.step == 'mctf':
         mctf()
     elif args.step == 'aretomo':
-        aretomo(args.config)
+        aretomo(lastJob())
     elif args.step == 'ctfrec':
-        ctfrec(args.config)
+        ctfrec(lastJob())
     elif args.step == 'pytom':
-        pytom(args.config)
+        pytom(os.path.join(lastJob(), 'warp_tomostar'))
     elif args.step == 'all_single':
         all_single()
 
