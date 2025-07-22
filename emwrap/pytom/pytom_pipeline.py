@@ -73,6 +73,10 @@ class PyTomPipeline(ProcessingPipeline):
         recFolder = os.path.join(tiltseriesFolder, 'reconstruction')
         tomoPattern = os.path.join(recFolder, '*Apx.mrc')
         tomograms = [os.path.basename(fn) for fn in glob(tomoPattern)]
+        self.info['inputs'] = [
+            {'tomograms': self.inputTomograms}
+        ]
+        self.writeInfo()
         self.log(f">>> Tomograms pattern: {tomoPattern}")
 
         # Get tomo suffix to remove from filenames and get the matching tsName
