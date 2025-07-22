@@ -16,6 +16,10 @@
 
 import os
 
+from emtools.utils import FolderManager, Path, Process
+from emwrap.base import ProcessingPipeline
+from emtools.metadata import StarFile, Acquisition
+
 
 def get_warptools():
     varPath = 'WARPTOOLS_PATH'
@@ -27,3 +31,71 @@ def get_warptools():
         raise Exception(f"PyTom path variable {varPath} is not defined.")
 
     return program
+
+
+class WarpBasePipeline(ProcessingPipeline):
+    """ Base class to organize common functions/properties of different
+    Warp pipelines.
+    """
+    FS = 'warp_frameseries'
+    FSS = f'{FS}.settings'
+    TS = 'warp_tiltseries'
+    TSS = f'{TS}.settings'
+    TM = 'warp_tomostar'
+
+    INPUTS = {
+        'fs': FS,
+        'fss': FSS,
+        'ts': TS,
+        'tss': TSS,
+        'tm': TM
+    }
+
+    def __init__(self, all_args):
+        ProcessingPipeline.__init__(self, all_args[self.name])
+        self.gpuList = self._args['gpu'].split()
+        self.acq = Acquisition(all_args['acquisition'])
+        self.warptools = get_warptools()
+
+    def _importInputs(self, inputRunFolder, keys=None):
+        """ Inspect the input run folder and copy or link input folder/files
+        if necessary. If gain is present in the acquisition, it will be linked.
+
+        Args:
+            inputRunFolder: the input run folder
+            keys: input keys to import, if None, all inputs will be imported
+        """
+        keys = self.INPUTS.keys() if keys is None else keys
+
+        if isinstance(inputRunFolder, FolderManager):
+            ifm = inputRunFolder
+        else:
+            ifm = FolderManager(inputRunFolder)
+
+        inputs = [ifm.join(self.INPUTS[k]) for k in keys]
+        if m := [fn for fn in inputs if not os.path.exists(fn)]:
+            raise Exception("Missing expected paths: " + str(m))
+
+        def _copyFolder(inputFolder):
+            baseFolder = os.path.basename(inputFolder)
+            inputFm = FolderManager(inputFolder)
+            outputFm = FolderManager(self.join(baseFolder))
+            outputFm.create()
+            for fn in inputFm.listdir():
+                inputPath = inputFm.join(fn)
+                if os.path.isdir(inputPath):
+                    outputFm.link(inputPath)
+                else:
+                    outputFm.copy(inputPath)
+
+        for inputPath in inputs:
+            if inputPath.endswith('.settings'):
+                self.copy(inputPath)
+            elif inputPath.endswith(self.TS):
+                _copyFolder(inputPath)
+            else:  # warp_frameseries and warp_tomostar
+                self.link(inputPath)
+
+        # Link input gain file
+        if gain := self.acq.get('gain', None):
+            self._args['--gain_path'] = self.link(gain)

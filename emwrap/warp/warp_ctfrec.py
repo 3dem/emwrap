@@ -24,44 +24,28 @@ from glob import glob
 from datetime import datetime
 
 from emtools.utils import Color, FolderManager, Path, Process
-from emtools.metadata import StarFile, Acquisition
 from emtools.jobs import Batch, Args
-from emtools.image import Image
-from emwrap.base import ProcessingPipeline
 
-from .warp import get_warptools
+from .warp import WarpBasePipeline
 
 
-class WarpCtfReconstruct(ProcessingPipeline):
+class WarpCtfReconstruct(WarpBasePipeline):
+
     """ Script to run warp_ts_aretomo. """
     name = 'emw-warp-ctfrec'
     input_name = 'in_movies'
 
-    def __init__(self, all_args):
-        args = all_args[self.name]
-        ProcessingPipeline.__init__(self, args)
-        self.gpuList = args['gpu'].split()
-        self.inputTsAlign = args['in_movies']
-        self.acq = Acquisition(all_args['acquisition'])
-        self.warptools = get_warptools()
-
     def prerun(self):
         self.dumpArgs(printMsg="Input args")
-        # FIXME: Improve the pattern split into root folder and the images suffix
-        inputFolder = FolderManager(self.inputTsAlign)
-        ts = self.link(inputFolder.join('warp_tiltseries'))
-        tss = self.link(inputFolder.join(f"{ts}.settings"))
-        tms = self.link(inputFolder.join('warp_tomostar'))
-        fs = self.link(inputFolder.join('warp_frameseries'))
-        if gain := self.acq.get('gain', None):
-            self.link(gain)
+        inputFolder = FolderManager(self._args['in_movies'])
+        self._importInputs(inputFolder)
 
         batch = Batch(id=self.name, path=self.path)
 
         # Run ts_ctf
         args = Args({
             'ts_ctf': '',
-            '--settings': tss,
+            '--settings': self.TSS,
             '--device_list': self.gpuList
         })
         args.update(self._args['ts_ctf']['extra_args'])
@@ -71,7 +55,7 @@ class WarpCtfReconstruct(ProcessingPipeline):
         # Run filter_quality
         args = Args({
             'filter_quality': '',
-            '--settings': tss,
+            '--settings': self.TSS,
             "--resolution": [1, 6],
             "--output": "warp_tiltseries_filtered.txt"
         })
@@ -81,12 +65,9 @@ class WarpCtfReconstruct(ProcessingPipeline):
         # Run ts_reconstruct
         args = Args({
             'ts_reconstruct': '',
-            '--settings': tss,
+            '--settings': self.TSS,
             '--device_list': self.gpuList
         })
-        from pprint import pprint
-        print("ts_reconstruct: ARGS:")
-        pprint(args)
         args.update(self._args['ts_reconstruct']['extra_args'])
 
         with batch.execute('ts_reconstruct'):

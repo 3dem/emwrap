@@ -24,45 +24,37 @@ from glob import glob
 from datetime import datetime
 
 from emtools.utils import Color, FolderManager, Path, Process
-from emtools.metadata import StarFile, Acquisition
 from emtools.jobs import Batch, Args
-from emtools.image import Image
-from emwrap.base import ProcessingPipeline
 
-from .warp import get_warptools
+from .warp import WarpBasePipeline
 
 
-class WarpAreTomo(ProcessingPipeline):
-    """ Script to run warp_ts_aretomo. """
+class WarpAreTomo(WarpBasePipeline):
+    """ Warp wrapper to run warp_ts_aretomo.
+    It will run:
+        - ts_import -> mdocs
+        -
+    """
     name = 'emw-warp-aretomo'
     input_name = 'in_movies'
 
-    def __init__(self, all_args):
-        args = all_args[self.name]
-        ProcessingPipeline.__init__(self, args)
-        self.gpuList = args['gpu'].split()
-        self.inputMotionCtf = args['in_movies']
-        self.acq = Acquisition(all_args['acquisition'])
-        self.warptools = get_warptools()
-
     def prerun(self):
         self.dumpArgs(printMsg="Input args")
-        # FIXME: Improve the pattern split into root folder and the images suffix
-        inputFolder = FolderManager(self.inputMotionCtf)
-        fs = 'warp_frameseries'
-        ts = 'warp_tiltseries'
-        tms = 'warp_tomostar'
-        self.mkdir(ts)
-        self.mkdir(tms)
-
+        # Input run folder from the Motion correction and CTF job
+        inputFolder = FolderManager(self._args['in_movies'])
+        self.mkdir(self.TS)
+        self.mkdir(self.TM)
         batch = Batch(id=self.name, path=self.path)
+
+        # Link input frameseries folder, settings and gain reference
+        self._importInputs(inputFolder, keys=['fs', 'fss'])
 
         # Run ts_import
         args = Args({
             'ts_import': '',
-            '--frameseries': self.link(inputFolder.join(fs)),
+            '--frameseries': self.FS,
             '--tilt_exposure': self.acq['total_dose'],
-            '--output': tms,
+            '--output': self.TM,
         })
         args.update(self._args['ts_import'])
         args['--mdocs'] = self.link(args['--mdocs'])
@@ -73,17 +65,14 @@ class WarpAreTomo(ProcessingPipeline):
         # Run create_settings
         args = Args({
             'create_settings': '',
-            '--folder_data': tms,
+            '--folder_data': self.TM,
             '--extension': "*.tomostar",
-            '--folder_processing': ts,
-            '--output': f'{ts}.settings',
+            '--folder_processing': self.TS,
+            '--output': self.TSS,
             '--angpix': self.acq.pixel_size,  # FIXME: CHANGE depending on motion bin,
             '--exposure': self.acq['total_dose']
         })
         args.update(self._args['create_settings'])
-
-        if gain := self.acq.get('gain', None):
-            args['--gain_path'] = self.link(gain)
 
         with batch.execute('create_settings'):
             batch.call(self.warptools, args)
@@ -91,7 +80,7 @@ class WarpAreTomo(ProcessingPipeline):
         # Run fs_motion_and_ctf
         args = Args({
             'ts_aretomo': '',
-            '--settings': f'{ts}.settings',
+            '--settings': self.TSS,
             '--device_list': self.gpuList
         })
         args.update(self._args['ts_aretomo']['extra_args'])

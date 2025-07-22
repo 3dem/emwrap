@@ -24,47 +24,43 @@ from glob import glob
 from datetime import datetime
 
 from emtools.utils import Color, FolderManager, Path, Process
-from emtools.metadata import StarFile, Acquisition
 from emtools.jobs import Batch, Args
-from emtools.image import Image
-from emwrap.base import ProcessingPipeline
 
-from .warp import get_warptools
+from .warp import WarpBasePipeline
 
 
-class WarpMotionCtf(ProcessingPipeline):
-    """ Pipeline PyTom picking in a set of tomograms. """
+class WarpMotionCtf(WarpBasePipeline):
+    """ Warp wrapper to run Motion correction and CTF estimation.
+    It will run:
+        - create_settings -> frame_series.setting
+        - fs_motion_and_ctf
+    """
     name = 'emw-warp-mctf'
     input_name = 'in_movies'
 
-    def __init__(self, all_args):
-        args = all_args[self.name]
-        ProcessingPipeline.__init__(self, args)
-        self.gpuList = args['gpu'].split()
-        self.inputPattern = args['in_movies']
-        self.acq = Acquisition(all_args['acquisition'])
-        self.warptools = get_warptools()
-
     def prerun(self):
         self.dumpArgs(printMsg="Input args")
-        # FIXME: Improve the pattern split into root folder and the images suffix
-        fs = 'warp_frameseries'
-        self.mkdir(fs)
+
+        # Input movies pattern for the frame series
+        inputPattern = self._args['in_movies']
+        inputFolder = os.path.dirname(inputPattern)
+
+        self.mkdir(self.FS)
 
         # Run create_settings
         args = Args({
             'create_settings': '',
-            '--folder_data': self.link(os.path.dirname(self.inputPattern)),
-            '--extension': f"*{Path.getExt(self.inputPattern)}",
-            '--folder_processing': fs,
-            '--output': f'{fs}.settings',
+            '--folder_data': self.link(inputFolder),
+            '--extension': f"*{Path.getExt(inputPattern)}",
+            '--folder_processing': self.FS,
+            '--output': self.FSS,
             '--angpix': self.acq.pixel_size,
             '--exposure': self.acq['total_dose']
         })
         args.update(self._args['create_settings'])
 
-        if gain := self.acq.get('gain', None):
-            args['--gain_path'] = self.link(gain)
+        # Just link the gain reference
+        self._importInputs(inputFolder, keys=[])
 
         batch = Batch(id='mtc', path=self.path)
 
@@ -79,7 +75,7 @@ class WarpMotionCtf(ProcessingPipeline):
         # Run fs_motion_and_ctf
         args = Args({
             'fs_motion_and_ctf': '',
-            '--settings': f'{fs}.settings',
+            '--settings': self.FSS,
             '--m_grid': f'1x1x{ngroups}',
             '--c_grid': '2x2x1',
             '--device_list': self.gpuList
