@@ -28,7 +28,8 @@ from collections import defaultdict
 
 from emtools.utils import Process, Color, Pretty, FolderManager, Timer
 from emtools.jobs import BatchManager, Args, Pipeline
-from emtools.metadata import Table, Column, StarFile, StarMonitor, TextFile
+from emtools.metadata import (Table, Column, StarFile, StarMonitor, TextFile,
+                              Acquisition)
 
 
 class ProcessingPipeline(Pipeline, FolderManager):
@@ -41,7 +42,9 @@ class ProcessingPipeline(Pipeline, FolderManager):
     """
     MIC_ID = re.compile('(?P<prefix>\w+)-(?P<id>\d{6})')
 
-    def __init__(self, args):
+    def __init__(self, input_args):
+        self._input_args = input_args
+        args = input_args[self.name]
         self._args = args
         workingDir = args.get('working_dir', os.getcwd())
         outputDir = args.get('output', None)
@@ -94,12 +97,10 @@ class ProcessingPipeline(Pipeline, FolderManager):
         else:
             Process.system(f"mkdir {self.tmpDir}")
 
-    def dumpArgs(self, printMsg=''):
-        argStr = json.dumps(self._args, indent=4) + '\n'
-        with open(self.join('args.json'), 'w') as f:
+    def __dumpArgs(self):
+        argStr = json.dumps(self._input_args, indent=4) + '\n'
+        with open(self.join('input_args.json'), 'w') as f:
             f.write(argStr)
-        if printMsg:
-            self.log(f"{Color.cyan(printMsg)}: \n\t{Color.bold(argStr)}")
 
     def get_arg(self, argDict, key, envKey, default=None):
         """ Get an argument from the argDict or from the environment.
@@ -152,6 +153,7 @@ class ProcessingPipeline(Pipeline, FolderManager):
             }
             self.info['runs'].append(runInfo)
             self.writeInfo()
+            self.__dumpArgs()
             self.__file('RUNNING')
             self.__create_tmp()
             self.prerun()
@@ -257,6 +259,10 @@ class ProcessingPipeline(Pipeline, FolderManager):
 
     def log(self, msg, flush=False):
         print(f"{Pretty.now()}: >>> {msg}", flush=flush)
+
+    def loadAcquisition(self):
+        # FIXME: allow to read a default one
+        return Acquisition(self._input_args['acquisition'])
 
     @staticmethod
     def getInputArgs(progName, inputName):
