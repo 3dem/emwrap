@@ -149,10 +149,8 @@ class Relion2DPipeline(ProcessingPipeline):
     name = 'emw-rln2d'
     input_name = 'in_particles'
 
-    def __init__(self, all_args):
-        args = all_args[self.name]
-        ProcessingPipeline.__init__(self, args)
-        self._args = args
+    def __init__(self, input_args):
+        ProcessingPipeline.__init__(self, input_args)
         self.gpuList = args['gpu'].split()
 
     def get_rln2d_proc(self, gpu):
@@ -224,7 +222,6 @@ class Relion2DPipeline(ProcessingPipeline):
     def prerun(self):
         self._minSize = self._args['batch_size']
         self._timeout = self._args.get('timeout', 3600)
-        self.dumpArgs(printMsg="Input args")
         self.log(f"Batch size: {Color.cyan(str(self._minSize))}")
         self.log(f"Input timeout (s): {Color.cyan(str(self._timeout))}")
         self.log(f"Using GPUs: {Color.cyan(str(self.gpuList))}", flush=True)
