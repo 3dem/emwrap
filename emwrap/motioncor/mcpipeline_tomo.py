@@ -22,7 +22,7 @@ import time
 import sys
 
 from emtools.utils import Color, FolderManager, Path
-from emtools.metadata import Table, Column, StarFile, RelionStar
+from emtools.metadata import Table, Column, StarFile, RelionStar, Acquisition
 from emtools.jobs import TsStarBatchManager
 from emtools.image import Image
 from emwrap.base import ProcessingPipeline
@@ -35,16 +35,16 @@ class McPipelineTomo(ProcessingPipeline):
     name = 'emw-mc-tomo'
     input_name = 'in_movies'
 
-    def __init__(self, all_args):
-        args = all_args[self.name]
-        ProcessingPipeline.__init__(self, args)
+    def __init__(self, input_args):
+        ProcessingPipeline.__init__(self, input_args)
+        args = self._args
         self.gpuList = args['gpu'].split()
         self.outputMicDir = self.join('Micrographs')
         self.inputStar = args['in_movies']
         self.inputLen = 0
-        self.acq = None
+        self.acq = self.loadAcquisition()
+        self.inputGain = self.acq.get('gain', None)
         self.outputTsDir = 'TS'
-        self.acqInfo = all_args['acquisition']
         self._DEBUG_only_output = 'DEBUG_only_output' in args
         extra = self._args['motioncor']['extra_args']
         self.bin = float(extra.get('-FtBin', 1.0))
@@ -69,12 +69,11 @@ class McPipelineTomo(ProcessingPipeline):
                 os.symlink(os.path.join('frames', baseName), batch.join('movie-' + baseName))
 
             # Link the gain reference
-            if input_gain := self.acqInfo.get('gain', None):
-                base_gain = os.path.basename(input_gain)
-                os.symlink(os.path.abspath(input_gain), batch.join(base_gain))
-                self.acq['gain'] = base_gain
+            acq = Acquisition(self.acq)
+            if self.inputGain:
+                acq['gain'] = batch.link(self.inputGain)
 
-            mc = Motioncor(self.acq, **self._args['motioncor'])
+            mc = Motioncor(acq, **self._args['motioncor'])
             mc.process_batch(batch, gpu=gpu)
             return batch
 
@@ -205,8 +204,6 @@ class McPipelineTomo(ProcessingPipeline):
             print("DEBUG: Only generating output...")
             self._writeCorrectedTS()
             return
-
-        self.dumpArgs(printMsg="Input args")
 
         inputTs = self._getInputTsTable()
         self.acq = RelionStar.get_acquisition(inputTs)

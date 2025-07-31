@@ -25,7 +25,7 @@ from emwrap.base import ProcessingPipeline
 from .motioncor import Motioncor
 
 
-class McPipeline(ProcessingPipeline):
+class McPipeline(ProcessingPipeline):  # FIXME: Update with latest changes
     """ Pipeline specific to Motioncor processing. """
     def __init__(self, args):
         ProcessingPipeline.__init__(self, args)

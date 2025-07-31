@@ -20,12 +20,13 @@ import pathlib
 import sys
 import json
 import argparse
-from pprint import pprint
+import math
 from glob import glob
+from pprint import pprint
 
 from emtools.utils import Color, Timer, Path, Process
 from emtools.jobs import MdocBatchManager, Args
-from emtools.metadata import Mdoc, Acquisition, StarFile
+from emtools.metadata import Mdoc, StarFile
 
 from emwrap.base import ProcessingPipeline
 
@@ -35,9 +36,9 @@ class AreTomoPipeline(ProcessingPipeline):
     name = 'emw-aretomo'
     input_name = 'in_movies'
 
-    def __init__(self, all_args):
-        args = all_args[self.name]
-        ProcessingPipeline.__init__(self, args)
+    def __init__(self, input_args):
+        ProcessingPipeline.__init__(self, input_args)
+        args = self._args
         self.program = args.get('aretomo_path',
                                 os.environ.get('ARETOMO_PATH', None))
         self.extraArgs = args['aretomo'].get('extra_args', {})
@@ -46,7 +47,8 @@ class AreTomoPipeline(ProcessingPipeline):
         self.inputMovies = args['in_movies']
         self.inputMdocPattern = args['mdoc']
         self.mdoc_suffix = args.get('mdoc_suffix', None)
-        self.acq = Acquisition(all_args['acquisition'])
+        self.acq = self.loadAcquisition()
+        self.inputGain = self.acq.get('gain', None)
 
     def aretomo(self, batch, **kwargs):
         gpu = kwargs['gpu']
@@ -69,11 +71,26 @@ class AreTomoPipeline(ProcessingPipeline):
             "-InSuffix": ".mdoc",
             "-OutDir": "output",
             "-Gpu": gpu,
-            "-PixSize": ps
+            "-PixSize": ps,
+            "-kV": self.acq.voltage,
+            "-Cs": self.acq.cs,
+            "-AmpContrast": self.acq.amplitude_contrast,
+            "-AtBin": "8",  # FIXME
+            "-AtPatch": "4 4",
+            "-Wbp": "",
+            "-TiltAxis": 85,
+            "-TiltCor": 1,
+            "-FlipVol": ""
         })
         args.update(self.extraArgs)
-        # Example of extraArgs:
-        # -McPatch 5 5 -McBin 2 -Group 4 8 -AtBin 4 -AtPatch 4 4
+        # Make a local link to the input frame integration file
+        args["-FmIntFile"] = batch.link(args["-FmIntFile"])
+        # TODO: create the file if it does not exist
+        startDiv = math.ceil(self.acq.total_dose)
+
+        # Link the gain reference
+        if self.inputGain:
+            args['-Gain'] = batch.link(self.inputGain)
 
         batch.call(self.program, args)
 
@@ -117,7 +134,6 @@ class AreTomoPipeline(ProcessingPipeline):
             yield mdoc
 
     def prerun(self):
-        self.dumpArgs(printMsg="Input args")
         self.log(f"Using GPUs: {Color.cyan(str(self.gpuList))}", flush=True)
         self.inputMdocs = glob(self.inputMdocPattern)
         if not self.inputMdocs:
