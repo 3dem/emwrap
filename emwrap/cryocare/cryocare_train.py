@@ -88,7 +88,6 @@ class CryoCareTrain(CryoCarePipeline):
         batch.call(program, [])
 
     def prerun(self):
-        self.dumpArgs(printMsg="Input args")
         self.log(f"Using GPUs: {Color.cyan(str(self.gpuList))}", flush=True)
 
         evenVols, oddVols = self.getInputVols()

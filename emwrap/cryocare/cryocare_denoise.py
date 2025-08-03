@@ -79,7 +79,6 @@ class CryoCareDenoise(CryoCarePipeline):
         return batch
 
     def prerun(self):
-        self.dumpArgs(printMsg="Input args")
         self.log(f"Using GPUs: {Color.cyan(str(self.gpuList))}", flush=True)
         self.model = self._args['model']
 
