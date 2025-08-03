@@ -36,7 +36,6 @@ class WarpCtfReconstruct(WarpBasePipeline):
     input_name = 'in_movies'
 
     def prerun(self):
-        self.dumpArgs(printMsg="Input args")
         inputFolder = FolderManager(self._args['in_movies'])
         self._importInputs(inputFolder)
 

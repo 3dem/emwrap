@@ -70,7 +70,6 @@ class PreprocessingPipeline(ProcessingPipeline):
             self._only_output()
             return
 
-        self.dumpArgs(printMsg="Input args")
         self.log(f"Batch size: {Color.cyan(str(self.batchSize))}")
         self.log(f"Using GPUs: {Color.cyan(str(self.gpuList))}", flush=True)
         inputs = self.info['inputs']
@@ -123,7 +122,6 @@ class PreprocessingPipeline(ProcessingPipeline):
                     pp, result = _runPP()
                     # This should update particle_size and other args
                     self._pp_args.update(pp.args)
-                    self.dumpArgs('Updated args')
 
             if result is None:
                 batch.log(f"{Color.warn('Using existing boxSize.')} "

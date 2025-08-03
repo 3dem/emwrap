@@ -39,7 +39,6 @@ class WarpAreTomo(WarpBasePipeline):
     input_name = 'in_movies'
 
     def prerun(self):
-        self.dumpArgs(printMsg="Input args")
         # Input run folder from the Motion correction and CTF job
         inputFolder = FolderManager(self._args['in_movies'])
         self.mkdir(self.TS)
@@ -69,7 +68,7 @@ class WarpAreTomo(WarpBasePipeline):
             '--extension': "*.tomostar",
             '--folder_processing': self.TS,
             '--output': self.TSS,
-            '--angpix': self.acq.pixel_size,  # FIXME: CHANGE depending on motion bin,
+            '--angpix': self.acq.pixel_size * 2,  # FIXME: CHANGE depending on motion bin,
             '--exposure': self.acq['total_dose']
         })
         args.update(self._args['create_settings'])

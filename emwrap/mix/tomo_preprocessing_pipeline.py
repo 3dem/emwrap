@@ -137,7 +137,6 @@ class TomoPreprocessingPipeline(ProcessingPipeline):
         return batch
 
     def prerun(self):
-        self.dumpArgs(printMsg="Input args")
         self.log(f"Using GPUs: {Color.cyan(str(self.gpuList))}")
         inputs = self.info['inputs']
         inputs.append({

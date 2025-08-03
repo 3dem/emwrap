@@ -51,11 +51,15 @@ class WarpBasePipeline(ProcessingPipeline):
         'tm': TM
     }
 
-    def __init__(self, all_args):
-        ProcessingPipeline.__init__(self, all_args[self.name])
+    def __init__(self, input_args):
+        ProcessingPipeline.__init__(self, input_args)
         self.gpuList = self._args['gpu'].split()
-        self.acq = Acquisition(all_args['acquisition'])
+        self.acq = self.loadAcquisition()
         self.warptools = get_warptools()
+        if gainFile := self.acq.get('gain', None):
+            self.gain = os.path.basename(gainFile)
+        else:
+            self.gain = None
 
     def _importInputs(self, inputRunFolder, keys=None):
         """ Inspect the input run folder and copy or link input folder/files
@@ -98,4 +102,4 @@ class WarpBasePipeline(ProcessingPipeline):
 
         # Link input gain file
         if gain := self.acq.get('gain', None):
-            self._args['--gain_path'] = self.link(gain)
+            self.link(gain)

@@ -39,8 +39,6 @@ class WarpMotionCtf(WarpBasePipeline):
     input_name = 'in_movies'
 
     def prerun(self):
-        self.dumpArgs(printMsg="Input args")
-
         # Input movies pattern for the frame series
         inputPattern = self._args['in_movies']
         inputFolder = os.path.dirname(inputPattern)
@@ -57,6 +55,9 @@ class WarpMotionCtf(WarpBasePipeline):
             '--angpix': self.acq.pixel_size,
             '--exposure': self.acq['total_dose']
         })
+        if self.gain:
+            args['--gain_path'] = self.gain
+
         args.update(self._args['create_settings'])
 
         # Just link the gain reference
