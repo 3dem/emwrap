@@ -37,12 +37,11 @@ class PyTomPipeline(ProcessingPipeline):
     name = 'emw-pytom'
     input_name = 'in_movies'
 
-    def __init__(self, all_args):
-        args = all_args[self.name]
-        ProcessingPipeline.__init__(self, args)
-        self.gpuList = args['gpu'].split(',')
-        self.inputTomograms = args['in_movies']
-        self.acq = Acquisition(all_args['acquisition'])
+    def __init__(self, input_args):
+        ProcessingPipeline.__init__(self, input_args)
+        self.gpuList = self._args['gpu'].split(',')
+        self.inputTomograms = self._args['in_movies']
+        self.acq = self.loadAcquisition()
 
     def get_pytom_proc(self, gpu):
 
@@ -107,12 +106,11 @@ class PyTomPipeline(ProcessingPipeline):
                          f"for name: {tsName}")
 
     def prerun(self):
-        self.dumpArgs(printMsg="Input args")
         g = self.addGenerator(self._getInputTomograms)
         outputQueue = None
         self.mkdir('Coordinates')
-
         print(f"Creating {len(self.gpuList)} processing threads.")
+
         for gpu in self.gpuList:
             p = self.addProcessor(g.outputQueue,
                                   self.get_pytom_proc(gpu),
