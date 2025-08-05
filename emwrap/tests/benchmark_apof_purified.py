@@ -44,7 +44,7 @@ ngpus = len(gpus)
 gpuConfigs = []
 
 VARS = {
-    "WARPTOOLS_PATH": None,
+    "WARP_LOADER": None,
     "ARETOMO_PATH": None,
     "ARETOMO_VERSION": None,
     "RELION_TOMOREFINE": None,
@@ -313,6 +313,7 @@ def run_aretomo3():
                     "-AtBin": 8,
                     "-TiltAxis": 85,
                     "-VolZ": 1600,
+                    "-AlignZ": 1200,
                     "-TotalDose": 3.5,
                     "-McBin": 2,
                     "-EerSampling": 2,
