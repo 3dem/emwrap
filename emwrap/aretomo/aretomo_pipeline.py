@@ -52,9 +52,11 @@ class AreTomoPipeline(ProcessingPipeline):
 
     def aretomo(self, batch, **kwargs):
         gpu = kwargs['gpu']
-        tsName = batch['tsName']
-        batch.mkdir('output')
-        logFn = batch.join('output', f'{tsName}_aretomo_log.txt')
+        #tsName = batch['tsName']
+
+        for d in ['output', 'tmp', 'log']:
+            batch.mkdir(d)
+        #logFn = batch.join('output', f'{tsName}_aretomo_log.txt')
         mdoc = batch['mdoc']
         ps = self.acq.pixel_size
 
@@ -70,17 +72,19 @@ class AreTomoPipeline(ProcessingPipeline):
             "-InMdoc": localMdoc,
             "-InSuffix": ".mdoc",
             "-OutDir": "output",
+            "-TmpDir": "tmp",
+            "-LogDir": "log",
             "-Gpu": gpu,
             "-PixSize": ps,
             "-kV": self.acq.voltage,
             "-Cs": self.acq.cs,
             "-AmpContrast": self.acq.amplitude_contrast,
             "-AtBin": "8",  # FIXME
-            "-AtPatch": "4 4",
-            "-Wbp": "",
+            "-AtPatch": "1 1",
+            "-Wbp": 1,
             "-TiltAxis": 85,
             "-TiltCor": 1,
-            "-FlipVol": ""
+            "-FlipVol": 1
         })
         args.update(self.extraArgs)
         # Make a local link to the input frame integration file
