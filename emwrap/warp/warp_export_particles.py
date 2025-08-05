@@ -50,7 +50,7 @@ class WarpExportParticles(WarpBasePipeline):
 
         # Run ts_ctf
         args = Args({
-            "ts_export_particles": "",
+            'WarpTools': "ts_export_particles",
             "--settings": self.TSS,
             "--input_star": "all_coordinates.star",
             "--box": 64,
@@ -63,7 +63,7 @@ class WarpExportParticles(WarpBasePipeline):
         })
         args.update(self._args['ts_export_particles']['extra_args'])
         with batch.execute('ts_export_particles'):
-            batch.call(self.warptools, args)
+            batch.call(self.loader, args)
 
         self.updateBatchInfo(batch)
 

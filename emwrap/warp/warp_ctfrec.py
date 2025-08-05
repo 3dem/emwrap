@@ -43,34 +43,34 @@ class WarpCtfReconstruct(WarpBasePipeline):
 
         # Run ts_ctf
         args = Args({
-            'ts_ctf': '',
+            'WarpTools': 'ts_ctf',
             '--settings': self.TSS,
             '--device_list': self.gpuList
         })
         args.update(self._args['ts_ctf']['extra_args'])
         with batch.execute('ts_ctf'):
-            batch.call(self.warptools, args)
+            batch.call(self.loader, args)
 
         # Run filter_quality
         args = Args({
-            'filter_quality': '',
+            'WarpTools': 'filter_quality',
             '--settings': self.TSS,
             "--resolution": [1, 6],
             "--output": "warp_tiltseries_filtered.txt"
         })
         with batch.execute('filter_quality'):
-            batch.call(self.warptools, args)
+            batch.call(self.loader, args)
 
         # Run ts_reconstruct
         args = Args({
-            'ts_reconstruct': '',
+            'WarpTools': 'ts_reconstruct',
             '--settings': self.TSS,
             '--device_list': self.gpuList
         })
         args.update(self._args['ts_reconstruct']['extra_args'])
 
         with batch.execute('ts_reconstruct'):
-            batch.call(self.warptools, args)
+            batch.call(self.loader, args)
 
         self.updateBatchInfo(batch)
 

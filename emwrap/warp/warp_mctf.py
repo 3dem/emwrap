@@ -47,7 +47,7 @@ class WarpMotionCtf(WarpBasePipeline):
 
         # Run create_settings
         args = Args({
-            'create_settings': '',
+            'WarpTools': 'create_settings',
             '--folder_data': self.link(inputFolder),
             '--extension': f"*{Path.getExt(inputPattern)}",
             '--folder_processing': self.FS,
@@ -66,7 +66,7 @@ class WarpMotionCtf(WarpBasePipeline):
         batch = Batch(id='mtc', path=self.path)
 
         with batch.execute('create_settings'):
-            batch.call(self.warptools, args)
+            batch.call(self.loader, args)
 
         if n := self._args['create_settings'].get('--eer_ngroups', 0):
             ngroups = n
@@ -75,7 +75,7 @@ class WarpMotionCtf(WarpBasePipeline):
 
         # Run fs_motion_and_ctf
         args = Args({
-            'fs_motion_and_ctf': '',
+            'WarpTools': 'fs_motion_and_ctf',
             '--settings': self.FSS,
             '--m_grid': f'1x1x{ngroups}',
             '--c_grid': '2x2x1',
@@ -84,7 +84,7 @@ class WarpMotionCtf(WarpBasePipeline):
         args.update(self._args['fs_motion_and_ctf']['extra_args'])
 
         with batch.execute('fs_motion_and_ctf'):
-            batch.call(self.warptools, args)
+            batch.call(self.loader, args)
 
         self.updateBatchInfo(batch)
 

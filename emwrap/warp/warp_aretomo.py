@@ -50,7 +50,7 @@ class WarpAreTomo(WarpBasePipeline):
 
         # Run ts_import
         args = Args({
-            'ts_import': '',
+            'WarpTools': 'ts_import',
             '--frameseries': self.FS,
             '--tilt_exposure': self.acq['total_dose'],
             '--output': self.TM,
@@ -59,11 +59,11 @@ class WarpAreTomo(WarpBasePipeline):
         args['--mdocs'] = self.link(args['--mdocs'])
 
         with batch.execute('ts_import'):
-            batch.call(self.warptools, args)
+            batch.call(self.loader, args)
 
         # Run create_settings
         args = Args({
-            'create_settings': '',
+            'WarpTools': 'create_settings',
             '--folder_data': self.TM,
             '--extension': "*.tomostar",
             '--folder_processing': self.TS,
@@ -74,18 +74,18 @@ class WarpAreTomo(WarpBasePipeline):
         args.update(self._args['create_settings'])
 
         with batch.execute('create_settings'):
-            batch.call(self.warptools, args)
+            batch.call(self.loader, args)
 
         # Run fs_motion_and_ctf
         args = Args({
-            'ts_aretomo': '',
+            'WarpTools': 'ts_aretomo',
             '--settings': self.TSS,
             '--device_list': self.gpuList
         })
         args.update(self._args['ts_aretomo']['extra_args'])
 
         with batch.execute('ts_aretomo'):
-            batch.call(self.warptools, args)
+            batch.call(self.loader, args)
 
         self.updateBatchInfo(batch)
 

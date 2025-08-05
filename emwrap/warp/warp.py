@@ -21,8 +21,8 @@ from emwrap.base import ProcessingPipeline
 from emtools.metadata import StarFile, Acquisition
 
 
-def get_warptools():
-    varPath = 'WARPTOOLS_PATH'
+def get_loader():
+    varPath = 'WARP_LOADER'
 
     if program := os.environ.get(varPath, None):
         if not os.path.exists(program):
@@ -55,7 +55,7 @@ class WarpBasePipeline(ProcessingPipeline):
         ProcessingPipeline.__init__(self, input_args)
         self.gpuList = self._args['gpu'].split()
         self.acq = self.loadAcquisition()
-        self.warptools = get_warptools()
+        self.loader = get_loader()
         if gainFile := self.acq.get('gain', None):
             self.gain = os.path.basename(gainFile)
         else:
