@@ -80,7 +80,8 @@ class WarpAreTomo(WarpBasePipeline):
         args = Args({
             'WarpTools': 'ts_aretomo',
             '--settings': self.TSS,
-            '--device_list': self.gpuList
+            '--device_list': self.gpuList,
+            '--exe': os.environ['ARETOMO2']
         })
         args.update(self._args['ts_aretomo']['extra_args'])
 
