@@ -90,7 +90,7 @@ class RelionTomoRefine(ProcessingPipeline):
 
         # Run ts_import
         args = Args({
-            "--o": "output",
+            "--o": "output/run",
             "--auto_refine": "",
             "--split_random_halves": "",
             "--ios": f"{inputBase}_optimisation_set.star",
