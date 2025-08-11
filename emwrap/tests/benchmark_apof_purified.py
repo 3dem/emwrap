@@ -46,9 +46,10 @@ gpuConfigs = []
 VARS = {
     "WARP_LOADER": None,
     "ARETOMO_PATH": None,
-    "ARETOMO_VERSION": None,
+    "ARETOMO2": None,
     "RELION_TOMOREFINE": None,
 
+    'EMWRAP_TEST_GPU_LIST': "",
     'EMWRAP_TEST_NGPUS': "4",
     "EMWRAP_TEST_PERDEVICE": "2",
     "EMWRAP_TEST_ANGULAR_SEARCH": "20"
@@ -59,6 +60,7 @@ def _getVar(key):
     return os.environ.get(key, VARS[key])
 
 
+gpuList = _getVar('EMWRAP_TEST_GPU_LIST')
 ngpus = _getVar('EMWRAP_TEST_NGPUS')
 perdevice = _getVar('EMWRAP_TEST_PERDEVICE')
 angular_search = int(_getVar('EMWRAP_TEST_ANGULAR_SEARCH'))
@@ -80,9 +82,11 @@ def _printVars():
     print()
 
 
-
-for n in ngpus.split(':'):
-    gpuConfigs.append(' '.join(str(g) for g in range(int(n))))
+if gpuList:
+    gpuConfigs.append(gpuList)
+else:
+    for n in ngpus.split(':'):
+        gpuConfigs.append(' '.join(str(g) for g in range(int(n))))
 
 perDeviceList = perdevice.split(':')
 
@@ -226,7 +230,7 @@ def run_ctfrec(inputJob, gpus, perdevice):
 
 def pytom(inputTomostar):
     for gpus in gpuConfigs:
-        run_ctfrec(inputTomostar, gpus)
+        run_pytom(inputTomostar, gpus)
 
 
 def run_pytom(inputTomostar, gpus):
@@ -301,6 +305,17 @@ def run_relion_tomorefine(inputJob):
     runJob(cmd, argsJson, inputParticles, 'relion_tomorefine')
 
 
+def run_mcore(inputJob, gpus, perdevice):
+    argsJson = {
+        "acquisition": acquisition,
+        "emw-warp-mcore": {
+            "gpu": gpus
+        }
+    }
+    cmd = 'emw-relion -r "python -m emwrap.warp.warp_mcore --json {argsFn} -i {inputStr}" -w'
+    runJob(cmd, argsJson, inputJob, 'warp_mcore')
+
+
 def run_aretomo3():
     gpus = gpuConfigs[0]
     argsJson = {
@@ -326,6 +341,19 @@ def run_aretomo3():
     runJob(cmd, argsJson, "data/frames", 'aretomo3')
 
 
+def run_cryocare_train(inputJob):
+    gpus = gpuConfigs[0]
+    argsJson = {
+        "acquisition": acquisition,
+        "emw-cryocare-train": {
+            "gpu": gpus
+        }
+    }
+    cmd = 'emw-relion -r "python -m emwrap.cryocare.cryocare_train --json {argsFn} -i {inputStr}" -w'
+    inputPattern = os.path.join(inputJob, "TS/*/*[EVN|ODD]_Vol.mrc")
+    runJob(cmd, argsJson, inputPattern, 'cryocare_train')
+
+
 def all_single():
     gpus = gpuConfigs[0]
     perdevice = perDeviceList[0]
@@ -337,15 +365,66 @@ def all_single():
     inputCoords = os.path.join(lastJob(), 'Coordinates')
     run_export(inputCoords, gpus, perdevice)
     run_relion_tomorefine(lastJob())
+    run_mcore(lastJob(), gpus, perdevice)
+
+
+def printStats(folder, asJson):
+    jobsMapping = {
+        "job001": "warp-motion-ctf",
+        "job002": "warp-aretomo2",
+        "job003": "warp-ctf-reconstruct",
+        "job004": "pytom-match-pick",
+        "job005": "warp-export-particles",
+        "job006": "relion-tomorefine",
+        "job007": "warp-m-refinement"
+    }
+    print(f"\n>>>> Run: {folder}")
+    infoFiles = glob.glob(f"{folder}/External/job0*/info.json")
+    infoFiles.sort()
+    headers = ["JOBID", "JOBNAME", "START", "END", "ELAPSED"]
+    format_str = u'   {:<10}{:<25}{:<25}{:<25}{:<25}'
+    rows = []
+
+    if not asJson:
+        print(format_str.format(*headers))
+
+    for fn in infoFiles:
+        with open(fn) as f:
+            info = json.load(f)
+            jobid = os.path.basename(os.path.dirname(fn))
+            run = info['runs'][-1]
+            jobname = jobsMapping[jobid]
+            rowData = [
+                jobid,
+                jobname,
+                run['start'] or '',
+                run['end'] or '',
+                run['elapsed'] or ''
+            ]
+            rows.append({k: v for k, v in zip(headers, rowData)})
+            if not asJson:
+                print(format_str.format(*rowData))
+    if asJson:
+        print(json.dumps(rows, indent=None))
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('step', choices=["env", "mctf", "aretomo", "ctfrec", "pytom",
-                                         "export", "refine", "all_single", "aretomo3"],
+    parser.add_argument('--step', choices=["mctf", "aretomo", "ctfrec", "pytom", "export", "refine", "mcore",
+                                         "all",
+                                         "aretomo3", "cryocare_train",
+                                         'stats'],
+                        default='',
                         help="")
-    parser.add_argument('sampling', nargs='?', default='8k',
+    parser.add_argument('--env', action="store_true",
+                        help="Print current environment for the running the tests.")
+    parser.add_argument('--sampling', nargs='?', default='8k',
                         choices=['4k', '8k'])
+    parser.add_argument('--stats', nargs='+', default=None,
+                        help="Input several run to compute timing stats. ")
+    parser.add_argument('--json', action="store_true",
+                        help="Output stats in JSON format.")
+
     args = parser.parse_args()
 
     gainDict = {
@@ -356,7 +435,7 @@ def main():
     acquisition['gain'] = gainDict[args.sampling]
     acquisition['sampling'] = args.sampling
 
-    if args.step == 'env':
+    if args.env == 'env':
         _printVars()
     elif args.step == 'mctf':
         mctf()
@@ -370,10 +449,19 @@ def main():
         export(os.path.join(lastJob(), 'Coordinates'))
     elif args.step == 'refine':
         run_relion_tomorefine(lastJob())
-    elif args.step == 'all_single':
+    elif args.step == 'all':
         all_single()
+    elif args.step == 'mcore':
+        gpus = gpuConfigs[0]
+        perdevice = perDeviceList[0]
+        run_mcore(lastJob(), gpus, perdevice)
     elif args.step == 'aretomo3':
         run_aretomo3()
+    elif args.step == 'cryocare_train':
+        run_cryocare_train(lastJob())
+    elif args.stats:
+        for folder in args.stats:
+            printStats(folder, args.json)
 
 
 if __name__ == '__main__':
