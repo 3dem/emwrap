@@ -72,28 +72,26 @@ class CryoCareTrain(CryoCarePipeline):
     name = 'emw-cryocare-train'
     input_name = 'in_movies'
 
-    def train(self, batch, **kwargs):
-        data_train_config['even'] = [self.relpath(v) for v in batch['even']]
-        data_train_config['odd'] = [self.relpath(v) for v in batch['odd']]
-
-        batch.dump(data_train_config, 'train_data_config.json')
-
-        train_config["gpu_id"] = [int(g) for g in self.gpuList]
-        batch.dump(train_config, 'train_config.json')
-
-        # Extract data config
-        program = os.environ['CRYOCARE_TRAIN']
-
-        print(f">>> Running: {program}")
-        batch.call(program, [])
-
     def prerun(self):
         self.log(f"Using GPUs: {Color.cyan(str(self.gpuList))}", flush=True)
 
         evenVols, oddVols = self.getInputVols()
 
-        batch = Batch(id='cryocare', path=self.path, even=evenVols, odd=oddVols)
-        self.train(batch)
+        batch = Batch(id='cryocare', path=self.path)
+        data_train_config['even'] = [self.relpath(v) for v in evenVols]
+        data_train_config['odd'] = [self.relpath(v) for v in oddVols]
+
+        batch.dump(data_train_config, 'train_data_config.json')
+
+        train_config["gpu_id"] = [int(g) for g in self.gpuList]
+        batch.dump(train_config, 'train_config.json')
+        loader = os.environ['CRYOCARE_LOADER']
+        with batch.execute('cryocare_train'):
+            batch.call(loader,
+                       'cryoCARE_extract_train_data.py --conf train_data_config.json')
+            batch.call(loader,
+                       'cryoCARE_train.py --conf train_config.json')
+        self.updateBatchInfo(batch)
 
 
 def main():

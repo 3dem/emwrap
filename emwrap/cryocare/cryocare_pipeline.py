@@ -33,19 +33,20 @@ from emwrap.base import ProcessingPipeline
 class CryoCarePipeline(ProcessingPipeline):
     """ Pipeline specific to CryoCare processing. """
 
-    def __init__(self, all_args):
-        args = all_args[self.name]
-        ProcessingPipeline.__init__(self, args)
-        self.gpuList = [int(g) for g in args['gpu'].split()]
-        self.inputVolPattern = args['in_movies']
-        self._args = args
+    def __init__(self, input_args):
+        ProcessingPipeline.__init__(self, input_args)
+        self.gpuList = [int(g) for g in self._args['gpu'].split()]
+        self.inputVolPattern = self._args['in_movies']
 
     def getInputVols(self):
+        # FIXME: Use input STAR file instead of guessing the matching
+        # based on glob pattern or names
+
         inputVols = glob(self.inputVolPattern)
 
         if not inputVols:
             raise Exception(f"No volumes were found with pattern: "
-                            f"{self.inputMdocPattern}")
+                            f"{self.inputVolPattern}")
 
         # Let's match volumes in pairs
         evenVols = [v for v in inputVols if 'EVN' in v]
