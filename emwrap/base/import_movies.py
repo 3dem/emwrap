@@ -33,18 +33,18 @@ class ImportMoviesPipeline(ProcessingPipeline):
     name = 'emw-import-movies'
     input_name = 'in_movies'
 
-    def __init__(self, args):
-        ProcessingPipeline.__init__(self, args[self.name])
-        self.acq = Acquisition(args['acquisition'])
-        im_args = args[self.name]
+    def __init__(self, input_args):
+        ProcessingPipeline.__init__(self, input_args)
+        self.acq = self.loadAcquisition()
+        args = self._args
 
         self.wait = {
-            'timeout': im_args.get('timeout', 120),  # 2 hour
-            'file_change': im_args.get('file_change', 60),  # 1 min
-            'sleep': im_args.get('sleep', 60),
+            'timeout': args.get('timeout', 120),  # 2 hour
+            'file_change': args.get('file_change', 60),  # 1 min
+            'sleep': args.get('sleep', 60),
         }
         self.outputStar = self.join('movies.star')
-        self.pattern = im_args[self.input_name]
+        self.pattern = args[self.input_name]
         rootParts = []
         for p in Path.splitall(self.pattern):
             if Path.isPattern(p):
@@ -87,6 +87,13 @@ class ImportMoviesPipeline(ProcessingPipeline):
                 if 'GridSquare' in p:
                     return p
             return 'None'
+
+        if self.pattern.endswith('EER.eer'):
+            suffix = '_EER.eer'
+        elif self.pattern.endswith('fractions.tiff'):
+            suffix = '_fractions.tiff'
+        else:
+            suffix = Path.getExt(self.pattern)
 
         # Keep monitoring for new files until the time expires
         while (now - lastUpdate).seconds < self.wait['timeout']:
@@ -131,7 +138,7 @@ class ImportMoviesPipeline(ProcessingPipeline):
                             sf.flush()
                             unwritten = 0
                         allMovies.add(fn)
-                        absXml = absFn.replace('_fractions.tiff', '.xml')
+                        absXml = absFn.replace(suffix, '.xml')
 
                         if os.path.exists(absXml):
                             shutil.copy(absXml, xmlFolder.join(f'{newPrefix}.xml'))
