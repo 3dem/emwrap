@@ -410,20 +410,18 @@ def printStats(folder, asJson):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--step', choices=["mctf", "aretomo", "ctfrec", "pytom", "export", "refine", "mcore",
-                                         "all",
-                                         "aretomo3", "cryocare_train",
-                                         'stats'],
-                        default='',
-                        help="")
-    parser.add_argument('--env', action="store_true",
-                        help="Print current environment for the running the tests.")
-    parser.add_argument('--sampling', nargs='?', default='8k',
-                        choices=['4k', '8k'])
-    parser.add_argument('--stats', nargs='+', default=None,
-                        help="Input several run to compute timing stats. ")
+    g = parser.add_mutually_exclusive_group(required=True)
+    g.add_argument('--warp', '-w', choices=["mctf", "aretomo", "ctfrec", "pytom", "export", "refine", "mcore", "all"])
+    g.add_argument('--at3', '-a', choices=["aretomo3", "cryocare_train", "all"])
+    g.add_argument('--env', action="store_true",
+                   help="Print current environment for the running the tests.")
+    g.add_argument('--stats', nargs='+', default=None,
+                   help="Input several run to compute timing stats. ")
     parser.add_argument('--json', action="store_true",
                         help="Output stats in JSON format.")
+
+    parser.add_argument('--sampling', nargs='?', default='8k',
+                        choices=['4k', '8k'])
 
     args = parser.parse_args()
 
@@ -435,30 +433,32 @@ def main():
     acquisition['gain'] = gainDict[args.sampling]
     acquisition['sampling'] = args.sampling
 
-    if args.env == 'env':
+    if args.env:
         _printVars()
-    elif args.step == 'mctf':
-        mctf()
-    elif args.step == 'aretomo':
-        aretomo(lastJob())
-    elif args.step == 'ctfrec':
-        ctfrec(lastJob())
-    elif args.step == 'pytom':
-        pytom(os.path.join(lastJob(), 'warp_tomostar'))
-    elif args.step == 'export':
-        export(os.path.join(lastJob(), 'Coordinates'))
-    elif args.step == 'refine':
-        run_relion_tomorefine(lastJob())
-    elif args.step == 'all':
-        all_single()
-    elif args.step == 'mcore':
-        gpus = gpuConfigs[0]
-        perdevice = perDeviceList[0]
-        run_mcore(lastJob(), gpus, perdevice)
-    elif args.step == 'aretomo3':
-        run_aretomo3()
-    elif args.step == 'cryocare_train':
-        run_cryocare_train(lastJob())
+    elif warp_step := args.warp:
+        if warp_step == 'mctf':
+            mctf()
+        elif warp_step == 'aretomo':
+            aretomo(lastJob())
+        elif warp_step == 'ctfrec':
+            ctfrec(lastJob())
+        elif warp_step == 'pytom':
+            pytom(os.path.join(lastJob(), 'warp_tomostar'))
+        elif warp_step == 'export':
+            export(os.path.join(lastJob(), 'Coordinates'))
+        elif warp_step == 'refine':
+            run_relion_tomorefine(lastJob())
+        elif warp_step == 'all':
+            all_single()
+        elif warp_step == 'mcore':
+            gpus = gpuConfigs[0]
+            perdevice = perDeviceList[0]
+            run_mcore(lastJob(), gpus, perdevice)
+    elif at3_step := args.at3:
+        if at3_step == 'aretomo3':
+            run_aretomo3()
+        elif at3_step == 'cryocare_train':
+            run_cryocare_train(lastJob())
     elif args.stats:
         for folder in args.stats:
             printStats(folder, args.json)
