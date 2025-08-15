@@ -52,6 +52,7 @@ class OTF(FolderManager):
         project = RelionProject(self.path)
         project.clean()
         os.chdir(self.path)
+        Process.system('mkdir .slurm')
 
         raw = session['extra']['raw']
 

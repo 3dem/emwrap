@@ -36,15 +36,15 @@ class PreprocessingPipeline(ProcessingPipeline):
     name = 'emw-preprocessing'
     input_name = 'in_movies'
 
-    def __init__(self, all_args):
-        args = all_args[self.name]
-        ProcessingPipeline.__init__(self, args)
+    def __init__(self, input_args):
+        ProcessingPipeline.__init__(self, input_args)
+        args = self._args
         self.gpuList = args['gpu'].split()
         self.outputDirs = {}
         self.inputStar = args['in_movies']
         self.batchSize = args.get('batch_size', 32)
         self.inputTimeOut = args.get('input_timeout', 3600)
-        self.acq = all_args['acquisition']
+        self.acq = self.loadAcquisition()
         self._totalInput = self._totalOutput = 0
         self._pp_args = args
         self._pp_args['acquisition'] = Acquisition(self.acq)
@@ -89,6 +89,7 @@ class PreprocessingPipeline(ProcessingPipeline):
         if os.path.exists(outputMicStar):
             with StarFile(outputMicStar) as sf:
                 self._totalOutput = sf.getTableSize('micrographs')
+                self.log(f"Found {self._totalOutput} existing micrographs")
 
         g = self.addMoviesGenerator(self.inputStar, outputMicStar, self.batchSize,
                                     inputTimeOut=self.inputTimeOut,
@@ -148,9 +149,9 @@ class PreprocessingPipeline(ProcessingPipeline):
                 firstTime = not os.path.exists(micsStar)
                 partStack = {}  # map micrograph to output stack of particles
                 # Update micrographs.star
-                with StarFile(micsStar, 'a') as sf:
-                    with StarFile(micsStarBatch) as sfBatch:
-                        if micsTable := sfBatch.getTable('micrographs'):
+                with StarFile(micsStarBatch) as sfBatch:
+                    if micsTable := sfBatch.getTable('micrographs'):
+                        with StarFile(micsStar, 'a') as sf:
                             if firstTime:
                                 sf.writeTimeStamp()
                                 sf.writeTable('optics', sfBatch.getTable('optics'))
@@ -163,14 +164,15 @@ class PreprocessingPipeline(ProcessingPipeline):
                                                               'rlnMicrographName',
                                                               'rlnCtfImage',
                                                               'rlnMicrographCoordinates'))
-                    batch.log(f"Removing {micsStarBatch}", flush=True)
-                    os.remove(micsStarBatch)
+                batch.log(f"Removing {micsStarBatch}", flush=True)
+                os.remove(micsStarBatch)
 
                 # Update coordinates.star
                 coordStar, coordStarBatch = _pair('coordinates.star')
-                with StarFile(coordStar, 'a') as sf:
-                    with StarFile(coordStarBatch) as sfBatch:
-                        if coordsTable := sfBatch.getTable('coordinate_files'):
+                firstTime = not os.path.exists(coordStar)
+                with StarFile(coordStarBatch) as sfBatch:
+                    if coordsTable := sfBatch.getTable('coordinate_files'):
+                        with StarFile(coordStar, 'a') as sf:
                             if firstTime:
                                 sf.writeTimeStamp()
                                 sf.writeHeader('coordinate_files', coordsTable)
@@ -178,14 +180,15 @@ class PreprocessingPipeline(ProcessingPipeline):
                                 sf.writeRow(self.fixOutputRow(row,
                                                               'rlnMicrographName',
                                                               'rlnMicrographCoordinates'))
-                    batch.log(f"Removing {coordStarBatch}", flush=True)
-                    os.remove(coordStarBatch)
+                batch.log(f"Removing {coordStarBatch}", flush=True)
+                os.remove(coordStarBatch)
 
                 # Update particles.star
                 partStar, partStarBatch = _pair('particles.star')
-                with StarFile(partStar, 'a') as sf:
-                    with StarFile(partStarBatch) as sfBatch:
-                        if partTable := sfBatch.getTable('particles'):
+                firstTime = not os.path.exists(partStar)
+                with StarFile(partStarBatch) as sfBatch:
+                    if partTable := sfBatch.getTable('particles'):
+                        with StarFile(partStar, 'a') as sf:
                             if firstTime:
                                 sf.writeTimeStamp()
                                 sf.writeTable('optics', sfBatch.getTable('optics'))
@@ -195,8 +198,8 @@ class PreprocessingPipeline(ProcessingPipeline):
                                 i = row.rlnImageName.split('@')[0]
                                 sf.writeRow(row._replace(rlnImageName=f"{i}@{partStack[micName]}",
                                                          rlnMicrographName=self.fixOutputPath(micName)))
-                    batch.log(f"Removing {partStarBatch}", flush=True)
-                    os.remove(partStarBatch)
+                batch.log(f"Removing {partStarBatch}", flush=True)
+                os.remove(partStarBatch)
 
                 batch.info.update({
                     'output_elapsed': str(t.getElapsedTime())
