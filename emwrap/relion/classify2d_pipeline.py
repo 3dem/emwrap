@@ -151,7 +151,7 @@ class Relion2DPipeline(ProcessingPipeline):
 
     def __init__(self, input_args):
         ProcessingPipeline.__init__(self, input_args)
-        self.gpuList = args['gpu'].split()
+        self.gpuList = self._args['gpu'].split()
 
     def get_rln2d_proc(self, gpu):
         def _rln2d(batch):
