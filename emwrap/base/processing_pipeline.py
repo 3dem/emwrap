@@ -62,7 +62,7 @@ class ProcessingPipeline(Pipeline, FolderManager):
         self.tmpDir = self.join('tmp')
         self.info = {
             'inputs': [],
-            'outputs': [],
+            'outputs': {},
             'runs': [],
             'summary': {},
             'batches': {}
@@ -70,6 +70,14 @@ class ProcessingPipeline(Pipeline, FolderManager):
         self.infoFile = self.join('info.json')
         # Lock used when requiring single thread running output generation code
         self.outputLock = threading.Lock()
+
+    @property
+    def intpus(self):
+        return self.info['intputs']
+
+    @property
+    def outputs(self):
+        return self.info['outputs']
 
     def __validate(self, path, key):
         if not path:
@@ -290,7 +298,6 @@ class ProcessingPipeline(Pipeline, FolderManager):
 
     @classmethod
     def runFromArgs(cls):
-        print(f"ProcessingPipeline.getInputArgs({cls.name}, {cls.input_name})")
         input_args = ProcessingPipeline.getInputArgs(cls.name, cls.input_name)
         p = cls(input_args)
         p.run()
