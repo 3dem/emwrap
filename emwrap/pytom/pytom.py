@@ -16,7 +16,7 @@
 
 import os
 
-from emtools.utils import Color, Timer, Path, FolderManager
+from emtools.utils import Color, Timer, Path, FolderManager, Pretty
 from emtools.jobs import Args
 from emtools.metadata import Table, StarFile, TextFile, Acquisition
 from emtools.image import Image
@@ -30,7 +30,6 @@ class PyTom:
         self.args.update(kwargs.get('extra_args', {}))
 
     def process_batch(self, batch, **kwargs):
-
         def _write_list(key, ext):
             fn = f"{batch['tsName']}_{key}.{ext}"
             with open(batch.join(fn), 'w') as f:
@@ -43,21 +42,22 @@ class PyTom:
         fm = FolderManager(outputDir)
 
         # pytom_match arguments
-        args = {
+        args = Args(self.args)
+        args.update({
             '--destination': 'output',
             '--voxel-size-angstrom': 9.52,  # FIXME: This should be taken from input
             '--tomogram': batch.link(batch['tomogram']),
             '--tilt-angles': _write_list('tilt_angles', 'rawtlt'),
             '--dose-accumulation': _write_list('dose_accumulation', 'txt'),
-            '-g': kwargs['gpu'].split()
-        }
-        args.update(self.args)
+            '-g': kwargs['gpu']
+        })
+        #args.update(self.args)
         # Let's create some relative symbolic links and update arguments
         for a in ['--template', '--mask']:
             args[a] = batch.link(args[a])
 
         # Let's fix some arguments that need to be a list
-        for a in ['-s']:
+        for a in ['-s', '-g']:
             if a in args:
                 args[a] = args[a].split()
 
