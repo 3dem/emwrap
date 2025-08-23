@@ -38,17 +38,23 @@ class WarpMotionCtf(WarpBasePipeline):
     name = 'emw-warp-mctf'
     input_name = 'in_movies'
 
-    def prerun(self):
+    def runBatch(self, batch, importInputs=True):
         # Input movies pattern for the frame series
         inputPattern = self._args['in_movies']
         inputFolder = os.path.dirname(inputPattern)
+        batch.mkdir(self.FS)
 
-        self.mkdir(self.FS)
+        # Just link the gain reference
+        if importInputs:
+            folderData = batch.link(inputFolder)
+            self._importInputs(inputFolder, keys=[])
+        else:
+            folderData = inputFolder
 
         # Run create_settings
         args = Args({
             'WarpTools': 'create_settings',
-            '--folder_data': self.link(inputFolder),
+            '--folder_data': folderData,
             '--extension': f"*{Path.getExt(inputPattern)}",
             '--folder_processing': self.FS,
             '--output': self.FSS,
@@ -59,11 +65,6 @@ class WarpMotionCtf(WarpBasePipeline):
             args['--gain_path'] = self.gain
 
         args.update(self._args['create_settings'])
-
-        # Just link the gain reference
-        self._importInputs(inputFolder, keys=[])
-
-        batch = Batch(id='mtc', path=self.path)
 
         with batch.execute('create_settings'):
             batch.call(self.loader, args)
@@ -87,6 +88,10 @@ class WarpMotionCtf(WarpBasePipeline):
             batch.call(self.loader, args)
 
         self.updateBatchInfo(batch)
+
+    def prerun(self):
+        batch = Batch(id='mtc', path=self.path)
+        self.runBatch(batch)
 
 
 def main():

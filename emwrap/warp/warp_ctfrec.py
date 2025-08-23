@@ -36,10 +36,14 @@ class WarpCtfReconstruct(WarpBasePipeline):
     input_name = 'in_movies'
 
     def prerun(self):
-        inputFolder = FolderManager(self._args['in_movies'])
-        self._importInputs(inputFolder)
-
         batch = Batch(id=self.name, path=self.path)
+        self.runBatch(batch)
+
+    def runBatch(self, batch, importInputs=True):
+        inputFolder = FolderManager(self._args['in_movies'])
+
+        if importInputs:
+            self._importInputs(inputFolder)
 
         # Run ts_ctf
         args = Args({

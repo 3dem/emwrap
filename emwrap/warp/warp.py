@@ -42,6 +42,7 @@ class WarpBasePipeline(ProcessingPipeline):
     TS = 'warp_tiltseries'
     TSS = f'{TS}.settings'
     TM = 'warp_tomostar'
+    WARP_FOLDERS = [FS, TS, TM]
 
     INPUTS = {
         'fs': FS,
@@ -53,7 +54,7 @@ class WarpBasePipeline(ProcessingPipeline):
 
     def __init__(self, input_args):
         ProcessingPipeline.__init__(self, input_args)
-        self.gpuList = self._args['gpu'].split()
+        self.gpuList = self._args['gpu'].split(',')
         self.acq = self.loadAcquisition()
         self.loader = get_loader()
         if gainFile := self.acq.get('gain', None):
@@ -69,6 +70,7 @@ class WarpBasePipeline(ProcessingPipeline):
             inputRunFolder: the input run folder
             keys: input keys to import, if None, all inputs will be imported
         """
+        print(f"{self.name}: Import inputs ", self.gain)
         keys = self.INPUTS.keys() if keys is None else keys
 
         if isinstance(inputRunFolder, FolderManager):
@@ -102,4 +104,5 @@ class WarpBasePipeline(ProcessingPipeline):
 
         # Link input gain file
         if gain := self.acq.get('gain', None):
+            print(f"{self.name}: Liking gain gain: ", gain)
             self.link(gain)

@@ -33,20 +33,23 @@ class WarpAreTomo(WarpBasePipeline):
     """ Warp wrapper to run warp_ts_aretomo.
     It will run:
         - ts_import -> mdocs
-        -
     """
     name = 'emw-warp-aretomo'
     input_name = 'in_movies'
 
     def prerun(self):
+        batch = Batch(id=self.name, path=self.path)
+        self.runBatch(batch)
+
+    def runBatch(self, batch, importInputs=True):
         # Input run folder from the Motion correction and CTF job
         inputFolder = FolderManager(self._args['in_movies'])
-        self.mkdir(self.TS)
-        self.mkdir(self.TM)
-        batch = Batch(id=self.name, path=self.path)
+        batch.mkdir(self.TS)
+        batch.mkdir(self.TM)
 
         # Link input frameseries folder, settings and gain reference
-        self._importInputs(inputFolder, keys=['fs', 'fss'])
+        if importInputs:
+            self._importInputs(inputFolder, keys=['fs', 'fss'])
 
         # Run ts_import
         args = Args({
@@ -56,7 +59,8 @@ class WarpAreTomo(WarpBasePipeline):
             '--output': self.TM,
         })
         args.update(self._args['ts_import'])
-        args['--mdocs'] = self.link(args['--mdocs'])
+        if args['--mdocs'] != '.':
+            args['--mdocs'] = batch.link(args['--mdocs'])
 
         with batch.execute('ts_import'):
             batch.call(self.loader, args)
