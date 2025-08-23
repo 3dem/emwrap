@@ -49,6 +49,7 @@ VARS = {
     "ARETOMO2": None,
     "RELION_TOMOREFINE": None,
 
+    'CUDA_VISIBLE_DEVICES': None,
     'EMWRAP_TEST_GPU_LIST': "",
     'EMWRAP_TEST_NGPUS': "4",
     "EMWRAP_TEST_PERDEVICE": "2",
@@ -127,105 +128,114 @@ def iterGpuConfigs():
         for perdevice in perDeviceList:
             yield gpus, perdevice
 
-def mctf():
-    for gpus, perdevice in iterGpuConfigs():
-        run_mctf(gpus, perdevice)
 
-
-def run_mctf(gpus, perdevice):
-    binning = 1 if acquisition['sampling'] == '8k' else 0
-
-    argsJson = {
-        "acquisition": acquisition,
-        "emw-warp-mctf": {
-            "gpu": gpus,
-            "create_settings": {
-                "--bin": binning,
-                "--eer_ngroups": 11
-            },
-            "fs_motion_and_ctf": {
-                "extra_args": {
-                    "--c_range_max": 5,
-                    "--c_range_min": 40,
-                    "--c_defocus_max": 7,
-                    "--c_defocus_min": 1.5,
-                    "--c_use_sum": "",
-                    "--out_averages": "",
-                    "--out_average_halves": "",
-                    "--perdevice": perdevice
+class Mctf:
+    def __init__(self, gpus, perdevice):
+        binning = 1 if acquisition['sampling'] == '8k' else 0
+        self.argsJson = {
+            "acquisition": acquisition,
+            "emw-warp-mctf": {
+                "gpu": gpus,
+                "create_settings": {
+                    "--bin": binning,
+                    "--eer_ngroups": 11
+                },
+                "fs_motion_and_ctf": {
+                    "extra_args": {
+                        "--c_range_max": 5,
+                        "--c_range_min": 40,
+                        "--c_defocus_max": 7,
+                        "--c_defocus_min": 1.5,
+                        "--c_use_sum": "",
+                        "--out_averages": "",
+                        "--out_average_halves": "",
+                        "--perdevice": perdevice
+                    }
                 }
             }
         }
-    }
-    cmd = 'emw-relion -r "python -m emwrap.warp.warp_mctf --json {argsFn} -i {inputStr}" -w'
-    runJob(cmd, argsJson, 'data/frames/*.eer', 'warp_mctf')
+
+    def run(self):
+        cmd = 'emw-relion -r "python -m emwrap.warp.warp_mctf --json {argsFn} -i {inputStr}" -w'
+        runJob(cmd, self.argsJson, 'data/frames/*.eer', 'warp_mctf')
+
+    @staticmethod
+    def run_all():
+        for gpus, perdevice in iterGpuConfigs():
+            Mctf(gpus, perdevice).run()
 
 
-def aretomo(inputJob):
-    for gpus, perdevice in iterGpuConfigs():
-        run_aretomo(inputJob, gpus, perdevice)
-
-
-def run_aretomo(inputJob, gpus, perdevice):
-    argsJson = {
-        "acquisition": acquisition,
-        "emw-warp-aretomo": {
-            "gpu": gpus,
-            "ts_import": {
-                "--mdocs": "data/mdocs",
-                # "--min_ntilts": 5,
-                "--tilt_offset": 11,
-                "--override_axis": 85
-            },
-            "create_settings": {
-                "--tomo_dimensions": "4096x4096x1600"
-            },
-            "ts_aretomo": {
-                "extra_args": {
-                    "--angpix": 9.52,
-                    "--alignz": 1800,
-                    "--axis_iter": 2,
-                    "--axis_batch": 15,
-                    "--perdevice": 1
+class Aretomo:
+    def __init__(self, gpus, perdevice):
+        self.argsJson = {
+            "acquisition": acquisition,
+            "emw-warp-aretomo": {
+                "gpu": gpus,
+                "ts_import": {
+                    "--mdocs": "data/mdocs",
+                    # "--min_ntilts": 5,
+                    "--tilt_offset": 11,
+                    "--override_axis": 85
+                },
+                "create_settings": {
+                    "--tomo_dimensions": "4096x4096x1600"
+                },
+                "ts_aretomo": {
+                    "extra_args": {
+                        "--angpix": 9.52,
+                        "--alignz": 1800,
+                        "--axis_iter": 2,
+                        "--axis_batch": 15,
+                        "--perdevice": 1
+                    }
                 }
             }
         }
-    }
-    # python -m emwrap.warp.warp_aretomo --json args.json -i External/job004/
-    cmd = 'emw-relion -r "python -m emwrap.warp.warp_aretomo --json {argsFn} -i {inputStr}" -w'
-    runJob(cmd, argsJson, inputJob, 'warp_aretomo')
+
+    def run(self, inputJob):
+        # python -m emwrap.warp.warp_aretomo --json args.json -i External/job004/
+        cmd = 'emw-relion -r "python -m emwrap.warp.warp_aretomo --json {argsFn} -i {inputStr}" -w'
+        runJob(cmd, self.argsJson, 'warp_aretomo')
+
+    @staticmethod
+    def run_all(inputJob):
+        for gpus, _ in iterGpuConfigs():
+            Aretomo(gpus).run(inputJob)
 
 
-def ctfrec(inputJob):
-    for gpus, perdevice in iterGpuConfigs():
-        run_ctfrec(inputJob, gpus, perdevice)
-
-
-def run_ctfrec(inputJob, gpus, perdevice):
-    argsJson = {
-        "acquisition": acquisition,
-        "emw-warp-ctfrec": {
-            "gpu": gpus,
-            "ts_ctf": {
-                "extra_args": {
-                    "--range_low": 35,
-                    "--range_high": 6,
-                    "--defocus_max": 7.5,
-                    "--defocus_min": 1.5,
-                    "--perdevice": perdevice
-                }
-            },
-            "ts_reconstruct": {
-                "extra_args": {
-                    "--angpix": 9.52,  # FIXME
-                    "--halfmap_frames": "",
-                    "--perdevice": 2
+class Ctfrec:
+    def __init__(self, gpus, perdevice):
+        self.argsJson = {
+            "acquisition": acquisition,
+            "emw-warp-ctfrec": {
+                "gpu": gpus,
+                "ts_ctf": {
+                    "extra_args": {
+                        "--range_low": 35,
+                        "--range_high": 6,
+                        "--defocus_max": 7.5,
+                        "--defocus_min": 1.5,
+                        "--perdevice": perdevice
+                    }
+                },
+                "ts_reconstruct": {
+                    "extra_args": {
+                        "--angpix": 9.52,  # FIXME
+                        "--halfmap_frames": "",
+                        "--perdevice": perdevice
+                    }
                 }
             }
         }
-    }
-    cmd = 'emw-relion -r "python -m emwrap.warp.warp_ctfrec --json {argsFn} -i {inputStr}" -w'
-    runJob(cmd, argsJson, inputJob, 'warp_ctfrec')
+
+    def run(self, inputJob):
+        cmd = 'emw-relion -r "python -m emwrap.warp.warp_ctfrec --json {argsFn} -i {inputStr}" -w'
+        runJob(cmd, self.argsJson, inputJob, 'warp_ctfrec')
+
+    @staticmethod
+    def run_all(inputJob):
+        for gpus, perdevice in iterGpuConfigs():
+            Ctfrec(gpus, perdevice).run(inputJob)
 
 
 def pytom(inputTomostar):
@@ -357,15 +367,34 @@ def run_cryocare_train(inputJob):
 def all_single():
     gpus = gpuConfigs[0]
     perdevice = perDeviceList[0]
-    run_mctf(gpus, perdevice)
-    run_aretomo(lastJob(), gpus, perdevice)
-    run_ctfrec(lastJob(), gpus, perdevice)
+    Mctf(gpus, perdevice).run()
+    Aretomo(gpus, perdevice).run(lastJob())
+    Ctfrec(gpus, perdevice).run(lastJob())
     inputTomostar = os.path.join(lastJob(), 'warp_tomostar')
     run_pytom(inputTomostar, gpus)
     inputCoords = os.path.join(lastJob(), 'Coordinates')
     run_export(inputCoords, gpus, perdevice)
     run_relion_tomorefine(lastJob())
     run_mcore(lastJob(), gpus, perdevice)
+
+
+def run_preprocessing():
+    gpus = gpuConfigs[0]
+    perdevice = perDeviceList[0]
+    # Create a single configuration file
+    argsJson = {
+        "acquisition": acquisition,
+        "emw-warp-preprocessing": {
+            "gpu": gpus,
+            "mdocs": "data/mdocs/Position_*[0-9].mdoc"
+        }
+    }
+    for _class in [Mctf, Aretomo, Ctfrec]:
+        r = _class(gpus, perdevice)
+        argsJson.update(r.argsJson)
+
+    cmd = 'emw-relion -r "python -m emwrap.warp.warp_preprocessing --json {argsFn} -i {inputStr}" -w'
+    runJob(cmd, argsJson, "data/frames", 'warp_preprocessing')
 
 
 def printStats(folder, asJson):
@@ -411,7 +440,8 @@ def printStats(folder, asJson):
 def main():
     parser = argparse.ArgumentParser()
     g = parser.add_mutually_exclusive_group(required=True)
-    g.add_argument('--warp', '-w', choices=["mctf", "aretomo", "ctfrec", "pytom", "export", "refine", "mcore", "all"])
+    g.add_argument('--warp', '-w', choices=["mctf", "aretomo", "ctfrec", "pytom", "export", "refine", "mcore",
+                                            "all", "preprocessing"])
     g.add_argument('--at3', '-a', choices=["aretomo3", "cryocare_train", "all"])
     g.add_argument('--env', action="store_true",
                    help="Print current environment for the running the tests.")
@@ -437,11 +467,11 @@ def main():
         _printVars()
     elif warp_step := args.warp:
         if warp_step == 'mctf':
-            mctf()
+            Mctf.run_all()
         elif warp_step == 'aretomo':
-            aretomo(lastJob())
+            Aretomo.run_all(lastJob())
         elif warp_step == 'ctfrec':
-            ctfrec(lastJob())
+            Ctfrec.run_all(lastJob())
         elif warp_step == 'pytom':
             pytom(os.path.join(lastJob(), 'warp_tomostar'))
         elif warp_step == 'export':
@@ -454,6 +484,8 @@ def main():
             gpus = gpuConfigs[0]
             perdevice = perDeviceList[0]
             run_mcore(lastJob(), gpus, perdevice)
+        elif warp_step == 'preprocessing':
+            run_preprocessing()
     elif at3_step := args.at3:
         if at3_step == 'aretomo3':
             run_aretomo3()
