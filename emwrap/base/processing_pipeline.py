@@ -61,7 +61,7 @@ class ProcessingPipeline(Pipeline, FolderManager):
 
         self.tmpDir = self.join('tmp')
         self.info = {
-            'inputs': [],
+            'inputs': {},
             'outputs': {},
             'runs': [],
             'summary': {},
@@ -72,8 +72,8 @@ class ProcessingPipeline(Pipeline, FolderManager):
         self.outputLock = threading.Lock()
 
     @property
-    def intpus(self):
-        return self.info['intputs']
+    def inputs(self):
+        return self.info['inputs']
 
     @property
     def outputs(self):
