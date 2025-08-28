@@ -211,7 +211,10 @@ class ProcessingPipeline(Pipeline, FolderManager):
             createBatch: if True, the BatchManager will create the batch folder
         """
         def _movie_fn(row):
-            return row.rlnMicrographMovieName
+            for label in ['rlnMicrographMovieName', 'rlnMicrographName']:
+                if value := getattr(row, label, None):
+                    return value
+            return None
 
         def _movie_micrograph_key(row):
             """ Return the id from movie or micrograph row. """
