@@ -39,11 +39,24 @@ class WarpExportParticles(WarpBasePipeline):
 
     def prerun(self):
         inputFm = FolderManager(self._args['in_particles'])
-        tomostarFolder = self._getTomostarFolder(inputFm)
+        # If the tomostar folder is not provided, we guess it from
+        # the input to pytom picking job
+        if tomostar := self._args.get('tomostar', None):
+            tomostarFolder = tomostar
+            self.log("Input tomostar folder from arguments.")
+        else:
+            tomostarFolder = self._getTomostarFolder(inputFm)
+            self.log("Finding tomostar folder from PyTom input.")
+
+        self.log(f"Tomostar folder path: {Color.cyan(tomostarFolder)}")
         tomostarFm = FolderManager(tomostarFolder)
+
         self._joinStarFiles(inputFm, tomostarFm)
         # Assume that the Warp folder is one level up from the tomostar
-        self._importInputs(FolderManager(os.path.dirname(tomostarFolder)))
+        warpFolder = FolderManager(os.path.dirname(tomostarFolder))
+        # Import inputs except tomostar, that might come from a different folder
+        self._importInputs(warpFolder, keys=['fs', 'fss', 'ts', 'tss'])
+        self.link(tomostarFolder, name=self.TM)
         self.mkdir('Particles')
 
         batch = Batch(id=self.name, path=self.path)
@@ -80,26 +93,33 @@ class WarpExportParticles(WarpBasePipeline):
         """ Join all input coordinates star files into a single one,
         and correct the rlnMicrographName to use the .tomostar suffix
         """
-        suffix = None
-        starFiles = inputFm.glob('*default_particles.star')
+        suffix = '_default_particles.star'
+        def _tomoName(fn):
+            base = os.path.basename(fn)
+            fnSuffix = f"_{base.split('_')[-3]}{suffix}"
+            self.log(f"fnSufix: {fnSuffix}")
+            return base.replace(fnSuffix, '')
+
+        starFiles = {_tomoName(fn): fn
+                     for fn in inputFm.glob(f'*{suffix}')}
+
+        tomostarFiles = {Path.removeBaseExt(fn): fn
+                         for fn in tomostarFm.glob('*.tomostar')}
 
         with StarFile(self.join('all_coordinates.star'), 'w') as sfOut:
-            for starFn in starFiles:
-                self.log(f"Parsing file: {starFn}")
-                # Update micrographs.star
-                with StarFile(starFn) as sf:
-                    if t := sf.getTable('particles'):
-                        if suffix is None:  # First time
-                            sfOut.writeTimeStamp()
-                            sfOut.writeHeader('particles', t)
-
-                        micName = t[0].rlnMicrographName
-                        suffix = '_' + micName.split('_')[-1]
-                        newMicName = micName.replace(suffix, '.tomostar')
-                        if not tomostarFm.exists(newMicName):
-                            print(Color.red("     Missing: " + newMicName))
-                        for row in t:
-                            sfOut.writeRow(row._replace(rlnMicrographName=newMicName))
+            firstTime = True
+            for tomoName, fn in tomostarFiles.items():
+                if starFn := starFiles.get(tomoName, None):
+                    self.log(f"Parsing file: {starFn}")
+                    # Update micrographs.star
+                    with StarFile(starFn) as sf:
+                        if t := sf.getTable('particles'):
+                            if firstTime:
+                                sfOut.writeTimeStamp()
+                                sfOut.writeHeader('particles', t)
+                                firstTime = False
+                            for row in t:
+                                sfOut.writeRow(row._replace(rlnMicrographName=os.path.basename(fn)))
 
 
 def main():
