@@ -68,7 +68,7 @@ class StarBatchManager(FolderManager):
                 mTime = datetime.fromtimestamp(os.path.getmtime(self._inputStar))
                 now = datetime.now()
                 if self._lastCheck is None or mTime > self._lastCheck:
-                    self.log("fReading star file: {self._inputStar}, "
+                    self.log(f"Reading star file: {self._inputStar}, "
                              "checking for new batches.", flush=True)
                     for batch in self._createNewBatches():
                         self._lastUpdate = now
@@ -184,18 +184,20 @@ class Relion2DPipeline(ProcessingPipeline):
         else:
             Process.system(f"rm {batch.join('*moment.mrcs')}", print=batch.log)
             Process.system(f"mv {batch.path} {self.join('Classes2D')}", print=batch.log)
-            self.info['outputs'].append(
-                {'label': f'Classes2D_{batch.id}',
-                 'files': [
-                     [iterFiles.get('data', batch.join('data:None')), 'ParticleGroupMetadata.star.relion.class2d'],
-                     [iterFiles.get('optimiser', 'optimiser:None'), 'ProcessData.star.relion.optimiser.class2d']
-                 ]})
+            classesId = f'Classes2D_{batch.id}'
+            self.info['outputs'][classesId] = {
+                'label': classesId,
+                'files': [
+                    [iterFiles.get('data', batch.join('data:None')), 'ParticleGroupMetadata.star.relion.class2d'],
+                    [iterFiles.get('optimiser', 'optimiser:None'), 'ProcessData.star.relion.optimiser.class2d']
+                ]}
+
             with self.outputLock:
                 batch.info['index'] = batch['index']
                 batch.info['items'] = batch['items']
                 batch.info['path'] = self.join('Classes2D', os.path.basename(batch['path']))
                 self.updateBatchInfo(batch)
-                batch.log(f"Completed batch in {batch.info['elapsed']},"
+                batch.log(f"Completed batch in {batch.info['_elapsed']},"
                           f"total batches: {len(self.info['batches'])}", flush=True)
         return batch
 

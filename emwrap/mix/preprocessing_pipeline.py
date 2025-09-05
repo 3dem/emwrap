@@ -72,13 +72,11 @@ class PreprocessingPipeline(ProcessingPipeline):
 
         self.log(f"Batch size: {Color.cyan(str(self.batchSize))}")
         self.log(f"Using GPUs: {Color.cyan(str(self.gpuList))}", flush=True)
-        inputs = self.info['inputs']
-        inputs.append({
-            'key': 'input_movies',
+        self.inputs['Movies'] = {
             'label': 'Movies',
             'datatype': 'MicrographMovieGroupMetadata.star.relion',
             'files': [self.inputStar]
-        })
+        }
 
         # Create all required output folders
         for d in ['Micrographs', 'CTFs', 'Coordinates', 'Particles', 'Logs']:
@@ -204,19 +202,17 @@ class PreprocessingPipeline(ProcessingPipeline):
                 batch.info.update({
                     'output_elapsed': str(t.getElapsedTime())
                 })
-                self.info['outputs'] = [
-                    {'label': 'Micrographs',
-                     'files': [
-                         [micsStar, 'MicrographGroupMetadata.star'],
-                         [coordStar, 'MicrographCoordsGroup.star']
-                     ]},
-                    {'label': 'Particles',
-                     'files': [
-                         [partStar, 'ParticleGroupMetadata.star']
-                     ]},
-                ]
-
-                batch.log(f"No call: Updating batchInfo", flush=True)
+                self.outputs = {
+                    'Micrographs': {'label': 'Micrographs',
+                                    'files': [
+                                        [micsStar, 'MicrographGroupMetadata.star'],
+                                        [coordStar, 'MicrographCoordsGroup.star']]
+                                    },
+                    'Particles': {'label': 'Particles',
+                                  'files': [
+                                      [partStar, 'ParticleGroupMetadata.star']]
+                                  },
+                }
                 self.updateBatchInfo(Batch(batch))
 
                 with StarFile(self.inputStar) as sf:
