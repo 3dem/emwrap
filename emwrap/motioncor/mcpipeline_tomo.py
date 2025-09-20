@@ -183,9 +183,6 @@ class McPipelineTomo(ProcessingPipeline):
         outTs = Table(cols + ['rlnTomoTiltSeriesPixelSize'])
         newPixelSize = self.acq.pixel_size * self.bin
 
-        self.log(f"DEBUG >>> corrected TS>>> ps: {self.acq.pixel_size} "
-                 f"bin: {self.bin} new_ps: {newPixelSize}")
-
         with StarFile(self.join('corrected_tilt_series.star'), 'w') as sfOut:
             sfOut.writeTimeStamp()
             sfOut.writeHeader('global', outTs)

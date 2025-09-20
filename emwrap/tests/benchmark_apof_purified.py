@@ -195,7 +195,7 @@ class Aretomo:
     def run(self, inputJob):
         # python -m emwrap.warp.warp_aretomo --json args.json -i External/job004/
         cmd = 'emw-relion -r "python -m emwrap.warp.warp_aretomo --json {argsFn} -i {inputStr}" -w'
-        runJob(cmd, self.argsJson, 'warp_aretomo')
+        runJob(cmd, self.argsJson,  inputJob, 'warp_aretomo')
 
     @staticmethod
     def run_all(inputJob):
