@@ -141,6 +141,8 @@ class StarBatchManager(FolderManager):
         if self._lastCheck is None or self._lastUpdate is None:
             return False
         else:
+            self.log(f"Checking timeout: self._lastCheck - self._lastUpdate: "
+                     f"{Pretty.delta(self._lastCheck - self._lastUpdate)}")
             return (self._lastCheck - self._lastUpdate) > self._timeout
 
 
@@ -207,7 +209,8 @@ class Relion2DPipeline(ProcessingPipeline):
         batchMgr = StarBatchManager(self.tmpDir, self._args['in_particles'],
                                     self._args.get('group_column', None),
                                     minSize=self._minSize,
-                                    timeout=self._timeout)
+                                    timeout=self._timeout,
+                                    log=self.log)
 
         batches = {b for b in self.info.get('batches', {})}
 
