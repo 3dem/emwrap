@@ -52,6 +52,60 @@ class WarpBasePipeline(ProcessingPipeline):
         'tm': TM
     }
 
+    @classmethod
+    def copyInputs(cls, inputFolder, outputFolder, keys=None, gain=None, force=False):
+        """ Inspect the input run folder and copy or link input folder/files
+        if necessary.
+
+        Args:
+            inputFolder: the input folder containing settings and xml files
+            outputFolder: should not exist. It will be created and setup
+                as a proper warp folder to run commands.
+            keys: input keys to import, if None, all inputs will be imported
+            gain: if not None, it will be linked
+            force: if True, the output folder will be clean if exists.
+        """
+        keys = cls.INPUTS.keys() if keys is None else keys
+
+        def _getFM(i):
+            return i if isinstance(i, FolderManager) else FolderManager(i)
+
+        ifm = _getFM(inputFolder)
+        ofm = _getFM(outputFolder)
+
+        if ofm.exists() and not force:
+            raise Exception("Output folder already exist.")
+
+        ofm.create()
+
+        inputs = [ifm.join(cls.INPUTS[k]) for k in keys]
+        if m := [fn for fn in inputs if not os.path.exists(fn)]:
+            raise Exception("Missing expected paths: " + str(m))
+
+        def _copyFolder(inputFolder):
+            baseFolder = os.path.basename(inputFolder)
+            inputFm = FolderManager(inputFolder)
+            outputFm = FolderManager(ofm.join(baseFolder))
+            outputFm.create()
+            for fn in inputFm.listdir():
+                inputPath = inputFm.join(fn)
+                if os.path.isdir(inputPath):
+                    outputFm.link(inputPath)
+                else:
+                    outputFm.copy(inputPath)
+
+        for inputPath in inputs:
+            if inputPath.endswith('.settings'):
+                ofm.copy(inputPath)
+            elif inputPath.endswith(cls.TS):
+                _copyFolder(inputPath)
+            else:  # warp_frameseries and warp_tomostar
+                ofm.link(inputPath)
+
+        # Link input gain file
+        if gain:
+            ofm.link(gain)
+
     def __init__(self, input_args):
         ProcessingPipeline.__init__(self, input_args)
         self.gpuList = self._args['gpu'].split(',')
