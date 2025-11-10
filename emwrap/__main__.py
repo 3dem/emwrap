@@ -14,8 +14,8 @@
 # *
 # **************************************************************************
 
-from .project import main
+from .base import ProjectManager
 
 
 if __name__ == '__main__':
-    main()
+    ProjectManager.main()

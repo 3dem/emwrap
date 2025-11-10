@@ -66,12 +66,12 @@ setup(
        'console_scripts': [
            'emw-motioncor = emwrap.motioncor.__main__:main',
            'emw-aretomo = emwrap.aretomo.aretomo_pipeline:main',
-           'emw-relion = emwrap.relion.__main__:main',
            'emw-otf = emwrap.mix.otf:main',
            'emw-preprocessing = emwrap.mix.preprocessing_pipeline:main',
            'emw-rln2d = emwrap.relion.classify2d_pipeline:main',
            'emw-import-movies = emwrap.base.import_movies:main',
            'emw-mc-tomo = emwrap.motioncor.mcpipeline_tomo:main',
+           'emw = emwrap.base:ProjectManager.main'
        ],
 
     }

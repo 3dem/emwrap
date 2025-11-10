@@ -27,7 +27,7 @@ from emtools.utils import Color, Timer, Path, Process, FolderManager, Pretty
 from emtools.metadata import Table, StarFile, Acquisition, EPU
 from emtools.image import Image
 
-from emwrap.relion.project import RelionProject
+from emwrap.base import ProjectManager
 
 
 class OTF(FolderManager):
@@ -49,7 +49,7 @@ class OTF(FolderManager):
 
     def create(self, session, sconfig, resources):
         cwd = os.getcwd()
-        project = RelionProject(self.path)
+        project = ProjectManager(self.path)
         project.clean()
         os.chdir(self.path)
         Process.system('mkdir .slurm')
