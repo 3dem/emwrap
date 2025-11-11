@@ -42,6 +42,8 @@ JOB_STATUS_FILES = {
     'RELION_JOB_EXIT_ABORTED': STATUS_ABORTED
 }
 
+JOB_STATUS_ACTIVE = [STATUS_LAUNCHED, STATUS_RUNNING]
+
 
 class ProjectManager(FolderManager):
     """ Class to manipulate information about a Relion project. """
@@ -62,11 +64,6 @@ class ProjectManager(FolderManager):
             self._create()
         else:
             raise Exception(f"'{self.pipeline_star} does not exist")
-
-    @staticmethod
-    def write_jobstar(params, jobStarFile):
-        """ Convert params dict to a Relion job.star file. """
-        pass
 
     @property
     def pipeline_star(self):
@@ -91,6 +88,78 @@ class ProjectManager(FolderManager):
         job['status'] = 'Launched'
         cmd += f" --output {jobId}"
         self._runCmd(cmd, jobId, wait=wait)
+
+    def listJobs(self):
+        """ List current jobs. """
+        """ Update status of the running jobs. """
+        header = ["JOB_ID", "JOB_TYPE", "JOB_STATUS"]
+        format = u'{:<25}{:<25}{:<25}'
+        print(format.format(*header))
+
+        for job in self._wf.jobs():
+            print(format.format(job.id, job['jobtype'], job['status']))
+
+    def update(self):
+        """ Update status of the running jobs. """
+
+        update = False
+        for job in self._wf.jobs():
+            if job['status'] in active:  # Check job status
+                for statusFile, status in JOB_STATUS_FILES.items():
+                    if self.exists(job.id, statusFile):
+                        job['status'] = status
+                        update = True
+
+                if jobInfo := self.loadJobInfo(job):
+                    for o in jobInfo['outputs']:
+                        for fn, datatype in o['files']:
+                            if not job.hasOutput(fn):
+                                job.registerOutput(fn, datatype=datatype)
+                                update = True
+
+        if update:
+            self._update_pipeline_star()
+
+    def saveJob(self, jobTypeOrId, params):
+        """ Save a job. If jobId = None, a new job is created
+        and the parameters are saved. If jobId is not None,
+        the save action is allowed only if the job is in 'Saved'
+        state.
+        """
+        job = None
+        jobTypeOrId = Path.rmslash(jobTypeOrId)
+
+        if self._hasJob(jobTypeOrId):
+            job = self._getJob(jobTypeOrId)
+            if job['status'] != STATUS_SAVED:
+                raise Exception("Can only save un-run jobs.")
+            self._writeJobParams(job, params)
+        else:
+            if jobDef := ProcessingConfig.get_job_form(jobTypeOrId):
+                job = self._createJob(jobTypeOrId, params)
+
+        if job is None:
+            raise Exception(f"{jobTypeOrId} is not an existing jobId or job type.")
+
+        return job
+
+    def deleteJob(self, jobId):
+        """ Clean up job's folder. """
+        jobId = Path.rmslash(jobId)
+
+        if job := self._getJob(jobId):
+            if self._isActiveJob(job):
+                raise Exception("Can not delete launched or running jobs, stop them first.")
+
+            fm = FolderManager(path=self.join(jobId))
+            fm.clear()
+            self._wf.deleteJob(job)
+            self._update_pipeline_star()
+        else:
+            raise Exception(f"{jobTypeOrId} is not an existing jobId or job type.")
+
+    def _isActiveJob(self, job):
+        return job['status'] in JOB_STATUS_ACTIVE
 
     def _create(self):
         """ Create a new project in the given path. """
@@ -148,16 +217,8 @@ class ProjectManager(FolderManager):
         self.log(f"Saving job params: {paramsFile}")
         isContinue = 1 if os.path.exists(paramsFile) else 0  # FIXME
         isTomo = 1 if jobConf.get('tomo', False) else 0
-        with StarFile(paramsFile, 'w') as sfOut:
-            tJob = Table(['rlnJobTypeLabel', 'rlnJobIsContinue', 'rlnJobIsTomo'])
-            tJob.addRowValues(jobType, isContinue, isTomo)  # FIXME check continue and isTomo
-            sfOut.writeTimeStamp()
-            sfOut.writeTable('job', tJob, singleRow=True)
-            tValues = Table(['rlnJobOptionVariable', 'rlnJobOptionValue'])
-            for k, v in values.items():
-                val = ('Yes' if v else 'No') if isinstance(v, bool) else v
-                tValues.addRowValues(k, val)
-            sfOut.writeTable('joboptions_values', tValues, computeFormat=True)
+        RelionStar.write_jobstar(jobType, values, paramsFile,
+                                 isTomo=isTomo, isContinue=isContinue)
 
     def _createJob(self, jobType, params):
         jobConf = ProcessingConfig.get_job_conf(jobType)
@@ -217,58 +278,6 @@ class ProjectManager(FolderManager):
             with open(jobInfoFn) as f:
                 return json.load(f)
         return None
-
-    def listJobs(self):
-        """ List current jobs. """
-        """ Update status of the running jobs. """
-        header = ["JOB_ID", "JOB_TYPE", "JOB_STATUS"]
-        format = u'{:<25}{:<25}{:<25}'
-        print(format.format(*header))
-
-        for job in self._wf.jobs():
-            print(format.format(job.id, job['jobtype'], job['status']))
-
-    def update(self):
-        """ Update status of the running jobs. """
-        active = [STATUS_LAUNCHED, STATUS_RUNNING]
-        update = False
-        for job in self._wf.jobs():
-            if job['status'] in active:  # Check job status
-                for statusFile, status in JOB_STATUS_FILES.items():
-                    if self.exists(job.id, statusFile):
-                        job['status'] = status
-                        update = True
-
-                if jobInfo := self.loadJobInfo(job):
-                    for o in jobInfo['outputs']:
-                        for fn, datatype in o['files']:
-                            if not job.hasOutput(fn):
-                                job.registerOutput(fn, datatype=datatype)
-                                update = True
-
-        if update:
-            self._update_pipeline_star()
-
-    def saveJob(self, jobTypeOrId, params):
-        """ Save a job. If jobId = None, a new job is created
-        and the parameters are saved. If jobId is not None,
-        the save action is allowed only if the job is in 'Saved'
-        state.
-        """
-        job = None
-        jobTypeOrId = Path.rmslash(jobTypeOrId)
-
-        if self._hasJob(jobTypeOrId):
-            job = self._getJob(jobTypeOrId)
-            if job['status'] != STATUS_SAVED:
-                raise Exception("Can only save un-run jobs.")
-            self._writeJobParams(job, params)
-        else:
-            if jobDef := ProcessingConfig.get_job_form(jobTypeOrId):
-                job = self._createJob(jobTypeOrId, params)
-
-        if job is None:
-            raise Exception(f"{jobTypeOrId} is not an existing jobId or job type.")
 
     @staticmethod
     def main():
