@@ -25,6 +25,7 @@ from datetime import datetime
 
 from emtools.utils import Color, FolderManager, Path, Process
 from emtools.jobs import Batch, Args
+from emtools.metadata import StarFile
 
 from .warp import WarpBasePipeline
 
@@ -38,65 +39,88 @@ class WarpMotionCtf(WarpBasePipeline):
     name = 'emw-warp-mctf'
     input_name = 'in_movies'
 
-    def runBatch(self, batch, importInputs=True):
+    def runBatch(self, batch, **kwargs):
+        """ This method can be run for only the Mctf pipeline
+         or for the preprocessing one, where import inputs is not needed.
+        """
         # Input movies pattern for the frame series
-        inputPattern = self._args['in_movies']
-        inputFolder = os.path.dirname(inputPattern)
+        tsAllTable = StarFile.getTableFromFile('global', kwargs['tsStarFile'])
+
+        framesFm = FolderManager(batch.join('frames'))
+        framesFm.create()
+
+        mdocsFm = FolderManager(batch.join('mdocs'))
+        mdocsFm.create()
+
         batch.mkdir(self.FS)
 
-        # Just link the gain reference
-        if importInputs:
-            folderData = batch.link(inputFolder)
-            self._importInputs(inputFolder, keys=[])
-        else:
-            folderData = inputFolder
+        ext = None
+        ps = None
 
+        for tsRow in tsAllTable:
+            tsName = tsRow.rlnTomoName
+            ps = tsRow.rlnMicrographOriginalPixelSize
+            tsTable = StarFile.getTableFromFile(tsName, tsRow.rlnTomoTiltSeriesStarFile)
+            mdocsFm.link(tsRow.rlnMdocFile)
+            for frameRow in tsTable:
+                frameBase = framesFm.link(frameRow.rlnMicrographMovieName)
+                # Calculate extension only once
+                if ext is None:
+                    ext = Path.getExt(frameBase)
+
+        if gain := self.acq.get('gain', None):
+            self.log(f"{self.name}: Linking gain file: {gain}")
+            self.link(gain)
+
+        cs = 'create_settings'  # shortcut
         # Run create_settings
         args = Args({
-            'WarpTools': 'create_settings',
-            '--folder_data': folderData,
-            '--extension': f"*{Path.getExt(inputPattern)}",
+            'WarpTools': cs,
+            '--folder_data': 'frames',
+            '--extension': f"*{ext}",
             '--folder_processing': self.FS,
             '--output': self.FSS,
-            '--angpix': self.acq.pixel_size,
+            '--angpix': ps,
             '--exposure': self.acq['total_dose']
         })
         if self.gain:
             args['--gain_path'] = self.gain
 
-        args.update(self._args['create_settings'])
+        args.update({k.replace(f'{cs}.', '--'): v
+                     for k, v in self._args.items() if k.startswith(cs)})
 
         with batch.execute('create_settings'):
-            batch.call(self.loader, args)
+            batch.call(self.loader, args, logfile=self.join('run.out'))
 
-        if n := self._args['create_settings'].get('--eer_ngroups', 0):
+        #parts = self._args['']
+        n = int(self._args.get(f'{cs}.eer_ngroups', 0))
+
+        if n:
             ngroups = n
         else:
-            ngroups = None  # FIXME: Read from movies
+            ngroups = None  # FIXME: Read the number of frames from movies
+            raise Exception("Only working with .eer for now")
 
         # Run fs_motion_and_ctf
         args = Args({
             'WarpTools': 'fs_motion_and_ctf',
             '--settings': self.FSS,
-            '--m_grid': f'1x1x{ngroups}',
+            '--m_grid': f'1x1x{ngroups}',  # FIXME: Read m_grid from params
             '--c_grid': '2x2x1',
-            '--device_list': self.gpuList
+            #'--device_list': self.gpuList  FIXME: Allow selection of gpus
         })
-        args.update(self._args['fs_motion_and_ctf']['extra_args'])
+
+        # args.update(self._args['fs_motion_and_ctf']['extra_args'])
 
         with batch.execute('fs_motion_and_ctf'):
-            batch.call(self.loader, args)
+            batch.call(self.loader, args, logfile=self.join('run.out'))
 
         self.updateBatchInfo(batch)
 
     def prerun(self):
         batch = Batch(id='mtc', path=self.path)
-        self.runBatch(batch)
-
-
-def main():
-    WarpMotionCtf.runFromArgs()
+        self.runBatch(batch, tsStarFile=self._args['input_tiltseries'])
 
 
 if __name__ == '__main__':
-    main()
+    WarpMotionCtf.main()

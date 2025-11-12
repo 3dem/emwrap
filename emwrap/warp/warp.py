@@ -37,6 +37,8 @@ class WarpBasePipeline(ProcessingPipeline):
     """ Base class to organize common functions/properties of different
     Warp pipelines.
     """
+    FRAMES = 'frames'
+    MDOCS = 'mdocs'
     FS = 'warp_frameseries'
     FSS = f'{FS}.settings'
     TS = 'warp_tiltseries'
@@ -49,7 +51,9 @@ class WarpBasePipeline(ProcessingPipeline):
         'fss': FSS,
         'ts': TS,
         'tss': TSS,
-        'tm': TM
+        'tm': TM,
+        FRAMES: FRAMES,
+        MDOCS: MDOCS
     }
 
     @classmethod
@@ -106,8 +110,8 @@ class WarpBasePipeline(ProcessingPipeline):
         if gain:
             ofm.link(gain)
 
-    def __init__(self, input_args):
-        ProcessingPipeline.__init__(self, input_args)
+    def __init__(self, args, output):
+        ProcessingPipeline.__init__(self, args, output)
         self.gpuList = self._args['gpu'].split(',')
         self.acq = self.loadAcquisition()
         self.loader = get_loader()
@@ -158,5 +162,5 @@ class WarpBasePipeline(ProcessingPipeline):
 
         # Link input gain file
         if gain := self.acq.get('gain', None):
-            print(f"{self.name}: Liking gain gain: ", gain)
+            self.log(f"{self.name}: Linking gain gain: {gain}")
             self.link(gain)
