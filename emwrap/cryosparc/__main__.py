@@ -146,8 +146,8 @@ def cryosparc_prepare(sessionFile, particlesStar):
 
     logger.system(f"ln -s {csFolder.relpath(epuFolder)} {csFolder.join('XML')}")
 
-    movTable = StarFile.getTableFromFile(movStar, 'movies')
-    micTable = StarFile.getTableFromFile(micStar, 'micrographs')
+    movTable = StarFile.getTableFromFile('movies', movStar)
+    micTable = StarFile.getTableFromFile('micrographs', micStar)
 
     r = re.compile('(movie|micrograph)-(\d{6})')
 
