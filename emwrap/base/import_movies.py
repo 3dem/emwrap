@@ -59,7 +59,7 @@ class ImportMoviesPipeline(ProcessingPipeline):
 
         # Load already seen movies if we are continuing the job
         if os.path.exists(self.outputStar):
-            moviesTable = StarFile.getTableFromFile(self.outputStar, 'movies')
+            moviesTable = StarFile.getTableFromFile('movies', self.outputStar)
             allMovies.update(row.rlnMicrographOriginalMovieName for row in moviesTable)
             nextId = moviesTable[-1].rlnImageId
         else:

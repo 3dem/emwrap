@@ -64,6 +64,15 @@ class ProcessingConfig:
         return cls._forms_dict[jobtype]
 
     @classmethod
+    def get_job_launcher(cls, jobtype):
+        jobConf = cls.get_job_conf(jobtype)
+        if launcher := jobConf.get('launcher', None):
+            launcher_path = cls._fm.join(launcher)
+            if os.path.exists(launcher_path):
+                return launcher_path
+        return None
+
+    @classmethod
     def iter_form_params(cls, jobForm):
         """ Iterate over all params in sections, groups, lines of
         the form definition. """

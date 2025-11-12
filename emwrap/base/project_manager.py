@@ -26,6 +26,7 @@ from emtools.jobs import BatchManager, Workflow
 from emtools.metadata import Table, StarFile, RelionStar
 
 from .config import ProcessingConfig
+from .processing_pipeline import ProcessingPipeline
 
 
 STATUS_LAUNCHED = 'Launched'
@@ -104,7 +105,7 @@ class ProjectManager(FolderManager):
 
         update = False
         for job in self._wf.jobs():
-            if job['status'] in active:  # Check job status
+            if self._isActiveJob(job):
                 for statusFile, status in JOB_STATUS_FILES.items():
                     if self.exists(job.id, statusFile):
                         job['status'] = status
@@ -140,6 +141,62 @@ class ProjectManager(FolderManager):
 
         if job is None:
             raise Exception(f"{jobTypeOrId} is not an existing jobId or job type.")
+
+        return job
+
+    def copyJob(self, jobId, params=None):
+        """ Make a copy of an existing job and optionally update some params. """
+        job = self._getJob(jobId)
+        job_params = self._readJobParams(job, extraParams=params)
+        self.saveJob(job['jobtype'], job_params)
+
+    def runJob(self, jobTypeOrId, params=None, clean=False, wait=False):
+        """ Run a job.
+        If the job already exist:
+            - Must provide jobId and
+            - Optionally, some params to override
+            - Clean = True will clean up the output directory before run
+        If it is a new job:
+            - Must provide jobType and params
+        """
+        job = None
+        jobTypeOrId = Path.rmslash(jobTypeOrId)
+
+        if self._hasJob(jobTypeOrId):
+            job = self._getJob(jobTypeOrId)
+            jobStar = self.join(job.id, 'job.star')
+            jobType = job['jobtype']
+
+            if self._isActiveJob(job):
+                raise Exception("Can not re-run running or launched jobs.")
+
+            job_params = self._readJobParams(job, extraParams=params)
+
+            if clean:
+                self.log(f"Clean job folder {job.id}")
+                jfm = FolderManager(self.join(job.id))
+                jfm.create()
+
+            self._writeJobParams(job, job_params)
+            jobDef = ProcessingConfig.get_job_conf(jobType)
+        else:
+            jobType = jobTypeOrId
+            jobDef = ProcessingConfig.get_job_conf(jobType)
+            if jobDef:
+                job = self._createJob(jobType, params)
+                jobStar = self.join(job.id, 'job.star')
+
+        if job is None:
+            raise Exception(f"{jobTypeOrId} is not an existing jobId or job type.")
+
+        launcher = ProcessingConfig.get_job_launcher(jobType)
+
+        if not launcher:
+            raise Exception(f"Invalid launcher '{launcher}' for job type: {jobType}")
+
+        self._runCmd(f"{launcher} -i {jobStar} -o {job.id}", job.id, )
+        job['status'] = STATUS_LAUNCHED
+        self._update_pipeline_star()
 
         return job
 
@@ -199,9 +256,6 @@ class ProjectManager(FolderManager):
         # Run the command
         p = subprocess.Popen(args, stdout=stdout, stderr=stderr, close_fds=True)
 
-        # Update the Pipeline with new job
-        RelionStar.workflow_to_pipeline(self._wf, self.pipeline_star)
-
         if wait:
             p.wait()
 
@@ -219,6 +273,15 @@ class ProjectManager(FolderManager):
         isTomo = 1 if jobConf.get('tomo', False) else 0
         RelionStar.write_jobstar(jobType, values, paramsFile,
                                  isTomo=isTomo, isContinue=isContinue)
+
+    def _readJobParams(self, job, extraParams=None):
+        """ Read params from job.star and optionally update
+        some of the params.
+        """
+        job_params = RelionStar.read_jobstar(self.join(job.id, 'job.star'))
+        if extraParams:
+            job_params.update(extraParams)
+        return job_params
 
     def _createJob(self, jobType, params):
         jobConf = ProcessingConfig.get_job_conf(jobType)
@@ -262,14 +325,14 @@ class ProjectManager(FolderManager):
 
         return self._wf.getJob(jobId)
 
-    def restart(self, jobId, clean=False, wait=False):
-        job = self._getJob(jobId)
-        job['status'] = 'Launched'
-        cmd = self._loadCmd(jobId)
-        if clean:
-            FolderManager(self.join(jobId)).create()
-
-        self._runCmd(cmd, jobId, wait=wait)
+    # def restart(self, jobId, clean=False, wait=False):
+    #     job = self._getJob(jobId)
+    #     job['status'] = 'Launched'
+    #     cmd = self._loadCmd(jobId)
+    #     if clean:
+    #         FolderManager(self.join(jobId)).create()
+    #
+    #     self._runCmd(cmd, jobId, wait=wait)
 
     def loadJobInfo(self, job):
         """ Load the info.json file for a given run. """
@@ -298,15 +361,21 @@ class ProjectManager(FolderManager):
                        help="List jobs in the current project.")
 
         g.add_argument('--run', '-r', nargs='+',
-                       metavar=('COMMAND_OR_FOLDER', 'RUN_MODE'),
-                       help="Input a command (new job) or an existing job folder. "
-                            "In the case of the existing job folder, the special "
-                            "'clean' mode can be passed to delete previous run "
-                            "data.")
+                       metavar=('JOB_TYPE_OR_ID', 'PARAMS'),
+                       help="Run a new job, passing job type and params"
+                            "or re-run an existing one passing job_id."
+                            "If --clean is added, the output folder will "
+                            "be cleaned before running the jbo. ")
         g.add_argument('--save', '-s', nargs=2,
                        metavar=('JOB_TYPE_OR_ID', 'PARAMS'),
                        help="Save an existing job or create a new one, "
                             "updating the parameters")
+        g.add_argument('--copy', '-y', nargs='+',
+                       metavar=('JOB_ID', 'PARAMS'),
+                       help="Copy an existing job and optionally, "
+                            "updating some parameters")
+        g.add_argument('--delete', '-d', metavar='JOB_ID',
+                       help="Delete an existing job.")
 
         g.add_argument('-k', '--check', action='count', default=0,
                        help='Check and/or kill processes related to this project.'
@@ -317,7 +386,7 @@ class ProjectManager(FolderManager):
                             "the sub-process to complete. Useful for scripting "
                             "and benchmarking.")
 
-        g.add_argument('--clean', '-c', action='store_true',
+        p.add_argument('--clean', '-c', action='store_true',
                        help="If this option is used alone, it will "
                             "clean project files and create a new project. "
                             "If used in with --run, it will clean the job "
@@ -337,27 +406,35 @@ class ProjectManager(FolderManager):
                 # Just try to load the existing project
                 pm = ProjectManager(args.path)
 
+        def _params(params, i):
+            n = len(params)
+            return ProcessingPipeline.loadParams(params[i]) if i < n else None
+
         if args.update:
             pm.update()
+
         elif args.list:
             pm.listJobs()
+
         elif args.run:
-            first = args.run[0]
-            if os.path.exists(first):
-                mode = args.run[1] if len(args.run) > 1 else None
-                # Make sure we get the jobId without ending slash
-                jobId = Path.rmslash(first)
-                clean = mode == 'clean'
-                pm.restart(jobId, clean=clean, wait=args.wait)
-            else:
-                jobType = first.split()[0]
-                pm.run(first, jobType, wait=args.wait)
+            jobTypeOrId = args.run[0]
+            pm.runJob(jobTypeOrId, _params(args.run, 1),
+                      clean=args.clean,
+                      wait=args.wait)
+
+        elif args.copy:
+            jobId = args.copy[0]
+            pm.copyJob(jobId,  _params(args.copy, 1))
 
         elif args.save:
             jobIdOrType = args.save[0]
             params = json.loads(args.save[1])
             pm.saveJob(jobIdOrType, params)
+
+        elif args.delete:
+            pm.deleteJob(args.delete)
+
         elif args.check > 0:
             kill = args.check > 1
-            folderPath = os.path.abspath(args.path)
+            folderPath = os.path.abspath(pm.path)
             Process.checkChilds('emw', folderPath, kill=kill, verbose=True)

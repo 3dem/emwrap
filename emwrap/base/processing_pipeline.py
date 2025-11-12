@@ -29,7 +29,7 @@ from collections import defaultdict
 from emtools.utils import Process, Color, Pretty, FolderManager, Timer
 from emtools.jobs import BatchManager, Args, Pipeline
 from emtools.metadata import (Table, Column, StarFile, StarMonitor, TextFile,
-                              Acquisition)
+                              Acquisition, RelionStar)
 
 
 class ProcessingPipeline(Pipeline, FolderManager):
@@ -42,22 +42,19 @@ class ProcessingPipeline(Pipeline, FolderManager):
     """
     MIC_ID = re.compile('(?P<prefix>\w+)-(?P<id>\d{6})')
 
-    def __init__(self, input_args):
-        self._input_args = input_args
-        args = input_args[self.name]
+    def __init__(self, args, output):
         self._args = args
         workingDir = args.get('working_dir', os.getcwd())
-        outputDir = args.get('output', None)
         scratchDir = args.get('scratch', None)
         Pipeline.__init__(self, debug=args.get('debug', False))
         self.workingDir = self.__validate(workingDir, 'working')
-        self.outputDir = self.__validate(outputDir, 'output')
+        self.outputDir = self.__validate(output, 'output')
         self.scratchDir = self.__validate(scratchDir, 'scratch') if scratchDir else None
 
         # Relative prefix from the working dir to output dir
         self.outputPrefix = os.path.relpath(self.outputDir, self.workingDir)
 
-        FolderManager.__init__(self, outputDir)
+        FolderManager.__init__(self, output)
 
         self.tmpDir = self.join('tmp')
         self.info = {
@@ -104,11 +101,6 @@ class ProcessingPipeline(Pipeline, FolderManager):
             Process.system(f"ln -s {scratchTmp} {self.tmpDir}")
         else:
             Process.system(f"mkdir {self.tmpDir}")
-
-    def __dumpArgs(self):
-        argStr = json.dumps(self._input_args, indent=4) + '\n'
-        with open(self.join('input_args.json'), 'w') as f:
-            f.write(argStr)
 
     def get_arg(self, argDict, key, envKey, default=None):
         """ Get an argument from the argDict or from the environment.
@@ -161,7 +153,6 @@ class ProcessingPipeline(Pipeline, FolderManager):
             }
             self.info['runs'].append(runInfo)
             self.writeInfo()
-            self.__dumpArgs()
             self.__file('RUNNING')
             self.__create_tmp()
             self.prerun()
@@ -273,34 +264,43 @@ class ProcessingPipeline(Pipeline, FolderManager):
 
     def loadAcquisition(self):
         # FIXME: allow to read a default one
-        return Acquisition(self._input_args['acquisition'])
+        with open('acquisition.json') as f:
+            return Acquisition(json.load(f))
 
-    @staticmethod
-    def getInputArgs(progName, inputName):
+    @classmethod
+    def loadParams(cls, inputArgs):
+        """ Load params from JSON string, JSON file or Relion job.star file. """
+        if any(c in inputArgs for c in ['[', ']', '{', '}', '"']):
+            args = json.loads(inputArgs)
+        elif inputArgs.endswith('.star'):
+            args = RelionStar.read_jobstar(inputArgs)
+        elif inputArgs.endswith('.json'):
+            with open(inputArgs) as f:
+                args = json.load(f)
+        else:
+            raise Exception(f"Unknown input args file type: {inputArgs}")
+
+        return args
+
+    @classmethod
+    def getInputArgs(cls, progName, inputName):
         p = argparse.ArgumentParser(prog=progName)
-        p.add_argument('--json',
-                       help="Input all arguments through this JSON file.")
-        p.add_argument(f'--{inputName}', '-i')
-        p.add_argument('--output', '-o')
+        p.add_argument(f'--{inputName}', '-i', metavar="ARGS",
+                       help="Input all arguments through a JSON string, file or JOB.STAR file.")
+        p.add_argument('--output', '-o', metavar='OUTPUT_DIR')
         p.add_argument('--j', help="Just to ignore the threads option from Relion")
 
         args = p.parse_args()
 
-        with open(args.json) as f:
-            input_args = json.load(f)
+        if len(sys.argv) == 1:
+            p.print_help(sys.stderr)
+            sys.exit(1)
 
-            prog_args = input_args[progName]
-
-            if inputValue := getattr(args, inputName):
-                prog_args[inputName] = inputValue
-
-            if outputValue := getattr(args, 'output'):
-                prog_args['output'] = outputValue
-
-            return input_args
+        inputArgs = getattr(args, inputName)
+        return cls.loadParams(inputArgs), getattr(args, 'output')
 
     @classmethod
-    def runFromArgs(cls):
-        input_args = ProcessingPipeline.getInputArgs(cls.name, cls.input_name)
-        p = cls(input_args)
+    def main(cls):
+        args, output = ProcessingPipeline.getInputArgs(cls.name, cls.input_name)
+        p = cls(args, output)
         p.run()
