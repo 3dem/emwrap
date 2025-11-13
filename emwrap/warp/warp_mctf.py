@@ -92,7 +92,6 @@ class WarpMotionCtf(WarpBasePipeline):
         with batch.execute('create_settings'):
             batch.call(self.loader, args, logfile=self.join('run.out'))
 
-        #parts = self._args['']
         n = int(self._args.get(f'{cs}.eer_ngroups', 0))
 
         if n:
@@ -106,20 +105,16 @@ class WarpMotionCtf(WarpBasePipeline):
             'WarpTools': 'fs_motion_and_ctf',
             '--settings': self.FSS,
             '--m_grid': f'1x1x{ngroups}',  # FIXME: Read m_grid from params
-            '--c_grid': '2x2x1',
+            '--c_grid': '2x2x1', # FIXME: Read c_grid option
             #'--device_list': self.gpuList  FIXME: Allow selection of gpus
         })
 
         subargs = self.get_subargs('fs_motion_and_ctf')
         if gpus := self._args['gpus']:
-            args['--device_list'] = self.get_gpu_list(gpus)
+            args['--device_list'] = self.gpuList
         if pd := subargs['perdevice']:
             args['--perdevice'] = int(pd)
-        """ 
-        fs_motion_and_ctf.c_use_sum            Yes                               
-fs_motion_and_ctf.out_averages         Yes                               
-fs_motion_and_ctf.out_average_halves   Yes 
-        """
+
         for a in ['c_use_sum', 'out_averages', 'out_average_halves']:
             if subargs[a]:
                 args[f"--{a}"] = ""
@@ -151,17 +146,6 @@ fs_motion_and_ctf.out_average_halves   Yes
 
             tsTable = StarFile.getTableFromFile(tsName, tsRow.rlnTomoTiltSeriesStarFile)
 
-            """
-            _rlnCtfPowerSpectrum #7 
-            _rlnMicrographNameEven #8 
-            _rlnMicrographNameOdd #9 
-            _rlnMicrographName #10 
-            _rlnMicrographMetadata #11 
-            _rlnAccumMotionTotal #12 
-            _rlnAccumMotionEarly #13 
-            _rlnAccumMotionLate #14 
-            
-            """
             # FIXME: Do not add even/odd when this option is not selected
             extra_cols = [
                 'rlnCtfPowerSpectrum', 'rlnMicrographName', 'rlnMicrographMetadata',
@@ -204,7 +188,7 @@ fs_motion_and_ctf.out_average_halves   Yes
     def prerun(self):
         self.inputTs = self._args['input_tiltseries']
         batch = Batch(id='mtc', path=self.path)
-        # self.runBatch(batch, tsStarFile=self.inputTs)
+        self.runBatch(batch, tsStarFile=self.inputTs)
         self._output(batch)
 
 

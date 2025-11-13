@@ -33,23 +33,24 @@ class WarpAreTomo(WarpBasePipeline):
     """ Warp wrapper to run warp_ts_aretomo.
     It will run:
         - ts_import -> mdocs
+        - create_settings -> warp_tiltseries.settings
+        - ts_aretomo -> ts alignment
     """
     name = 'emw-warp-aretomo'
     input_name = 'in_movies'
 
-    def prerun(self):
-        batch = Batch(id=self.name, path=self.path)
-        self.runBatch(batch)
-
-    def runBatch(self, batch, importInputs=True):
+    def runBatch(self, batch, importInputs=True, **kwargs):
         # Input run folder from the Motion correction and CTF job
-        inputFolder = FolderManager(self._args['in_movies'])
+        inputTs=kwargs['inputTs']
+        inputFolder = FolderManager(os.path.dirname(inputTs))
+
+        # FIXME: Add validations if the input star exists and required warp folders
         batch.mkdir(self.TS)
         batch.mkdir(self.TM)
 
         # Link input frameseries folder, settings and gain reference
         if importInputs:
-            self._importInputs(inputFolder, keys=['fs', 'fss'])
+            self._importInputs(inputFolder, keys=['fs', 'fss', 'frames', 'mdocs'])
 
         # Run ts_import
         args = Args({
@@ -57,13 +58,11 @@ class WarpAreTomo(WarpBasePipeline):
             '--frameseries': self.FS,
             '--tilt_exposure': self.acq['total_dose'],
             '--output': self.TM,
+            '--mdocs': 'mdocs'
         })
-        args.update(self._args['ts_import'])
-        if args['--mdocs'] != '.':
-            args['--mdocs'] = batch.link(args['--mdocs'])
-
-        with batch.execute('ts_import'):
-            batch.call(self.loader, args)
+        subargs = self.get_subargs('ts_import', '--')
+        args.update(subargs)
+        self.batch_execute('ts_import', batch, args)
 
         # Run create_settings
         args = Args({
@@ -72,32 +71,32 @@ class WarpAreTomo(WarpBasePipeline):
             '--extension': "*.tomostar",
             '--folder_processing': self.TS,
             '--output': self.TSS,
-            '--angpix': self.acq.pixel_size * 2,  # FIXME: CHANGE depending on motion bin,
+            '--angpix': self.acq.pixel_size,  # * 2,  # FIXME: CHANGE depending on motion bin,
             '--exposure': self.acq['total_dose']
         })
-        args.update(self._args['create_settings'])
-
-        with batch.execute('create_settings'):
-            batch.call(self.loader, args)
+        subargs = self.get_subargs('create_settings', '--')
+        args.update(subargs)
+        self.batch_execute('create_settings', batch, args)
 
         # Run fs_motion_and_ctf
         args = Args({
             'WarpTools': 'ts_aretomo',
             '--settings': self.TSS,
-            '--device_list': self.gpuList,
             '--exe': os.environ['ARETOMO2']
         })
-        args.update(self._args['ts_aretomo']['extra_args'])
+        if self.gpuList:
+            args['--device_list'] = self.gpuList
 
-        with batch.execute('ts_aretomo'):
-            batch.call(self.loader, args)
+        subargs = self.get_subargs('ts_aretomo', '--')
+        args.update(subargs)
+        self.batch_execute('ts_aretomo', batch, args)
 
         self.updateBatchInfo(batch)
 
-
-def main():
-    WarpAreTomo.runFromArgs()
+    def prerun(self):
+        batch = Batch(id=self.name, path=self.path)
+        self.runBatch(batch, inputTs=self._args['input_tiltseries'])
 
 
 if __name__ == '__main__':
-    main()
+    WarpAreTomo.main()

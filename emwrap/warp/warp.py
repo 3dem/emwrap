@@ -112,7 +112,8 @@ class WarpBasePipeline(ProcessingPipeline):
 
     def __init__(self, args, output):
         ProcessingPipeline.__init__(self, args, output)
-        self.gpuList = self._args['gpu'].split(',')
+        gpus = self._args.get('gpus', '')
+        self.gpuList = self.get_gpu_list(gpus) if gpus else []
         self.acq = self.loadAcquisition()
         self.loader = get_loader()
         if gainFile := self.acq.get('gain', None):
@@ -164,3 +165,9 @@ class WarpBasePipeline(ProcessingPipeline):
         if gain := self.acq.get('gain', None):
             self.log(f"{self.name}: Linking gain gain: {gain}")
             self.link(gain)
+
+    def batch_execute(self, label, batch, args, logfile=None):
+        """ Shortcut to execute a batch. """
+        logfile = logfile or self.join('run.out')
+        with batch.execute(label):
+            batch.call(self.loader, args, logfile=logfile)
