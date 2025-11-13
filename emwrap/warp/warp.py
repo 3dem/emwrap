@@ -171,3 +171,8 @@ class WarpBasePipeline(ProcessingPipeline):
         logfile = logfile or self.join('run.out')
         with batch.execute(label):
             batch.call(self.loader, args, logfile=logfile)
+
+    def write_ts_table(self, tableName, table, starFile):
+        self.log(f"Writing: {starFile}")
+        with StarFile(starFile, 'w') as sfOut:
+            sfOut.writeTable(tableName, table, computeFormat='left', timeStamp=True)

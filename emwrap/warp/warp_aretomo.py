@@ -25,6 +25,7 @@ from datetime import datetime
 
 from emtools.utils import Color, FolderManager, Path, Process
 from emtools.jobs import Batch, Args
+from emtools.metadata import StarFile, Table, WarpXml
 
 from .warp import WarpBasePipeline
 
@@ -93,9 +94,51 @@ class WarpAreTomo(WarpBasePipeline):
 
         self.updateBatchInfo(batch)
 
+    def _output(self, batch):
+        """ Register output STAR files. """
+        def _float(v):
+            return round(float(v), 2)
+
+        batch.mkdir('tilt_series')
+        self.log("Registering output STAR files.")
+        tsAllTable = StarFile.getTableFromFile('global', self.inputTs)
+
+        newTsStarFile = batch.join('tilt_series_aln.star')
+
+        newTsAllTable = Table(tsAllTable.getColumnNames()) # + ['rlnDefocusU'])
+        for tsRow in tsAllTable:
+            tsName = tsRow.rlnTomoName
+            tsStarFile = self.join('tilt_series', tsName + '.star')
+            # tsXml = self.join(self.TS, tsName + '.xml')
+            # self.log(f"Reading {tsXml}")
+            # if os.path.exists(tsXml):
+            #     ctf = WarpXml(tsXml).getDict('TiltSeries', 'CTF', 'Param')
+            #     defocus = _float(ctf['Defocus'])
+            # else:
+            #     defocus = 9999
+
+            tsDict = tsRow._asdict()
+            tsDict.update({
+                'rlnTomoTiltSeriesStarFile': tsStarFile,
+                #'rlnDefocusU': defocus
+            })
+            newTsAllTable.addRowValues(**tsDict)
+
+        self.write_ts_table('global', newTsAllTable, newTsStarFile)
+        self.updateBatchInfo(batch)
+
     def prerun(self):
+        self.inputTs = self._args['input_tiltseries']
         batch = Batch(id=self.name, path=self.path)
-        self.runBatch(batch, inputTs=self._args['input_tiltseries'])
+
+        if self._args['__j'] != 'only_output':
+            self.log("Running Warp commands.")
+            self.runBatch(batch, inputTs=self.inputTs)
+        else:
+            self.log("Received special argument 'only_output', "
+                     "only generating STAR files. ")
+
+        self._output(batch)
 
 
 if __name__ == '__main__':

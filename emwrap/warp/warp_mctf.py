@@ -22,10 +22,11 @@ import time
 import sys
 from glob import glob
 from datetime import datetime
+from collections import defaultdict
 
 from emtools.utils import Color, FolderManager, Path, Process
 from emtools.jobs import Batch, Args
-from emtools.metadata import StarFile, Table
+from emtools.metadata import StarFile, Table, WarpXml
 
 from .warp import WarpBasePipeline
 
@@ -55,7 +56,7 @@ class WarpMotionCtf(WarpBasePipeline):
         ps = None
 
         # Input movies pattern for the frame series
-        tsAllTable = StarFile.getTableFromFile('global', kwargs['tsStarFile'])
+        tsAllTable = StarFile.getTableFromFile('global', kwargs['inputTs'])
 
         for tsRow in tsAllTable:
             tsName = tsRow.rlnTomoName
@@ -126,22 +127,29 @@ class WarpMotionCtf(WarpBasePipeline):
 
     def _output(self, batch):
         """ Register output STAR files. """
+
+        def _float(v):
+            return round(float(v), 2)
+
         batch.mkdir('tilt_series')
         self.log("Registering output STAR files.")
         tsAllTable = StarFile.getTableFromFile('global', self.inputTs)
 
-        newTsStarFile = batch.join('corrected_tilt_series.star')
+        newTsStarFile = batch.join('tilt_series_ctf.star')
 
         newPsLabel = 'rlnTomoTiltSeriesPixelSize'
         newTsAllTable = Table(tsAllTable.getColumnNames() + [newPsLabel])
         for tsRow in tsAllTable:
             tsName = tsRow.rlnTomoName
-            tsStarFile = self.join('tilt_series', f"{tsName}.star")
+            tsStarFile = self.join('tilt_series', tsName + '.star')
             ps = tsRow.rlnMicrographOriginalPixelSize
             newPs = ps  # FIXME: Take into account if there is binning at Mc level
+
             tsDict = tsRow._asdict()
-            tsDict[newPsLabel] = newPs
-            tsDict['rlnTomoTiltSeriesStarFile'] = tsStarFile
+            tsDict.update({
+                newPsLabel: newPs,
+                'rlnTomoTiltSeriesStarFile': tsStarFile
+            })
             newTsAllTable.addRowValues(**tsDict)
 
             tsTable = StarFile.getTableFromFile(tsName, tsRow.rlnTomoTiltSeriesStarFile)
@@ -150,11 +158,15 @@ class WarpMotionCtf(WarpBasePipeline):
             extra_cols = [
                 'rlnCtfPowerSpectrum', 'rlnMicrographName', 'rlnMicrographMetadata',
                 'rlnAccumMotionTotal', 'rlnAccumMotionEarly', 'rlnAccumMotionLate',
-                'rlnMicrographNameEven', 'rlnMicrographNameOdd'
+                'rlnMicrographNameEven', 'rlnMicrographNameOdd', 'rlnCtfImage',
+                'rlnDefocusU', 'rlnDefocusV', 'rlnCtfAstigmatism', 'rlnDefocusAngle',
+                'rlnCtfFigureOfMerit', 'rlnCtfMaxResolution', 'rlnCtfIceRingDensity',
             ]
+
             filesMap = {
                 'rlnMicrographName': 'average',
                 'rlnCtfPowerSpectrum': 'powerspectrum',
+                'rlnCtfImage': 'powerspectrum',
                 'rlnMicrographNameEven': 'average/even',
                 'rlnMicrographNameOdd': 'average/odd'
             }
@@ -166,33 +178,46 @@ class WarpMotionCtf(WarpBasePipeline):
                 for k, v in filesMap.items():
                     frameDict[k] = batch.join(self.FS, v, movieMrc)
                 frameDict['rlnMicrographMetadata'] = "None"
-                # FIXME: Parse the movie values
+
+                movieXml = batch.join(self.FS, moviePrefix + '.xml')
+                defocusDict = defaultdict(lambda: 0)
+
+                if os.path.exists(movieXml):
+                    # self.log(f"Reading {movieXml}")
+                    ctf = WarpXml(movieXml).getDict('Movie', 'CTF', 'Param')
+                    defocusDict['rlnDefocusU'] = _float(ctf['Defocus'])
+                    defocusDict['rlnCtfAstigmatism'] = _float(ctf['DefocusDelta'])
+                    defocusDict['rlnDefocusV'] = _float(defocusDict['rlnDefocusU'] + defocusDict['rlnCtfAstigmatism'])
+                    defocusDict['rlnDefocusAngle'] = _float(ctf['DefocusAngle'])
+
                 for k in extra_cols:
                     if k.startswith('rlnAccumMotion'):
+                        # FIXME: Parse the movie values
                         frameDict[k] = 0
+                    elif k.startswith('rlnDefocus') or k.startswith('rlnCtf') and k not in frameDict:
+                        frameDict[k] = defocusDict[k]
+
                 newTsTable.addRowValues(**frameDict)
             # Write the new ts.star file
-            with StarFile(tsStarFile, 'w') as sfOut:
-                sfOut.writeTable(tsName, newTsTable,
-                                 computeFormat='left',
-                                 timeStamp=True)
+            self.write_ts_table(tsName, newTsTable, tsStarFile)
 
         # Write the corrected_tilt_series.star
-        with StarFile(newTsStarFile, 'w') as sfOut:
-            sfOut.writeTable('global', newTsAllTable,
-                             computeFormat='left',
-                             timeStamp=True)
+        self.write_ts_table('global', newTsAllTable, newTsStarFile)
 
         self.updateBatchInfo(batch)
 
     def prerun(self):
         self.inputTs = self._args['input_tiltseries']
         batch = Batch(id='mtc', path=self.path)
-        self.runBatch(batch, tsStarFile=self.inputTs)
+        if self._args['__j'] != 'only_output':
+            self.log("Running Warp commands.")
+            self.runBatch(batch, inputTs=self.inputTs)
+        else:
+            self.log("Received special argument 'only_output', "
+                     "only generating STAR files. ")
+
         self._output(batch)
 
 
 if __name__ == '__main__':
-
-
     WarpMotionCtf.main()

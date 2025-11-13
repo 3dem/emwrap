@@ -310,12 +310,13 @@ class ProcessingPipeline(Pipeline, FolderManager):
         return args
 
     @classmethod
-    def getInputArgs(cls, progName, inputName):
-        p = argparse.ArgumentParser(prog=progName)
-        p.add_argument(f'--{inputName}', '-i', metavar="ARGS",
+    def main(cls):
+        p = argparse.ArgumentParser(prog=cls.name)
+        p.add_argument(f'--input_movies', '-i', metavar="ARGS",
                        help="Input all arguments through a JSON string, file or JOB.STAR file.")
         p.add_argument('--output', '-o', metavar='OUTPUT_DIR')
-        p.add_argument('--j', help="Just to ignore the threads option from Relion")
+        p.add_argument('--j', '-j',
+                       help="Just to ignore the threads option from Relion")
 
         args = p.parse_args()
 
@@ -323,11 +324,9 @@ class ProcessingPipeline(Pipeline, FolderManager):
             p.print_help(sys.stderr)
             sys.exit(1)
 
-        inputArgs = getattr(args, inputName)
-        return cls.loadParams(inputArgs), getattr(args, 'output')
+        params, output = cls.loadParams(args.input_movies), getattr(args, 'output')
+        # Let's use the --j for special parameters
+        params['__j'] = args.j
 
-    @classmethod
-    def main(cls):
-        args, output = ProcessingPipeline.getInputArgs(cls.name, cls.input_name)
-        p = cls(args, output)
+        p = cls(params, output)
         p.run()
