@@ -21,7 +21,7 @@ import json
 import subprocess
 import argparse
 
-from emtools.utils import FolderManager, Process, Color, Path
+from emtools.utils import FolderManager, Process, Color, Path, Timer
 from emtools.jobs import BatchManager, Workflow
 from emtools.metadata import Table, StarFile, RelionStar
 
@@ -92,7 +92,8 @@ class ProjectManager(FolderManager):
 
     def listJobs(self):
         """ List current jobs. """
-        """ Update status of the running jobs. """
+        self.update()
+
         header = ["JOB_ID", "JOB_TYPE", "JOB_STATUS"]
         format = u'{:<25}{:<25}{:<25}'
         print(format.format(*header))
@@ -102,7 +103,8 @@ class ProjectManager(FolderManager):
 
     def update(self):
         """ Update status of the running jobs. """
-
+        self.log("Updating project.")
+        t = Timer()
         update = False
         for job in self._wf.jobs():
             if self._isActiveJob(job):
@@ -121,15 +123,21 @@ class ProjectManager(FolderManager):
         if update:
             self._update_pipeline_star()
 
-    def saveJob(self, jobTypeOrId, params):
+        self.log(t.getToc("Update took"))
+
+    def saveJob(self, jobTypeOrId, params, update=True):
         """ Save a job. If jobId = None, a new job is created
         and the parameters are saved. If jobId is not None,
         the save action is allowed only if the job is in 'Saved'
         state.
+        By default, the saveJob will first update the workflow.
+        You can pass update=False in a context where the
+        workflow has been already updated before the call to saveJob.
         """
-        job = None
-        jobTypeOrId = Path.rmslash(jobTypeOrId)
+        if update:
+            self.update()
 
+        job = None
         if self._hasJob(jobTypeOrId):
             job = self._getJob(jobTypeOrId)
             if job['status'] != STATUS_SAVED:
@@ -137,10 +145,23 @@ class ProjectManager(FolderManager):
             self._writeJobParams(job, params)
         else:
             if jobDef := ProcessingConfig.get_job_form(jobTypeOrId):
-                job = self._createJob(jobTypeOrId, params)
+                job = self._createJob(jobTypeOrId, params, update=False)
 
         if job is None:
             raise Exception(f"{jobTypeOrId} is not an existing jobId or job type.")
+
+        # Clear jobs inputs and add new ones
+        job.inputs = []
+        for k, v in params.items():
+            for job2 in self._wf.jobs():
+                if isinstance(v, str) and job2.id in v:
+                    # In this case the saved job is taking an input from this job
+                    data = job2.getOutput(v)
+                    if data is None:
+                        data = job2.registerOutput(v, datatype="File")
+                    job.addInputs([data])
+
+        self._update_pipeline_star()
 
         return job
 
@@ -150,7 +171,7 @@ class ProjectManager(FolderManager):
         job_params = self._readJobParams(job, extraParams=params)
         self.saveJob(job['jobtype'], job_params)
 
-    def runJob(self, jobTypeOrId, params=None, clean=False, wait=False):
+    def runJob(self, jobTypeOrId, params=None, clean=False, wait=False, update=True):
         """ Run a job.
         If the job already exist:
             - Must provide jobId and
@@ -159,6 +180,9 @@ class ProjectManager(FolderManager):
         If it is a new job:
             - Must provide jobType and params
         """
+        if update:
+            self.update()
+
         job = None
         jobTypeOrId = Path.rmslash(jobTypeOrId)
 
@@ -194,7 +218,7 @@ class ProjectManager(FolderManager):
         if not launcher:
             raise Exception(f"Invalid launcher '{launcher}' for job type: {jobType}")
 
-        self._runCmd(f"{launcher} -i {jobStar} -o {job.id}", job.id, )
+        self._runCmd(f"{launcher} -i {jobStar} -o {job.id}", job.id, wait=wait)
         job['status'] = STATUS_LAUNCHED
         self._update_pipeline_star()
 
@@ -283,7 +307,7 @@ class ProjectManager(FolderManager):
             job_params.update(extraParams)
         return job_params
 
-    def _createJob(self, jobType, params):
+    def _createJob(self, jobType, params, update=True):
         jobConf = ProcessingConfig.get_job_conf(jobType)
 
         if jobConf is None:
@@ -308,22 +332,24 @@ class ProjectManager(FolderManager):
         # Write job.star file
         self._writeJobParams(job, params)
 
-        self._update_pipeline_star()
+        if update:
+            self._update_pipeline_star()
 
         return job
 
     def _hasJob(self, jobId):
-        return self._wf.hasJob(jobId)
+        return self._wf.hasJob(Path.rmslash(jobId))
 
     def _getJob(self, jobId):
         """ Load a given job and check its folder exist. """
-        if not self._wf.hasJob(jobId):
+        jid = Path.rmslash(jobId)
+        if not self._wf.hasJob(jid):
             raise Exception(f"There is not job with id: '{jobId}'")
 
         if not self.exists(jobId):
             raise Exception(f"Missing folder for job: '{jobId}'")
 
-        return self._wf.getJob(jobId)
+        return self._wf.getJob(jid)
 
     # def restart(self, jobId, clean=False, wait=False):
     #     job = self._getJob(jobId)
