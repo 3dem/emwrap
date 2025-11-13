@@ -25,7 +25,7 @@ from datetime import datetime
 
 from emtools.utils import Color, FolderManager, Path, Process
 from emtools.jobs import Batch, Args
-from emtools.metadata import StarFile
+from emtools.metadata import StarFile, Table
 
 from .warp import WarpBasePipeline
 
@@ -43,9 +43,6 @@ class WarpMotionCtf(WarpBasePipeline):
         """ This method can be run for only the Mctf pipeline
          or for the preprocessing one, where import inputs is not needed.
         """
-        # Input movies pattern for the frame series
-        tsAllTable = StarFile.getTableFromFile('global', kwargs['tsStarFile'])
-
         framesFm = FolderManager(batch.join('frames'))
         framesFm.create()
 
@@ -56,6 +53,9 @@ class WarpMotionCtf(WarpBasePipeline):
 
         ext = None
         ps = None
+
+        # Input movies pattern for the frame series
+        tsAllTable = StarFile.getTableFromFile('global', kwargs['tsStarFile'])
 
         for tsRow in tsAllTable:
             tsName = tsRow.rlnTomoName
@@ -86,8 +86,8 @@ class WarpMotionCtf(WarpBasePipeline):
         if self.gain:
             args['--gain_path'] = self.gain
 
-        args.update({k.replace(f'{cs}.', '--'): v
-                     for k, v in self._args.items() if k.startswith(cs)})
+        subargs = self.get_subargs(cs, '--')
+        args.update(subargs)
 
         with batch.execute('create_settings'):
             batch.call(self.loader, args, logfile=self.join('run.out'))
@@ -110,17 +110,105 @@ class WarpMotionCtf(WarpBasePipeline):
             #'--device_list': self.gpuList  FIXME: Allow selection of gpus
         })
 
-        # args.update(self._args['fs_motion_and_ctf']['extra_args'])
+        subargs = self.get_subargs('fs_motion_and_ctf')
+        if gpus := self._args['gpus']:
+            args['--device_list'] = self.get_gpu_list(gpus)
+        if pd := subargs['perdevice']:
+            args['--perdevice'] = int(pd)
+        """ 
+        fs_motion_and_ctf.c_use_sum            Yes                               
+fs_motion_and_ctf.out_averages         Yes                               
+fs_motion_and_ctf.out_average_halves   Yes 
+        """
+        for a in ['c_use_sum', 'out_averages', 'out_average_halves']:
+            if subargs[a]:
+                args[f"--{a}"] = ""
 
         with batch.execute('fs_motion_and_ctf'):
             batch.call(self.loader, args, logfile=self.join('run.out'))
 
         self.updateBatchInfo(batch)
 
+    def _output(self, batch):
+        """ Register output STAR files. """
+        batch.mkdir('tilt_series')
+        self.log("Registering output STAR files.")
+        tsAllTable = StarFile.getTableFromFile('global', self.inputTs)
+
+        newTsStarFile = batch.join('corrected_tilt_series.star')
+
+        newPsLabel = 'rlnTomoTiltSeriesPixelSize'
+        newTsAllTable = Table(tsAllTable.getColumnNames() + [newPsLabel])
+        for tsRow in tsAllTable:
+            tsName = tsRow.rlnTomoName
+            tsStarFile = self.join('tilt_series', f"{tsName}.star")
+            ps = tsRow.rlnMicrographOriginalPixelSize
+            newPs = ps  # FIXME: Take into account if there is binning at Mc level
+            tsDict = tsRow._asdict()
+            tsDict[newPsLabel] = newPs
+            tsDict['rlnTomoTiltSeriesStarFile'] = tsStarFile
+            newTsAllTable.addRowValues(**tsDict)
+
+            tsTable = StarFile.getTableFromFile(tsName, tsRow.rlnTomoTiltSeriesStarFile)
+
+            """
+            _rlnCtfPowerSpectrum #7 
+            _rlnMicrographNameEven #8 
+            _rlnMicrographNameOdd #9 
+            _rlnMicrographName #10 
+            _rlnMicrographMetadata #11 
+            _rlnAccumMotionTotal #12 
+            _rlnAccumMotionEarly #13 
+            _rlnAccumMotionLate #14 
+            
+            """
+            # FIXME: Do not add even/odd when this option is not selected
+            extra_cols = [
+                'rlnCtfPowerSpectrum', 'rlnMicrographName', 'rlnMicrographMetadata',
+                'rlnAccumMotionTotal', 'rlnAccumMotionEarly', 'rlnAccumMotionLate',
+                'rlnMicrographNameEven', 'rlnMicrographNameOdd'
+            ]
+            filesMap = {
+                'rlnMicrographName': 'average',
+                'rlnCtfPowerSpectrum': 'powerspectrum',
+                'rlnMicrographNameEven': 'average/even',
+                'rlnMicrographNameOdd': 'average/odd'
+            }
+            newTsTable = Table(tsTable.getColumnNames() + extra_cols)
+            for frameRow in tsTable:
+                moviePrefix = Path.removeBaseExt(frameRow.rlnMicrographMovieName)
+                movieMrc = moviePrefix + '.mrc'
+                frameDict = frameRow._asdict()
+                for k, v in filesMap.items():
+                    frameDict[k] = batch.join(self.FS, v, movieMrc)
+                frameDict['rlnMicrographMetadata'] = "None"
+                # FIXME: Parse the movie values
+                for k in extra_cols:
+                    if k.startswith('rlnAccumMotion'):
+                        frameDict[k] = 0
+                newTsTable.addRowValues(**frameDict)
+            # Write the new ts.star file
+            with StarFile(tsStarFile, 'w') as sfOut:
+                sfOut.writeTable(tsName, newTsTable,
+                                 computeFormat='left',
+                                 timeStamp=True)
+
+        # Write the corrected_tilt_series.star
+        with StarFile(newTsStarFile, 'w') as sfOut:
+            sfOut.writeTable('global', newTsAllTable,
+                             computeFormat='left',
+                             timeStamp=True)
+
+        self.updateBatchInfo(batch)
+
     def prerun(self):
+        self.inputTs = self._args['input_tiltseries']
         batch = Batch(id='mtc', path=self.path)
-        self.runBatch(batch, tsStarFile=self._args['input_tiltseries'])
+        # self.runBatch(batch, tsStarFile=self.inputTs)
+        self._output(batch)
 
 
 if __name__ == '__main__':
+
+
     WarpMotionCtf.main()

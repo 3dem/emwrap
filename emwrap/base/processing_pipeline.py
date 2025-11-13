@@ -113,6 +113,13 @@ class ProcessingPipeline(Pipeline, FolderManager):
         """
         return argDict.get(key, os.environ.get(envKey, default))
 
+    def get_subargs(self, prefix, new_prefix=''):
+        def _new_key(k):
+            return k.replace(f'{prefix}.', new_prefix)
+
+        return {_new_key(k): v
+                for k, v in self._args.items() if k.startswith(prefix)}
+
     def prerun(self):
         """ This method will be called before the run. """
         pass
@@ -138,6 +145,26 @@ class ProcessingPipeline(Pipeline, FolderManager):
     @staticmethod
     def do_clean():
         return int(os.environ.get('EMWRAP_CLEAN', 1)) > 0
+
+    @staticmethod
+    def get_gpu_list(gpus, as_string=False):
+        """ Get the list of GPUs base on the following options:
+        1. If a single number N
+            List will be [0, 1..., N-1]
+        2. If there is a space-separated list
+            List will be gpus.split()
+        3. Single specific gpu should be specified with "GPU_NUMBER"
+        """
+        parts = gpus.split()
+        if len(parts) > 1:
+            gpu_list = [int(g) for g in parts]
+        else:
+            gpu_list = list(range(int(gpus)))
+
+        if as_string:
+            return ' '.join(str(g) for g in gpu_list)
+        else:
+            return gpu_list
 
     def run(self):
         try:

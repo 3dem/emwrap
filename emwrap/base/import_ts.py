@@ -113,8 +113,9 @@ data/Position_19_008_-12.00_20251010_172419_EER.eer	1	-12.010000	85.000000	28.00
             preExposure += self.acq.total_dose
 
         with StarFile(tsStarFile, 'w') as sfOut:
-            sfOut.writeTimeStamp()
-            sfOut.writeTable(tsName, tsTable, computeFormat="left")
+            sfOut.writeTable(tsName, tsTable,
+                             computeFormat="left",
+                             timeStamp=True)
 
         if self.allTsTable is None:
             self.allTsTable = Table([
@@ -142,8 +143,9 @@ data/Position_19_008_-12.00_20251010_172419_EER.eer	1	-12.010000	85.000000	28.00
         )
 
         with StarFile(self.outputStar, 'w') as sfOut:
-            sfOut.writeTimeStamp()
-            sfOut.writeTable('global', self.allTsTable, computeFormat="left")
+            sfOut.writeTable('global', self.allTsTable,
+                             computeFormat="left",
+                             timeStamp=True)
 
     def prerun(self):
         previousTs = set()
