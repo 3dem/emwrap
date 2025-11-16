@@ -44,6 +44,21 @@ class ProcessingConfig:
         return cls._config['jobs']
 
     @classmethod
+    def get_cluster(cls):
+        return cls._config.get('cluster', {})
+
+    @classmethod
+    def get_cluster_template(cls):
+        if cluster := cls.get_cluster():
+            return cls._fm.join(cluster['template'])
+        else:
+            return None
+
+    @classmethod
+    def get_cluster_submit(cls):
+        cls.get_cluster().get('submit', None)
+
+    @classmethod
     def get_jobs_dict(cls):
         return cls._jobs_dict
 

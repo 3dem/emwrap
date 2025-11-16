@@ -270,18 +270,36 @@ class ProjectManager(FolderManager):
 
     def _runCmd(self, cmd, jobId, wait=False):
         self._saveCmd(cmd, jobId)
-        args = shlex.split(cmd)
-        stdout = open(self.join(jobId, 'run.out'), 'a')
-        stderr = open(self.join(jobId, 'run.err'), 'a')
-        cmd = self.log(f"{Color.green(args[0])} {Color.bold(' '.join(args[1:]))}")
-        stdout.write(f"\n\n{cmd}\n")
-        stdout.flush()
+        if cluster := ProcessingConfig.get_cluster():
+            # Create the template script from cluster template
+            templateFile = ProcessingConfig.get_cluster_template()
+            self.log(f"Reading template file: {templateFile}")
+            with open(templateFile) as f:
+                template = f.read()
 
-        # Run the command
-        p = subprocess.Popen(args, stdout=stdout, stderr=stderr, close_fds=True)
+            scriptFile = self.join(jobId, 'job.script')
+            self.log(f"Writing script file: {scriptFile}")
+            with open(scriptFile, 'w') as f:
+                f.write(template.format(jobId=jobId, command=cmd, workingDir=self.path))
 
-        if wait:
-            p.wait()
+            # FIXME Implement the wait option when submitting to a cluster
+            submit = ProcessingConfig.get_cluster()['submit']
+            submitCmd = submit.format(job_script=scriptFile)
+            self.log(f"Executing: {Color.green(submitCmd)}")
+            os.system(submitCmd)
+        else:
+            args = shlex.split(cmd)
+            stdout = open(self.join(jobId, 'run.out'), 'a')
+            stderr = open(self.join(jobId, 'run.err'), 'a')
+            cmd = self.log(f"{Color.green(args[0])} {Color.bold(' '.join(args[1:]))}")
+            stdout.write(f"\n\n{cmd}\n")
+            stdout.flush()
+
+            # Run the command
+            p = subprocess.Popen(args, stdout=stdout, stderr=stderr, close_fds=True)
+
+            if wait:
+                p.wait()
 
     def _writeJobParams(self, job, params):
         """ Write the job.star for the given job. """
