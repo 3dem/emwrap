@@ -106,12 +106,14 @@ class WarpMotionCtf(WarpBasePipeline):
             'WarpTools': 'fs_motion_and_ctf',
             '--settings': self.FSS,
             '--m_grid': f'1x1x{ngroups}',  # FIXME: Read m_grid from params
-            '--c_grid': '2x2x1', # FIXME: Read c_grid option
-            #'--device_list': self.gpuList  FIXME: Allow selection of gpus
+            '--c_grid': '2x2x1',  # FIXME: Read c_grid option
+            '--c_voltage': int(self.acq.voltage),
+            '--c_cs': self.acq.cs,
+            '--c_amplitude': self.acq.amplitude_contrast
         })
 
         subargs = self.get_subargs('fs_motion_and_ctf')
-        if gpus := self._args['gpus']:
+        if self.gpuList:
             args['--device_list'] = self.gpuList
         if pd := subargs['perdevice']:
             args['--perdevice'] = int(pd)
@@ -207,16 +209,7 @@ class WarpMotionCtf(WarpBasePipeline):
         self.updateBatchInfo(batch)
 
     def prerun(self):
-        self.inputTs = self._args['input_tiltseries']
-        batch = Batch(id='mtc', path=self.path)
-        if self._args['__j'] != 'only_output':
-            self.log("Running Warp commands.")
-            self.runBatch(batch, inputTs=self.inputTs)
-        else:
-            self.log("Received special argument 'only_output', "
-                     "only generating STAR files. ")
-
-        self._output(batch)
+        self.prerunTs()
 
 
 if __name__ == '__main__':

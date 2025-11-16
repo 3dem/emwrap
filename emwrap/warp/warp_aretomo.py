@@ -38,11 +38,10 @@ class WarpAreTomo(WarpBasePipeline):
         - ts_aretomo -> ts alignment
     """
     name = 'emw-warp-aretomo'
-    input_name = 'in_movies'
 
     def runBatch(self, batch, importInputs=True, **kwargs):
         # Input run folder from the Motion correction and CTF job
-        inputTs=kwargs['inputTs']
+        inputTs = kwargs['inputTs']
         inputFolder = FolderManager(os.path.dirname(inputTs))
 
         # FIXME: Add validations if the input star exists and required warp folders
@@ -105,22 +104,17 @@ class WarpAreTomo(WarpBasePipeline):
 
         newTsStarFile = batch.join('tilt_series_aln.star')
 
-        newTsAllTable = Table(tsAllTable.getColumnNames()) # + ['rlnDefocusU'])
+        newTsAllTable = Table(tsAllTable.getColumnNames() + ['rlnTiltSeriesAligned'])
         for tsRow in tsAllTable:
             tsName = tsRow.rlnTomoName
             tsStarFile = self.join('tilt_series', tsName + '.star')
-            # tsXml = self.join(self.TS, tsName + '.xml')
-            # self.log(f"Reading {tsXml}")
-            # if os.path.exists(tsXml):
-            #     ctf = WarpXml(tsXml).getDict('TiltSeries', 'CTF', 'Param')
-            #     defocus = _float(ctf['Defocus'])
-            # else:
-            #     defocus = 9999
-
+            tsAligned = self.join(self.TS, 'tiltstack', tsName, f"{tsName}_aligned.mrc")
+            if not os.path.exists(tsAligned):
+                tsAligned = ""  # FIXME Handle missing aligned TS
             tsDict = tsRow._asdict()
             tsDict.update({
                 'rlnTomoTiltSeriesStarFile': tsStarFile,
-                #'rlnDefocusU': defocus
+                'rlnTiltSeriesAligned': tsAligned
             })
             newTsAllTable.addRowValues(**tsDict)
 
@@ -128,17 +122,7 @@ class WarpAreTomo(WarpBasePipeline):
         self.updateBatchInfo(batch)
 
     def prerun(self):
-        self.inputTs = self._args['input_tiltseries']
-        batch = Batch(id=self.name, path=self.path)
-
-        if self._args['__j'] != 'only_output':
-            self.log("Running Warp commands.")
-            self.runBatch(batch, inputTs=self.inputTs)
-        else:
-            self.log("Received special argument 'only_output', "
-                     "only generating STAR files. ")
-
-        self._output(batch)
+        self.prerunTs()
 
 
 if __name__ == '__main__':

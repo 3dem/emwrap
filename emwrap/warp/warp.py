@@ -19,6 +19,7 @@ import os
 from emtools.utils import FolderManager, Path, Process
 from emwrap.base import ProcessingPipeline
 from emtools.metadata import StarFile, Acquisition
+from emtools.jobs import Batch
 
 
 def get_loader():
@@ -149,22 +150,38 @@ class WarpBasePipeline(ProcessingPipeline):
             for fn in inputFm.listdir():
                 inputPath = inputFm.join(fn)
                 if os.path.isdir(inputPath):
-                    outputFm.link(inputPath)
+                    if fn.endswith('logs'):
+                        outputFm.mkdir('logs')  # Don't copy logs
+                    else:
+                        outputFm.link(inputPath)
                 else:
                     outputFm.copy(inputPath)
 
         for inputPath in inputs:
             if inputPath.endswith('.settings'):
                 self.copy(inputPath)
-            elif inputPath.endswith(self.TS):
+            elif inputPath.endswith(self.TS) or inputPath.endswith(self.TM):
                 _copyFolder(inputPath)
-            else:  # warp_frameseries and warp_tomostar
+            else:  # warp_frameseries
                 self.link(inputPath)
 
         # Link input gain file
         if gain := self.acq.get('gain', None):
             self.log(f"{self.name}: Linking gain gain: {gain}")
             self.link(gain)
+
+    def prerunTs(self):
+        """ Common operations for tilt-series prerun implementation in subclasses. """
+        self.inputTs = self._args['input_tiltseries']
+        batch = Batch(id=self.name, path=self.path)
+        if self._args['__j'] != 'only_output':
+            self.log("Running Warp commands.")
+            self.runBatch(batch, inputTs=self.inputTs)
+        else:
+            self.log("Received special argument 'only_output', "
+                     "only generating STAR files. ")
+
+        self._output(batch)
 
     def batch_execute(self, label, batch, args, logfile=None):
         """ Shortcut to execute a batch. """
