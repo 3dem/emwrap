@@ -20,6 +20,8 @@ import shlex
 import json
 import subprocess
 import argparse
+import shutil
+from datetime import datetime
 
 from emtools.utils import FolderManager, Process, Color, Path, Timer
 from emtools.jobs import BatchManager, Workflow
@@ -125,6 +127,18 @@ class ProjectManager(FolderManager):
 
         self.log(t.getToc("Update took"))
 
+    def _updateJobInputs(self, job, params):
+        # Clear jobs inputs and add new ones
+        job.inputs = []
+        for k, v in params.items():
+            for job2 in self._wf.jobs():
+                if isinstance(v, str) and job2.id in v:
+                    # In this case the saved job is taking an input from this job
+                    data = job2.getOutput(v)
+                    if data is None:
+                        data = job2.registerOutput(v, datatype="File")
+                    job.addInputs([data])
+
     def saveJob(self, jobTypeOrId, params, update=True):
         """ Save a job. If jobId = None, a new job is created
         and the parameters are saved. If jobId is not None,
@@ -150,17 +164,7 @@ class ProjectManager(FolderManager):
         if job is None:
             raise Exception(f"{jobTypeOrId} is not an existing jobId or job type.")
 
-        # Clear jobs inputs and add new ones
-        job.inputs = []
-        for k, v in params.items():
-            for job2 in self._wf.jobs():
-                if isinstance(v, str) and job2.id in v:
-                    # In this case the saved job is taking an input from this job
-                    data = job2.getOutput(v)
-                    if data is None:
-                        data = job2.registerOutput(v, datatype="File")
-                    job.addInputs([data])
-
+        self._updateJobInputs(job, params)
         self._update_pipeline_star()
 
         return job
@@ -198,9 +202,10 @@ class ProjectManager(FolderManager):
 
             if clean:
                 self.log(f"Clean job folder {job.id}")
-                jfm = FolderManager(self.join(job.id))
-                jfm.create()
+                self._deleteJobFolder(job)
+                self.mkdir(job.id)
 
+            self._updateJobInputs(job, job_params)
             self._writeJobParams(job, job_params)
             jobDef = ProcessingConfig.get_job_conf(jobType)
         else:
@@ -218,22 +223,33 @@ class ProjectManager(FolderManager):
         if not launcher:
             raise Exception(f"Invalid launcher '{launcher}' for job type: {jobType}")
 
-        self._runCmd(f"{launcher} -i {jobStar} -o {job.id}", job.id, wait=wait)
+        self._runCmd(f"{launcher} -i {jobStar} -o {job.id}", job.id,
+                     wait=wait, job_params=job_params)
         job['status'] = STATUS_LAUNCHED
         self._update_pipeline_star()
 
         return job
+
+    def _deleteJobFolder(self, job, validate=True):
+        if validate and self._isActiveJob(job):
+            raise Exception("Can not delete launched or running jobs, stop them first.")
+
+        if not self.exists('.Trash'):
+            self.mkdir('.Trash')
+
+        jobId = job.id
+        now = datetime.now()
+        uniqueTs = now.strftime("%Y%m%d_%H%M%S_%f")
+        newName = f"{uniqueTs}_{jobId}"
+        self.log(f"Deleting job {jobId}: mv {self.join(jobId)} {self.join('.Trash', newName)}")
+        shutil.move(self.join(jobId), self.join('.Trash', newName))
 
     def deleteJob(self, jobId):
         """ Clean up job's folder. """
         jobId = Path.rmslash(jobId)
 
         if job := self._getJob(jobId):
-            if self._isActiveJob(job):
-                raise Exception("Can not delete launched or running jobs, stop them first.")
-
-            fm = FolderManager(path=self.join(jobId))
-            fm.clear()
+            self._deleteJobFolder(job)
             self._wf.deleteJob(job)
             self._update_pipeline_star()
         else:
@@ -268,7 +284,7 @@ class ProjectManager(FolderManager):
         with open(self.join(jobId, 'command.txt')) as f:
             return f.readline().strip()
 
-    def _runCmd(self, cmd, jobId, wait=False):
+    def _runCmd(self, cmd, jobId, wait=False, job_params=None):
         self._saveCmd(cmd, jobId)
         if cluster := ProcessingConfig.get_cluster():
             # Create the template script from cluster template
@@ -280,7 +296,17 @@ class ProjectManager(FolderManager):
             scriptFile = self.join(jobId, 'job.script')
             self.log(f"Writing script file: {scriptFile}")
             with open(scriptFile, 'w') as f:
-                f.write(template.format(jobId=jobId, command=cmd, workingDir=self.path))
+                gpus = int(job_params.get('gpus', 1))   # FIXME Get gpu list and take the length
+                cpus = max(10, gpus * 10)
+                if gpus:
+                    # FIXME: Use emgoat for a more general interaction with HPC
+                    gpu_line = f'#BSUB -gpu "num={gpus}/host:mode=shared"'
+                else:
+                    gpu_line = ''
+
+                f.write(template.format(jobId=jobId, command=cmd,
+                                        gpus=gpus, cpus=cpus, gpu_line=gpu_line,
+                                        workingDir=self.path))
 
             # FIXME Implement the wait option when submitting to a cluster
             submit = ProcessingConfig.get_cluster()['submit']
