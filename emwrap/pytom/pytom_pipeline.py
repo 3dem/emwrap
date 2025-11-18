@@ -24,7 +24,7 @@ from glob import glob
 from datetime import datetime, timedelta
 
 from emtools.utils import Color, FolderManager, Path, Process
-from emtools.metadata import StarFile, Acquisition
+from emtools.metadata import StarFile, Acquisition, StarMonitor
 from emtools.jobs import Batch
 from emtools.image import Image
 from emwrap.base import ProcessingPipeline
@@ -37,19 +37,34 @@ class PyTomPipeline(ProcessingPipeline):
     name = 'emw-pytom'
     input_name = 'in_movies'
 
-    def __init__(self, input_args):
-        ProcessingPipeline.__init__(self, input_args)
-        self.gpuList = self._args['gpu'].split(',')
-        self.inputTomograms = self._args['in_movies']
-        self.timeout = timedelta(seconds=self._args.get('timeout', 3600))
-        self.wait = self._args.get('wait', 60)
+    def __init__(self, args, output):
+        ProcessingPipeline.__init__(self, args, output)
+        # FIXME add support to comma separated values for parallels in batches
+        self.gpuList = [self.get_gpu_list(args['gpus'], as_string=True)]
+
         self.acq = self.loadAcquisition()
+        # FIXME: Read this from the input arguments
+        self.wait = {
+            'timeout': int(args.get('wait.timeout', 60)),
+            'file_change': int(args.get('wait.file_change', 30)),
+            'sleep': int(args.get('wait.sleep', 30)),
+        }
+
+        self.inTomoStar = self._args['input_tomograms']
+        self.outTomoStar = self.join('tomograms_coords.star')
+
+        self._pytom_args = {
+            'pytom': self.get_subargs('pytom'),
+            'pytom_extract': self.get_subargs('pytom_extract')
+        }
 
     def get_pytom_proc(self, gpu):
 
         def _pytom(batch):
-            pytom = PyTom(self.acq, **self._args['pytom'])
-            pytom.process_batch(batch, gpu=gpu)
+            args = dict(self._pytom_args)
+            args['pytom']['g'] = gpu
+            pytom = PyTom(self.acq, args)
+            pytom.process_batch(batch)
             return batch
 
         return _pytom
@@ -66,82 +81,92 @@ class PyTomPipeline(ProcessingPipeline):
 
         return batch
 
-    def __getTomoDict(self, recFolder, tomoPattern):
-        if tomograms := [os.path.basename(fn) for fn in glob(tomoPattern)]:
-            # Get tomo suffix to remove from filenames and get the matching tsName
-            tomoSuffix = tomograms[0].split('_')[-1]
-            return {t.replace(tomoSuffix, ''): os.path.join(recFolder, t) for t in tomograms}
-        else:
-            return {}
-
     def _getInputTomograms(self):
         """ Create a generator for input tomograms. """
-        # Let's assume that at the same level, there is a warp_tiltseries folder
-        baseDir = os.path.dirname(Path.rmslash(self.inputTomograms))
-        tiltseriesFolder = os.path.join(baseDir, 'warp_tiltseries')
-        recFolder = os.path.join(tiltseriesFolder, 'reconstruction')
-        tomoPattern = os.path.join(recFolder, '*Apx.mrc')
-
-        self.info['inputs'] = [
-            {'tomograms': self.inputTomograms}
-        ]
-        self.writeInfo()
-        self.log(f">>> Tomograms pattern: {tomoPattern}")
-
-
+        # Let's create a STAR file monitor to check for incoming tomograms
+        # Get the tomograms IDs to avoid processing again that ones
         counter = 0
-        # For now, let input with the tomostar folder
-        pattern = os.path.join(self.inputTomograms, '*.tomostar')
+        blacklist = []
+        if os.path.exists(self.outTomoStar):
+            blacklist = StarFile.getTableFromFile('global', self.outTomoStar)
+            counter = len(blacklist)
+            self.log(f"Previously processed tomograms: {Color.cyan(counter)}")
 
-        last_found = datetime.now()
-        now = datetime.now()
-        seen = set()
+        t = StarFile.getTableFromFile('global', self.inTomoStar)
+        n = len(t)
+        self.log(f"Input star file: {Color.bold(self.inTomoStar)}")
+        self.log(f"Total input tomograms: {Color.bold(n)}")
+        self.log(f"Tomograms to process: {Color.green(n - counter)}")
 
-        while now - last_found < self.timeout:
-            self.log("Checking for new tomograms.")
-            tomoDict = self.__getTomoDict(recFolder, tomoPattern)
+        monitor = StarMonitor(self.inTomoStar, 'global',
+                              lambda row: row.rlnTomoName,
+                              timeout=self.wait['timeout'],
+                              blacklist=blacklist)
 
-            def _newTomo(fn):
-                tsName = Path.removeBaseExt(fn)
-                return fn not in seen and f"{tsName}_" in tomoDict
+        # This will keep monitor the star files for new tomograms until timed out.
+        for row in monitor.newItems():
+            tsName = row.rlnTomoName
+            counter += 1
+            nowPrefix = datetime.now().strftime('%y%m%d-%H%M%S')
+            batchId = f"{nowPrefix}_{counter:03}_{tsName}"
+            # FIXME: Now reading these values from Warp tomostar, but
+            # it should be from Relion's star files
+            t = StarFile.getTableFromFile('', row.wrpTomostar)
+            yield Batch(id=batchId, index=counter,
+                        path=os.path.join(self.tmpDir, batchId),
+                        tsName=tsName, tomogram=row.rlnTomogram,
+                        tilt_angles=[float(r.wrpAngleTilt) for r in t],
+                        dose_accumulation=[float(r.wrpDose) for r in t])
 
-            if newFiles := [fn for fn in glob(pattern) if _newTomo(fn)]:
-                self.log(f"Found new tomograms: {str(newFiles)}", flush=True)
-
-                for fn in newFiles:
-                    # Let's create a batch for this tomogram
-                    tsName = Path.removeBaseExt(fn)
-                    nowPrefix = datetime.now().strftime('%y%m%d-%H%M%S')
-                    counter += 1
-                    batchId = f"{nowPrefix}_{counter:02}_{tsName}"
-
-                    tomoFn = tomoDict[f'{tsName}_']
-
-                    # Let's read the tilt_angles and the dose_accumulation from the .tomostar file
-                    with StarFile(fn) as sf:
-                        t = sf.getTable('', guessType=False)
-                    yield Batch(id=batchId, index=counter,
-                                path=os.path.join(self.tmpDir, batchId),
-                                tsName=tsName, tomogram=tomoFn,
-                                tilt_angles=[float(row.wrpAngleTilt) for row in t],
-                                dose_accumulation=[float(row.wrpDose) for row in t])
-                    last_found = now
-                    seen.add(fn)
+        # while now - last_found < self.timeout:
+        #     self.log("Checking for new tomograms.")
+        #     tomoDict = self.__getTomoDict(recFolder, tomoPattern)
+        #
+        #     def _newTomo(fn):
+        #         tsName = Path.removeBaseExt(fn)
+        #         return fn not in seen and f"{tsName}_" in tomoDict
+        #
+        #     if newFiles := [fn for fn in glob(pattern) if _newTomo(fn)]:
+        #         self.log(f"Found new tomograms: {str(newFiles)}", flush=True)
+        #
+        #         for fn in newFiles:
+        #             # Let's create a batch for this tomogram
+        #             tsName = Path.removeBaseExt(fn)
+        #             nowPrefix = datetime.now().strftime('%y%m%d-%H%M%S')
+        #             counter += 1
+        #             batchId = f"{nowPrefix}_{counter:02}_{tsName}"
+        #
+        #             tomoFn = tomoDict[f'{tsName}_']
+        #
+        #             # Let's read the tilt_angles and the dose_accumulation from the .tomostar file
+        #             with StarFile(fn) as sf:
+        #                 t = sf.getTable('', guessType=False)
+        #             yield Batch(id=batchId, index=counter,
+        #                         path=os.path.join(self.tmpDir, batchId),
+        #                         tsName=tsName, tomogram=tomoFn,
+        #                         tilt_angles=[float(row.wrpAngleTilt) for row in t],
+        #                         dose_accumulation=[float(row.wrpDose) for row in t])
+        #             last_found = now
+        #             seen.add(fn)
                     # else:
                     #     pass
                     #     # Note: In streaming we don't know if the tomograms are read
                     #     # In warp all tomostar are generated
                     #     self.log(f"ERROR: Reconstructed tomogram was not found "
                     #              f"for name: {tsName}")
-
-            else:
-                self.log("No new tomograms found, sleeping.")
-
-            time.sleep(self.wait)
-            now = datetime.now()
-
+            #
+            # else:
+            #     self.log("No new tomograms found, sleeping.")
+            #
+            # time.sleep(self.wait)
+            # now = datetime.now()
 
     def prerun(self):
+        self.info['inputs'] = [
+            {'tomograms': self.inTomoStar}
+        ]
+        self.writeInfo()
+
         g = self.addGenerator(self._getInputTomograms)
         outputQueue = None
         self.mkdir('Coordinates')
@@ -156,9 +181,5 @@ class PyTomPipeline(ProcessingPipeline):
         self.addProcessor(outputQueue, self._output)
 
 
-def main():
-    PyTomPipeline.runFromArgs()
-
-
 if __name__ == '__main__':
-    main()
+    PyTomPipeline.main()

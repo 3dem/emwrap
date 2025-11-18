@@ -24,10 +24,10 @@ from emtools.image import Image
 
 class PyTom:
     """ PyTom wrapper to run in a batch folder. """
-    def __init__(self, acq, **kwargs):
-        self.acq = Acquisition(acq)
-        self.args = self.argsFromAcq(acq)
-        self.args.update(kwargs.get('extra_args', {}))
+    def __init__(self, acq, args):
+        #self.args = self.argsFromAcq(acq)
+        self.acq = acq
+        self.args = args
 
     def process_batch(self, batch, **kwargs):
         def _write_list(key, ext):
@@ -41,28 +41,26 @@ class PyTom:
         outputDir = batch.mkdir('output')
         fm = FolderManager(outputDir)
 
-        # pytom_match arguments
-        args = Args(self.args)
+        # Load parameters from acquision
+        args = self.argsFromAcq(self.acq)
         args.update({
             '--destination': 'output',
-            '--voxel-size-angstrom': 9.52,  # FIXME: This should be taken from input
             '--tomogram': batch.link(batch['tomogram']),
             '--tilt-angles': _write_list('tilt_angles', 'rawtlt'),
             '--dose-accumulation': _write_list('dose_accumulation', 'txt'),
-            '-g': kwargs['gpu']
         })
-        #args.update(self.args)
-        # Let's create some relative symbolic links and update arguments
-        for a in ['--template', '--mask']:
-            args[a] = batch.link(args[a])
 
-        # Let's fix some arguments that need to be a list
-        for a in ['-s', '-g']:
-            if a in args:
-                args[a] = args[a].split()
+        for k, v in self.args['pytom'].items():
+            # Let's create some relative symbolic links and update arguments
+            if k in ['template', 'mask']:
+                args[f'--{k}'] = batch.link(v)
+            elif k in ['s', 'g']:
+                args[f'--{k}'] = v.split()
 
         with batch.execute('pytom_match'):
-            batch.call(PyTom.get_program("PYTOM_MATCH"), args)
+            pytom = PyTom.get_program("PYTOM_MATCH")
+            # batch.call(pytom, args)
+            print(f"{Color.green(pytom)} {Color.bold(args.toLine())}")
 
         def _rename_star(newSuffix):
             """ Rename output star files to avoid overwrite. """
@@ -71,25 +69,33 @@ class PyTom:
                 newFn = fn.replace(e, f'_{newSuffix}{e}')
                 os.rename(fn, newFn)
 
-        jsonFile = os.path.basename(fm.glob('*.json')[0])
+        if files := fm.glob('*.json'):
+            jsonFile = os.path.basename(files[0])
 
-        # pytom_extract arguments
-        args = {
-            '-j': f'output/{jsonFile}',
-            '-n': 2500,
-            "--particle-diameter": args['--particle-diameter']
-        }
+            subargs = self.args['pytom_extract']
+            # pytom_extract arguments
+            args = {
+                '-j': f'output/{jsonFile}',
+                '-n': subargs['n'],
+                "--particle-diameter": subargs['particle-diameter']
+            }
 
-        with batch.execute('pytom_extract'):
-            pytom_extract = PyTom.get_program("PYTOM_EXTRACT")
-            batch.call(pytom_extract, args)
-            _rename_star('default')
-            args.update({
-                '--tophat-filter': "",
-                '--tophat-connectivity': 1
-            })
-            batch.call(pytom_extract, args)
-            _rename_star('tophat')
+            with batch.execute('pytom_extract'):
+                pytom_extract = PyTom.get_program("PYTOM_EXTRACT")
+                # batch.call(pytom_extract, args)
+                print(f"{Color.green(pytom_extract)} {Color.bold(args.toLine())}")
+                _rename_star('default')
+
+                if subargs['tophat-filter']:
+                    args.update({
+                        '--tophat-filter': "",
+                        '--tophat-connectivity': subargs['tophat-connectivity']
+                    })
+                    #batch.call(pytom_extract, args)
+                    print(f"{Color.green(pytom_extract)} {Color.bold(args.toLine())}")
+                    _rename_star('tophat')
+        else:
+            batch.log("No output json files, not running pytom_extract")
 
     @staticmethod
     def get_program(var):
@@ -101,4 +107,5 @@ class PyTom:
             '--voltage': acq.voltage,
             '--spherical-aberration': acq.cs,
             '--amplitude-contrast': acq.amplitude_contrast,
+            '--voxel-size-angstrom': acq.pixel_size
         })
