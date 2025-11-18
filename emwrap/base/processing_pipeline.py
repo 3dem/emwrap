@@ -114,11 +114,12 @@ class ProcessingPipeline(Pipeline, FolderManager):
         return argDict.get(key, os.environ.get(envKey, default))
 
     def get_subargs(self, prefix, new_prefix=''):
+        full_prefix = f'{prefix}.'
         def _new_key(k):
-            return k.replace(f'{prefix}.', new_prefix)
+            return k.replace(full_prefix, new_prefix)
 
         return {_new_key(k): v
-                for k, v in self._args.items() if k.startswith(prefix)}
+                for k, v in self._args.items() if k.startswith(full_prefix)}
 
     def prerun(self):
         """ This method will be called before the run. """
