@@ -84,7 +84,7 @@ class WarpCtfReconstruct(WarpBasePipeline):
         """ Register output STAR files. """
 
         def _float(v):
-            return round(float(v), 2)
+            return round(float(v), 3)
 
         self.log("Registering output STAR files.")
         tsAllTable = StarFile.getTableFromFile('global', self.inputTs)
@@ -93,11 +93,16 @@ class WarpCtfReconstruct(WarpBasePipeline):
 
         extraLabels = [
             'rlnTomogram',
+            'rlnTomogramPixelSize',
+            'rlnTomoTomogramBinning',
             'rlnDefocus',
             'rlnTomoReconstructedTomogramHalf1',
-            'rlnTomoReconstructedTomogramHalf2'
+            'rlnTomoReconstructedTomogramHalf2',
+            'wrpTomostar'
         ]
         recpath = self.join(self.TS, 'reconstruction')
+        newPs = _float(self._args["ts_reconstruct.angpix"])
+
         def _rec(*p):
             return os.path.join(recpath, *p)
 
@@ -126,11 +131,17 @@ class WarpCtfReconstruct(WarpBasePipeline):
             else:
                 defocus = 999
 
+            # FIXME: validate for missing tomostar files
+            tomostar = self.join(self.TM, tsName + '.tomostar')
+
             tsDict.update({
                 'rlnTomogram': t,
+                'rlnTomogramPixelSize': newPs,
+                'rlnTomoTomogramBinning': _float(newPs / tsDict['rlnTomoTiltSeriesPixelSize']),
                 'rlnDefocus': defocus,
                 'rlnTomoReconstructedTomogramHalf1': te,
-                'rlnTomoReconstructedTomogramHalf2': to
+                'rlnTomoReconstructedTomogramHalf2': to,
+                'wrpTomostar': tomostar
             })
             newTsAllTable.addRowValues(**tsDict)
 
