@@ -155,6 +155,9 @@ class ProcessingPipeline(Pipeline, FolderManager):
             List will be gpus.split()
         3. Single specific gpu should be specified with "GPU_NUMBER"
         """
+        if not gpus:
+            return '' if as_string else []
+
         parts = gpus.split()
         if len(parts) > 1:
             gpu_list = [int(g) for g in parts]

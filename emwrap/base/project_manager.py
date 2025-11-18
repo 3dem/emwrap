@@ -154,8 +154,9 @@ class ProjectManager(FolderManager):
         job = None
         if self._hasJob(jobTypeOrId):
             job = self._getJob(jobTypeOrId)
-            if job['status'] != STATUS_SAVED:
-                raise Exception("Can only save un-run jobs.")
+            # FIXME Activate the following validation once we allow to override the job's status
+            # if job['status'] != STATUS_SAVED:
+            #     raise Exception("Can only save un-run jobs.")
             self._writeJobParams(job, params)
         else:
             if jobDef := ProcessingConfig.get_job_form(jobTypeOrId):
@@ -164,6 +165,7 @@ class ProjectManager(FolderManager):
         if job is None:
             raise Exception(f"{jobTypeOrId} is not an existing jobId or job type.")
 
+        job['status'] = STATUS_SAVED
         self._updateJobInputs(job, params)
         self._update_pipeline_star()
 
@@ -240,7 +242,7 @@ class ProjectManager(FolderManager):
         jobId = job.id
         now = datetime.now()
         uniqueTs = now.strftime("%Y%m%d_%H%M%S_%f")
-        newName = f"{uniqueTs}_{jobId}"
+        newName = f"{uniqueTs}_{os.path.basename(jobId)}"
         self.log(f"Deleting job {jobId}: mv {self.join(jobId)} {self.join('.Trash', newName)}")
         shutil.move(self.join(jobId), self.join('.Trash', newName))
 
@@ -322,7 +324,8 @@ class ProjectManager(FolderManager):
             stdout.flush()
 
             # Run the command
-            p = subprocess.Popen(args, stdout=stdout, stderr=stderr, close_fds=True)
+            p = subprocess.Popen(args, cwd=self.path,
+                                 stdout=stdout, stderr=stderr, close_fds=True)
 
             if wait:
                 p.wait()
