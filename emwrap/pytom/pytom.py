@@ -28,6 +28,7 @@ class PyTom:
         #self.args = self.argsFromAcq(acq)
         self.acq = acq
         self.args = args
+        print(f"pytom args: {str(args)}")
 
     def process_batch(self, batch, **kwargs):
         def _write_list(key, ext):
@@ -48,6 +49,7 @@ class PyTom:
             '--tomogram': batch.link(batch['tomogram']),
             '--tilt-angles': _write_list('tilt_angles', 'rawtlt'),
             '--dose-accumulation': _write_list('dose_accumulation', 'txt'),
+            '--defocus': batch['defocus']
         })
 
         for k, v in self.args['pytom'].items():
@@ -56,11 +58,15 @@ class PyTom:
                 args[f'--{k}'] = batch.link(v)
             elif k in ['s', 'g']:
                 args[f'--{k}'] = v.split()
+            elif isinstance(v, bool):
+                args[f'--{k}'] = ""  # For booleans just add the argument
+            else:
+                args[f'--{k}'] = v
 
         with batch.execute('pytom_match'):
             pytom = PyTom.get_program("PYTOM_MATCH")
-            # batch.call(pytom, args)
-            print(f"{Color.green(pytom)} {Color.bold(args.toLine())}")
+            batch.call(pytom, args)
+            # print(f"{Color.green(pytom)} {Color.bold(args.toLine())}")
 
         def _rename_star(newSuffix):
             """ Rename output star files to avoid overwrite. """
@@ -82,8 +88,8 @@ class PyTom:
 
             with batch.execute('pytom_extract'):
                 pytom_extract = PyTom.get_program("PYTOM_EXTRACT")
-                # batch.call(pytom_extract, args)
-                print(f"{Color.green(pytom_extract)} {Color.bold(args.toLine())}")
+                batch.call(pytom_extract, args)
+                #print(f"{Color.green(pytom_extract)} {Color.bold(args.toLine())}")
                 _rename_star('default')
 
                 if subargs['tophat-filter']:
@@ -91,8 +97,8 @@ class PyTom:
                         '--tophat-filter': "",
                         '--tophat-connectivity': subargs['tophat-connectivity']
                     })
-                    #batch.call(pytom_extract, args)
-                    print(f"{Color.green(pytom_extract)} {Color.bold(args.toLine())}")
+                    batch.call(pytom_extract, args)
+                    #print(f"{Color.green(pytom_extract)} {Color.bold(args.toLine())}")
                     _rename_star('tophat')
         else:
             batch.log("No output json files, not running pytom_extract")

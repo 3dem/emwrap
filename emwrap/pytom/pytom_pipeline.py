@@ -24,7 +24,7 @@ from glob import glob
 from datetime import datetime, timedelta
 
 from emtools.utils import Color, FolderManager, Path, Process
-from emtools.metadata import StarFile, Acquisition, StarMonitor
+from emtools.metadata import StarFile, Acquisition, StarMonitor, Table
 from emtools.jobs import Batch
 from emtools.image import Image
 from emwrap.base import ProcessingPipeline
@@ -35,7 +35,6 @@ from .pytom import PyTom
 class PyTomPipeline(ProcessingPipeline):
     """ Pipeline PyTom picking in a set of tomograms. """
     name = 'emw-pytom'
-    input_name = 'in_movies'
 
     def __init__(self, args, output):
         ProcessingPipeline.__init__(self, args, output)
@@ -43,6 +42,7 @@ class PyTomPipeline(ProcessingPipeline):
         self.gpuList = [self.get_gpu_list(args['gpus'], as_string=True)]
 
         self.acq = self.loadAcquisition()
+
         # FIXME: Read this from the input arguments
         self.wait = {
             'timeout': int(args.get('wait.timeout', 60)),
@@ -71,15 +71,41 @@ class PyTomPipeline(ProcessingPipeline):
 
     def _output(self, batch):
         tsName = batch['tsName']
+
         batch.log(f"Storing output for batch '{tsName}'", flush=True)
 
         if batch.error:
             batch.log(f"ERROR: {batch.error}")
         else:
             Process.system(f"mv {batch.join('output', '*')} {self.join('Coordinates')}")
+            rowDict = batch['rowDict']
+            coordsStar = Path.replaceBaseExt(batch['tomogram'], '_default_particles.star')
+            coordsStarPath = self.join('Coordinates', coordsStar)
+            nCoords = 0
+            if os.path.exists(coordsStarPath):
+                t = StarFile.getTableFromFile('particles', coordsStarPath)
+                nCoords = len(t)
+
+            rowDict.update({
+                'rlnCoordinatesMetadata': coordsStarPath,
+                'rlnCoordinatesCount': nCoords
+            })
+            self.outTable.addRowValues(**rowDict)
+            with StarFile(self.outTomoStar, 'w') as sfOut:
+                sfOut.writeTable('global', self.outTable,
+                                 timeStamp=True, computeFormat='left')
+
             self.updateBatchInfo(batch)
 
         return batch
+
+    def _loadAcquisitionFromRow(self, row):
+        return Acquisition(
+            voltage=row.rlnVoltage,
+            cs=row.rlnSphericalAberration,
+            amplitude_contrast=row.rlnAmplitudeContrast,
+            pixel_size=row.rlnTomogramPixelSize
+        )
 
     def _getInputTomograms(self):
         """ Create a generator for input tomograms. """
@@ -87,13 +113,20 @@ class PyTomPipeline(ProcessingPipeline):
         # Get the tomograms IDs to avoid processing again that ones
         counter = 0
         blacklist = []
+        self.outTable = None
+        inTable = StarFile.getTableFromFile('global', self.inTomoStar)
+        n = len(inTable)
         if os.path.exists(self.outTomoStar):
-            blacklist = StarFile.getTableFromFile('global', self.outTomoStar)
-            counter = len(blacklist)
+            self.outTable = StarFile.getTableFromFile('global', self.outTomoStar)
+            counter = len(self.outTable)
             self.log(f"Previously processed tomograms: {Color.cyan(counter)}")
+            blacklist = self.outTable
+        else:
+            extraLabels = ['rlnCoordinatesMetadata', 'rlnCoordinatesCount']
+            self.outTable = Table(inTable.getColumnNames() + extraLabels)
 
-        t = StarFile.getTableFromFile('global', self.inTomoStar)
-        n = len(t)
+
+        self.acq.update(self._loadAcquisitionFromRow(inTable[0]))
         self.log(f"Input star file: {Color.bold(self.inTomoStar)}")
         self.log(f"Total input tomograms: {Color.bold(n)}")
         self.log(f"Tomograms to process: {Color.green(n - counter)}")
@@ -113,8 +146,10 @@ class PyTomPipeline(ProcessingPipeline):
             # it should be from Relion's star files
             t = StarFile.getTableFromFile('', row.wrpTomostar)
             yield Batch(id=batchId, index=counter,
+                        rowDict=row._asdict(),
                         path=os.path.join(self.tmpDir, batchId),
                         tsName=tsName, tomogram=row.rlnTomogram,
+                        defocus=float(row.rlnDefocus),
                         tilt_angles=[float(r.wrpAngleTilt) for r in t],
                         dose_accumulation=[float(r.wrpDose) for r in t])
 
