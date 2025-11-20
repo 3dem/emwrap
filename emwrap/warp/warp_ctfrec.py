@@ -48,7 +48,8 @@ class WarpCtfReconstruct(WarpBasePipeline):
             '--settings': self.TSS,
             '--voltage': int(self.acq.voltage),
             '--cs': self.acq.cs,
-            '--amplitude': self.acq.amplitude_contrast
+            '--amplitude': self.acq.amplitude_contrast,
+            '--auto_hand': 8
         })
         if self.gpuList:
             args['--device_list'] = self.gpuList
