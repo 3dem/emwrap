@@ -116,11 +116,30 @@ class ProjectManager(FolderManager):
                         update = True
 
                 if jobInfo := self.loadJobInfo(job):
+                    # FIXME Review all jobs to populate the info['outputs']
+                    # and also check for the Relion convention to define
+                    # the outputs
                     for o in jobInfo['outputs']:
                         for fn, datatype in o['files']:
                             if not job.hasOutput(fn):
                                 job.registerOutput(fn, datatype=datatype)
                                 update = True
+
+                # FIXME: this is a quick and dirty to define some known
+                # output star files for tomography
+                jobPath = self.join(job.id)
+
+                def _is_output(fn):
+                    return (fn.endswith('.star') and
+                            (fn.startswith('tomograms') or
+                             fn.startswith('tilt_series')))
+
+                for fn in os.listdir(jobPath):
+                    if _is_output(fn):
+                        dataId = os.path.join(job.id, fn)
+                        if not job.hasOutput(dataId):
+                            job.registerOutput(dataId, datatype='File')
+
 
         if update:
             self._update_pipeline_star()
@@ -215,7 +234,9 @@ class ProjectManager(FolderManager):
             jobDef = ProcessingConfig.get_job_conf(jobType)
             if jobDef:
                 job = self._createJob(jobType, params)
+                self._updateJobInputs(job, job_params)
                 jobStar = self.join(job.id, 'job.star')
+            job_params = params
 
         if job is None:
             raise Exception(f"{jobTypeOrId} is not an existing jobId or job type.")

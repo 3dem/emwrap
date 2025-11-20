@@ -55,6 +55,7 @@ class ProcessingPipeline(Pipeline, FolderManager):
         self.outputPrefix = os.path.relpath(self.outputDir, self.workingDir)
 
         FolderManager.__init__(self, output)
+        self.project = FolderManager(self.workingDir)
 
         self.tmpDir = self.join('tmp')
         self.info = {
