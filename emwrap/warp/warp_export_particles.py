@@ -24,7 +24,7 @@ from glob import glob
 from datetime import datetime
 
 from emtools.utils import Color, FolderManager, Path, Process
-from emtools.metadata import StarFile, Acquisition
+from emtools.metadata import StarFile, Acquisition, Table
 from emtools.jobs import Batch, Args
 from emtools.image import Image
 
@@ -35,96 +35,96 @@ from .warp import WarpBasePipeline
 class WarpExportParticles(WarpBasePipeline):
     """ Script to run warp_ts_aretomo. """
     name = 'emw-warp-export'
-    input_name = 'in_particles'
 
     def prerun(self):
-        inputFm = FolderManager(self._args['in_particles'])
-        # If the tomostar folder is not provided, we guess it from
-        # the input to pytom picking job
-        if tomostar := self._args.get('tomostar', None):
-            tomostarFolder = tomostar
-            self.log("Input tomostar folder from arguments.")
-        else:
-            tomostarFolder = self._getTomostarFolder(inputFm)
-            self.log("Finding tomostar folder from PyTom input.")
+        inTomoStar = self._args['input_tomograms']
 
-        self.log(f"Tomostar folder path: {Color.cyan(tomostarFolder)}")
-        tomostarFm = FolderManager(tomostarFolder)
+        inTable = StarFile.getTableFromFile('global', inTomoStar)
+        firstRow = inTable[0]
+        columns = inTable.getColumnNames()
 
-        self._joinStarFiles(inputFm, tomostarFm)
-        # Assume that the Warp folder is one level up from the tomostar
-        warpFolder = FolderManager(os.path.dirname(tomostarFolder))
+        if 'rlnCoordinatesMetadata' not in columns:
+            raise Exception("Missing 'rlnCoordinatesMetadata' "
+                            "column from input STAR file. ")
+        if 'wrpTomostar' not in columns:
+            raise Exception("Missing 'wrpTomostar' column from input STAR file. "
+                            "For Warp export-particles, picking needs to be "
+                            "done after Warp ctfrec.")
+
+        self.log(f"Input star file: {Color.bold(inTomoStar)}")
+        self.log(f"Total input tomograms: {Color.green(len(inTable))}")
+        total_pts = sum(row.rlnCoordinatesCount for row in inTable)
+        self.log(f"Input number of particles: {Color.green(total_pts)}")
+        warpPath = self.project.join(firstRow.wrpTomostar)
+        warpFolder = os.path.dirname(os.path.dirname(warpPath))
+
+        self._joinStarFiles(inTable)
         # Import inputs except tomostar, that might come from a different folder
-        self._importInputs(warpFolder, keys=['fs', 'fss', 'ts', 'tss'])
-        self.link(tomostarFolder, name=self.TM)
+        self._importInputs(warpFolder, keys=['fs', 'fss', 'ts', 'tss', 'tm'])
         self.mkdir('Particles')
 
         batch = Batch(id=self.name, path=self.path)
+
+        """
+        {
+    "gpus": "2",
+    "input_tomograms": "External/job006/tomograms.star",
+    "ts_export_particles.diameter": "140",
+    "ts_export_particles.output_angpix": "4.76",
+    "ts_export_particles.box": "64",
+    "ts_export_type": "2d"
+}
+        """
+        subargs = self.get_subargs("ts_export_particles")
 
         # Run ts_ctf
         args = Args({
             'WarpTools': "ts_export_particles",
             "--settings": self.TSS,
             "--input_star": "all_coordinates.star",
-            "--box": 64,
-            "--diameter": 140,
-            "--coords_angpix": 9.52,  # FIXME
-            "--output_angpix": 4.76,  # FIXME
+            "--box": subargs['box'],
+            "--diameter": subargs['diameter'],
+            "--coords_angpix": firstRow.rlnTomogramPixelSize,
+            "--output_angpix": subargs['output_angpix'],
             "--output_star": "warp_particles.star",
             "--output_processing": "Particles",
-            "--device_list": self.gpuList
+            f"--{self._args['ts_export_type']}": ""  # 2d or 3d
         })
-        args.update(self._args['ts_export_particles']['extra_args'])
-        with batch.execute('ts_export_particles'):
-            batch.call(self.loader, args)
+        if self.gpuList:
+            args['--device_list'] = self.gpuList
+
+        self.batch_execute('ts_export_particles', batch, args)
 
         self.updateBatchInfo(batch)
 
-    def _getTomostarFolder(self, inputFm):
-        """ Find the warp_tomostar folder from the input picking. """
-        with open(inputFm.join('..', 'info.json')) as f:
-            info = json.load(f)
-        for i in info['inputs']:
-            if 'tomograms' in i:
-                return i['tomograms']
-        return None
-
-    def _joinStarFiles(self, inputFm, tomostarFm):
+    def _joinStarFiles(self, inTable):
         """ Join all input coordinates star files into a single one,
         and correct the rlnMicrographName to use the .tomostar suffix
         """
-        suffix = '_default_particles.star'
-        def _tomoName(fn):
-            base = os.path.basename(fn)
-            fnSuffix = f"_{base.split('_')[-3]}{suffix}"
-            self.log(f"fnSufix: {fnSuffix}")
-            return base.replace(fnSuffix, '')
-
-        starFiles = {_tomoName(fn): fn
-                     for fn in inputFm.glob(f'*{suffix}')}
-
-        tomostarFiles = {Path.removeBaseExt(fn): fn
-                         for fn in tomostarFm.glob('*.tomostar')}
-
-        with StarFile(self.join('all_coordinates.star'), 'w') as sfOut:
-            firstTime = True
-            for tomoName, fn in tomostarFiles.items():
-                if starFn := starFiles.get(tomoName, None):
+        outStarFile = self.join('all_coordinates.star')
+        self.log(f"Writing output star file: {Color.bold(outStarFile)}")
+        with StarFile(outStarFile, 'w') as sfOut:
+            newTable = None
+            for tomoRow in inTable:
+                starFn = tomoRow.rlnCoordinatesMetadata
+                if self.project.exists(starFn):
                     self.log(f"Parsing file: {starFn}")
                     # Update micrographs.star
-                    with StarFile(starFn) as sf:
+                    with StarFile(self.project.join(starFn)) as sf:
                         if t := sf.getTable('particles'):
-                            if firstTime:
+                            if newTable is None:
+                                # Replace column rlnMicrographName by rlnTomoName
+                                newCols = ['rlnTomoName' if c == 'rlnMicrographName' else c
+                                           for c in t.getColumnNames()]
+                                newTable = Table(newCols)
                                 sfOut.writeTimeStamp()
-                                sfOut.writeHeader('particles', t)
-                                firstTime = False
+                                sfOut.writeHeader('particles', newTable)
                             for row in t:
-                                sfOut.writeRow(row._replace(rlnMicrographName=os.path.basename(fn)))
-
-
-def main():
-    WarpExportParticles.runFromArgs()
+                                rowDict = row._asdict()
+                                del rowDict['rlnMicrographName']
+                                rowDict['rlnTomoName'] = os.path.basename(tomoRow.wrpTomostar)
+                                sfOut.writeRowValues(rowDict)
 
 
 if __name__ == '__main__':
-    main()
+    WarpExportParticles.main()
