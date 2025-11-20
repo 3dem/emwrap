@@ -230,13 +230,14 @@ class ProjectManager(FolderManager):
             self._writeJobParams(job, job_params)
             jobDef = ProcessingConfig.get_job_conf(jobType)
         else:
+            job_params = params
             jobType = jobTypeOrId
             jobDef = ProcessingConfig.get_job_conf(jobType)
             if jobDef:
-                job = self._createJob(jobType, params)
+                job = self._createJob(jobType, job_params)
                 self._updateJobInputs(job, job_params)
                 jobStar = self.join(job.id, 'job.star')
-            job_params = params
+
 
         if job is None:
             raise Exception(f"{jobTypeOrId} is not an existing jobId or job type.")
