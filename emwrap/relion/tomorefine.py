@@ -35,7 +35,6 @@ from .classify2d import RelionClassify2D
 class RelionTomoRefine(ProcessingPipeline):
     """ Wrapper around relion_refine for subtomograms 3D refinement. """
     name = 'emw-relion-tomorefine'
-    input_name = 'in_particles'
 
     def __init__(self, input_args):
         ProcessingPipeline.__init__(self, input_args)
