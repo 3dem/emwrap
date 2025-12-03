@@ -146,6 +146,12 @@ class ProjectManager(FolderManager):
 
         self.log(t.getToc("Update took"))
 
+    def _validateJobInputs(self, jobDef, params):
+        """ Validate that provide values match with the job definition.
+        For example, format values or that PathParam exists.
+        """
+        pass
+
     def _updateJobInputs(self, job, params):
         # Clear jobs inputs and add new ones
         job.inputs = []
@@ -226,9 +232,10 @@ class ProjectManager(FolderManager):
                 self._deleteJobFolder(job)
                 self.mkdir(job.id)
 
+            jobDef = ProcessingConfig.get_job_conf(jobType)
             self._updateJobInputs(job, job_params)
             self._writeJobParams(job, job_params)
-            jobDef = ProcessingConfig.get_job_conf(jobType)
+
         else:
             job_params = params
             jobType = jobTypeOrId
@@ -237,7 +244,6 @@ class ProjectManager(FolderManager):
                 job = self._createJob(jobType, job_params)
                 self._updateJobInputs(job, job_params)
                 jobStar = self.join(job.id, 'job.star')
-
 
         if job is None:
             raise Exception(f"{jobTypeOrId} is not an existing jobId or job type.")

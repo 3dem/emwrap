@@ -122,6 +122,12 @@ class ProcessingPipeline(Pipeline, FolderManager):
         return {_new_key(k): v
                 for k, v in self._args.items() if k.startswith(full_prefix)}
 
+    def batch_execute(self, label, batch, args, logfile=None):
+        """ Shortcut to execute a batch using the internal launcher. """
+        logfile = logfile or self.join('run.out')
+        with batch.execute(label):
+            batch.call(self.launcher, args, logfile=logfile)
+
     def prerun(self):
         """ This method will be called before the run. """
         pass
