@@ -22,14 +22,14 @@ from emtools.metadata import StarFile, Acquisition
 from emtools.jobs import Batch
 
 
-def get_loader():
-    varPath = 'WARP_LOADER'
+def get_launcher():
+    varPath = 'WARP_LAUNCHER'
 
     if program := os.environ.get(varPath, None):
         if not os.path.exists(program):
-            raise Exception(f"PyTom path ({varPath}={program}) does not exists.")
+            raise Exception(f"Warp path ({varPath}={program}) does not exists.")
     else:
-        raise Exception(f"PyTom path variable {varPath} is not defined.")
+        raise Exception(f"Warp path variable {varPath} is not defined.")
 
     return program
 
@@ -116,7 +116,7 @@ class WarpBasePipeline(ProcessingPipeline):
         gpus = self._args.get('gpus', '')
         self.gpuList = self.get_gpu_list(gpus) if gpus else []
         self.acq = self.loadAcquisition()
-        self.loader = get_loader()
+        self.launcher = get_launcher()
         if gainFile := self.acq.get('gain', None):
             self.gain = os.path.basename(gainFile)
         else:
@@ -182,12 +182,6 @@ class WarpBasePipeline(ProcessingPipeline):
                      "only generating STAR files. ")
 
         self._output(batch)
-
-    def batch_execute(self, label, batch, args, logfile=None):
-        """ Shortcut to execute a batch. """
-        logfile = logfile or self.join('run.out')
-        with batch.execute(label):
-            batch.call(self.loader, args, logfile=logfile)
 
     def write_ts_table(self, tableName, table, starFile):
         self.log(f"Writing: {starFile}")

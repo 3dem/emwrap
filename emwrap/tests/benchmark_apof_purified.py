@@ -44,7 +44,7 @@ ngpus = len(gpus)
 gpuConfigs = []
 
 VARS = {
-    "WARP_LOADER": None,
+    "WARP_LAUNCHER": None,
     "ARETOMO_PATH": None,
     "ARETOMO2": None,
     "RELION_TOMOREFINE": None,
