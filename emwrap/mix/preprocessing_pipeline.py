@@ -202,7 +202,7 @@ class PreprocessingPipeline(ProcessingPipeline):
                 batch.info.update({
                     'output_elapsed': str(t.getElapsedTime())
                 })
-                self.outputs = {
+                self.outputs.update({
                     'Micrographs': {'label': 'Micrographs',
                                     'files': [
                                         [micsStar, 'MicrographGroupMetadata.star'],
@@ -212,7 +212,7 @@ class PreprocessingPipeline(ProcessingPipeline):
                                   'files': [
                                       [partStar, 'ParticleGroupMetadata.star']]
                                   },
-                }
+                })
                 self.updateBatchInfo(Batch(batch))
 
                 with StarFile(self.inputStar) as sf:
