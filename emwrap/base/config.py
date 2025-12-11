@@ -82,9 +82,14 @@ class ProcessingConfig:
     def get_job_launcher(cls, jobtype):
         jobConf = cls.get_job_conf(jobtype)
         if launcher := jobConf.get('launcher', None):
-            launcher_path = cls._fm.join(launcher)
+            # The launcher string value could have the script path and some
+            # extra arguments. The script path could be relative to the config
+            # file, so we add the config prefix and check that it exist
+            parts = launcher.split()
+            launcher_path = cls._fm.join(parts[0])
             if os.path.exists(launcher_path):
-                return launcher_path
+                parts[0] = launcher_path
+                return ' '.join(parts)
         return None
 
     @classmethod

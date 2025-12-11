@@ -136,15 +136,19 @@ class ProcessingPipeline(Pipeline, FolderManager):
         """ This method will be called after the run. """
         pass
 
-    def __file(self, suffix):
+    @classmethod
+    def output_file(cls, suffix, outputFolder):
         """ Generate status files with Relion convention. """
         # First remove all previous status files
-        for fn in os.listdir(self.path):
+        for fn in os.listdir(outputFolder):
             if fn.startswith('RELION_JOB_'):
-                os.remove(self.join(fn))
+                os.remove(os.path.join(outputFolder, fn))
 
-        with open(self.join(f'RELION_JOB_{suffix}'), 'w'):
+        with open(os.path.join(outputFolder, f'RELION_JOB_{suffix}'), 'w'):
             pass
+
+    def __file(self, suffix):
+        self.output_file(suffix, self.path)
 
     def __abort(self, signum, frame):
         self.__file('EXIT_ABORTED')
@@ -339,5 +343,12 @@ class ProcessingPipeline(Pipeline, FolderManager):
         # Let's use the --j for special parameters
         params['__j'] = args.j
 
-        p = cls(params, output)
-        p.run()
+        try:
+            # Create the ProcessingPipeline instance and run it
+            pp = cls(params, output)
+            pp.run()
+        except Exception as e:
+            ProcessingPipeline.output_file('EXIT_FAILURE', output)
+            traceback.print_exc()
+
+

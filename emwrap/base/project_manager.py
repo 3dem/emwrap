@@ -251,7 +251,7 @@ class ProjectManager(FolderManager):
         launcher = ProcessingConfig.get_job_launcher(jobType)
 
         if not launcher:
-            raise Exception(f"Invalid launcher '{launcher}' for job type: {jobType}")
+            raise Exception(f"Invalid launcher for job type: {jobType}")
 
         self._runCmd(f"{launcher} -i {jobStar} -o {job.id}", job.id,
                      wait=wait, job_params=job_params)
