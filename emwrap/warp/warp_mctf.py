@@ -90,8 +90,7 @@ class WarpMotionCtf(WarpBasePipeline):
         subargs = self.get_subargs(cs, '--')
         args.update(subargs)
 
-        with batch.execute('create_settings'):
-            batch.call(self.loader, args, logfile=self.join('run.out'))
+        self.batch_execute('create_settings', batch, args)
 
         n = int(self._args.get(f'{cs}.eer_ngroups', 0))
 
@@ -122,9 +121,7 @@ class WarpMotionCtf(WarpBasePipeline):
             if subargs[a]:
                 args[f"--{a}"] = ""
 
-        with batch.execute('fs_motion_and_ctf'):
-            batch.call(self.loader, args, logfile=self.join('run.out'))
-
+        self.batch_execute('fs_motion_and_ctf', batch, args)
         self.updateBatchInfo(batch)
 
     def _output(self, batch):
