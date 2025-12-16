@@ -26,6 +26,7 @@ from datetime import datetime
 from emtools.utils import Color, FolderManager, Path, Process
 from emtools.jobs import Batch, Args
 from emtools.metadata import StarFile, Table, WarpXml
+from emtools.image import Image
 
 from .warp import WarpBasePipeline
 
@@ -39,9 +40,38 @@ class WarpAreTomo(WarpBasePipeline):
     """
     name = 'emw-warp-aretomo'
 
+    def _getInfo(self, tsAllTable):
+        """ Load input or output information. """
+        first = tsAllTable[0]
+        ps = first.rlnTomoTiltSeriesPixelSize
+        tsTable = StarFile.getTableFromFile(first.rlnTomoName, first.rlnTomoTiltSeriesStarFile)
+        N = len(tsAllTable)
+        n = len(tsTable)
+        movieFn = tsTable[0].rlnMicrographMovieName
+        dim = Image.get_dimensions(movieFn)
+        self.log(f"get_dimensions: {dim}")
+        x = dim[0]
+        y = dim[1]
+        return N, x, y, n, ps
+
     def runBatch(self, batch, importInputs=True, **kwargs):
         # Input run folder from the Motion correction and CTF job
         inputTs = kwargs['inputTs']
+        tsAllTable = StarFile.getTableFromFile('global', inputTs)
+        N, x, y, n, ps = self._getInfo(tsAllTable)
+
+        self.inputs = {
+            'TiltSeries': {
+                'label': 'Tilt Series',
+                'type': 'TiltSeries',
+                'info': f"{N} items, {x} x {y} x {n}, {ps:0.3f} Å/px",
+                'files': [
+                    [inputTs, 'TomogramGroupMetadata.star.relion.tomo.motioncorr']
+                ]
+            }
+        }
+        self.writeInfo()
+
         inputFolder = FolderManager(os.path.dirname(inputTs))
 
         # FIXME: Add validations if the input star exists and required warp folders
@@ -71,14 +101,14 @@ class WarpAreTomo(WarpBasePipeline):
             '--extension': "*.tomostar",
             '--folder_processing': self.TS,
             '--output': self.TSS,
-            '--angpix': self.acq.pixel_size,  # * 2,  # FIXME: CHANGE depending on motion bin,
+            '--angpix': ps,
             '--exposure': self.acq['total_dose']
         })
         subargs = self.get_subargs('create_settings', '--')
         args.update(subargs)
         self.batch_execute('create_settings', batch, args)
 
-        # Run fs_motion_and_ctf
+        # Run ts_aretomo wrapper
         args = Args({
             'WarpTools': 'ts_aretomo',
             '--settings': self.TSS,
@@ -105,12 +135,18 @@ class WarpAreTomo(WarpBasePipeline):
         newTsStarFile = batch.join('tilt_series_aln.star')
 
         newTsAllTable = Table(tsAllTable.getColumnNames() + ['rlnTiltSeriesAligned'])
+        dims = 0, 0, 0
         for tsRow in tsAllTable:
             tsName = tsRow.rlnTomoName
+            # FIXME: The proper star files for each aligned TS needs to be generated
             tsStarFile = self.join('tilt_series', tsName + '.star')
             tsAligned = self.join(self.TS, 'tiltstack', tsName, f"{tsName}_aligned.mrc")
             if not os.path.exists(tsAligned):
                 tsAligned = ""  # FIXME Handle missing aligned TS
+            else:
+                newDims = Image.get_dimensions(tsAligned)
+                if newDims[2] > dims[2]:
+                    dims = newDims
             tsDict = tsRow._asdict()
             tsDict.update({
                 'rlnTomoTiltSeriesStarFile': tsStarFile,
@@ -119,6 +155,19 @@ class WarpAreTomo(WarpBasePipeline):
             newTsAllTable.addRowValues(**tsDict)
 
         self.write_ts_table('global', newTsAllTable, newTsStarFile)
+        N = len(newTsAllTable)
+        ps = newTsAllTable[0].rlnTomoTiltSeriesPixelSize  # FIXME: Check if binning was used in Aretomo
+        x, y, n = dims
+        self.outputs = {
+            'TiltSeriesAligned': {
+                'label': 'Tilt Series Aligned',
+                'type': 'TiltSeriesAligned',
+                'info': f"{N} items, {x} x {y} x {n}, {ps:0.3f} Å/px",
+                'files': [
+                    [newTsStarFile, 'TomogramGroupMetadata.star.relion.tomo.aligntiltseries']
+                ]
+            }
+        }
         self.updateBatchInfo(batch)
 
     def prerun(self):

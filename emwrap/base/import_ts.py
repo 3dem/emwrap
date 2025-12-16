@@ -27,6 +27,7 @@ from datetime import datetime
 from emtools.utils import Color, Pretty, Path, FolderManager
 from emtools.metadata import Acquisition, StarFile, RelionStar, Table
 from emtools.jobs import MdocBatchManager
+from emtools.image import Image
 
 from emwrap.base import ProcessingPipeline
 
@@ -58,31 +59,12 @@ class ImportTsPipeline(ProcessingPipeline):
             'file_change': int(args.get('wait.file_change', 30)),
             'sleep': int(args.get('wait.sleep', 30)),
         }
-        self.outputStar = self.join('tilt_series.star')
+        self.outputStar = self.join('frame_series.star')
         self.tsFolder = args["tilt_images"]
         self.mdocPattern = args['mdoc_files']
         self.tiltAxisAngle = args['tilt_axis_angle']
 
     def _output(self, batch):
-        """
-data_Position_19
-
-loop_
-_rlnMicrographMovieName #1
-_rlnTomoTiltMovieFrameCount #2
-_rlnTomoNominalStageTiltAngle #3
-_rlnTomoNominalTiltAxisAngle #4
-_rlnMicrographPreExposure #5
-_rlnTomoNominalDefocus #6
-data/Position_19_001_0.00_20251010_172146_EER.eer	1	-0.020000	85.000000	0.000000	-2.000000
-data/Position_19_002_3.00_20251010_172203_EER.eer	1	2.990000	85.000000	4.000000	-2.000000
-data/Position_19_003_-3.00_20251010_172230_EER.eer	1	-3.010000	85.000000	8.000000	-2.000000
-data/Position_19_004_-6.00_20251010_172250_EER.eer	1	-6.010000	85.000000	12.000000	-2.000000
-data/Position_19_005_6.00_20251010_172316_EER.eer	1	5.990000	85.000000	16.000000	-2.000000
-data/Position_19_006_9.00_20251010_172333_EER.eer	1	8.990000	85.000000	20.000000	-2.000000
-data/Position_19_007_-9.00_20251010_172400_EER.eer	1	-9.010000	85.000000	24.000000	-2.000000
-data/Position_19_008_-12.00_20251010_172419_EER.eer	1	-12.010000	85.000000	28.000000	-2.000000
-        """
         tsName = batch['tsName']
         mdoc = batch['mdoc']
         mdocFile = self.join('mdocs', f'{tsName}.mdoc')
@@ -101,12 +83,22 @@ data/Position_19_008_-12.00_20251010_172419_EER.eer	1	-12.010000	85.000000	28.00
         ])
 
         preExposure = 0
+        dims = None
+        N = 0
+        minAngle = 999
+        maxAngle = -999
         for z, s in mdoc.zsections():
+            N += 1
             movieName = mdoc.getSubFrameBase(s)
-            a = float()
+            framesPath = os.path.join(self.tsFolder, movieName)
+            if dims is None:
+                x, y, n = Image.get_dimensions(framesPath)
+            angle = float(s['TiltAngle'])
+            minAngle = min(minAngle, angle)
+            maxAngle = max(maxAngle, angle)
             tsTable.addRowValues(
-                rlnMicrographMovieName=os.path.join(self.tsFolder, movieName),
-                rlnTomoTiltMovieFrameCount=1,
+                rlnMicrographMovieName=framesPath,
+                rlnTomoTiltMovieFrameCount=n,
                 rlnTomoNominalStageTiltAngle=s['TiltAngle'],
                 rlnTomoNominalTiltAxisAngle=self.tiltAxisAngle,
                 rlnMicrographPreExposure='%0.3f' % preExposure,
@@ -131,13 +123,14 @@ data/Position_19_008_-12.00_20251010_172419_EER.eer	1	-12.010000	85.000000	28.00
                 'rlnMdocFile'
             ])
 
+        ps = self.acq.pixel_size
         self.allTsTable.addRowValues(
             rlnTomoName=tsName,
             rlnTomoTiltSeriesStarFile=tsStarFile,
             rlnVoltage=self.acq.voltage,
             rlnSphericalAberration=self.acq.cs,
             rlnAmplitudeContrast=self.acq.amplitude_contrast,
-            rlnMicrographOriginalPixelSize=self.acq.pixel_size,
+            rlnMicrographOriginalPixelSize=ps,
             rlnTomoHand=-1,
             rlnOpticsGroupName='optics_group1',
             rlnMdocFile=mdocFile
@@ -147,7 +140,17 @@ data/Position_19_008_-12.00_20251010_172419_EER.eer	1	-12.010000	85.000000	28.00
             sfOut.writeTable('global', self.allTsTable,
                              computeFormat="left",
                              timeStamp=True)
-
+            self.outputs = {
+                'FrameSeries': {
+                    'label': 'Frame series',
+                    'type': 'FrameSeries',
+                    'info': f"{len(self.allTsTable)} items, {x} x {y} x {n} x {N}, {ps:0.3f} Å/px",
+                    'files': [
+                        [self.outputStar, 'TomogramGroupMetadata.star.relion.tomo.import']
+                    ]
+                }
+            }
+            self.writeInfo()
 
     def prerun(self):
         previousTs = set()

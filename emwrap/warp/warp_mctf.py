@@ -27,6 +27,7 @@ from collections import defaultdict
 from emtools.utils import Color, FolderManager, Path, Process
 from emtools.jobs import Batch, Args
 from emtools.metadata import StarFile, Table, WarpXml
+from emtools.image import Image
 
 from .warp import WarpBasePipeline
 
@@ -38,7 +39,6 @@ class WarpMotionCtf(WarpBasePipeline):
         - fs_motion_and_ctf
     """
     name = 'emw-warp-mctf'
-    input_name = 'in_movies'
 
     def runBatch(self, batch, **kwargs):
         """ This method can be run for only the Mctf pipeline
@@ -54,20 +54,37 @@ class WarpMotionCtf(WarpBasePipeline):
 
         ext = None
         ps = None
+        dims = None
+        N = None
 
         # Input movies pattern for the frame series
-        tsAllTable = StarFile.getTableFromFile('global', kwargs['inputTs'])
+        inputTsStar = kwargs['inputTs']
+        tsAllTable = StarFile.getTableFromFile('global', inputTsStar)
 
         for tsRow in tsAllTable:
             tsName = tsRow.rlnTomoName
             ps = tsRow.rlnMicrographOriginalPixelSize
             tsTable = StarFile.getTableFromFile(tsName, tsRow.rlnTomoTiltSeriesStarFile)
             mdocsFm.link(tsRow.rlnMdocFile)
+            N = len(tsTable)
             for frameRow in tsTable:
                 frameBase = framesFm.link(frameRow.rlnMicrographMovieName)
                 # Calculate extension only once
                 if ext is None:
                     ext = Path.getExt(frameBase)
+                    dims = Image.get_dimensions(frameRow.rlnMicrographMovieName)
+
+        x, y, n = dims
+        self.inputs = {
+            'FrameSeries': {
+                'label': 'Frame Series',
+                'type': 'FrameSeries',
+                'info': f"{len(tsAllTable)} items, {x} x {y} x {n} x {N}, {ps:0.3f} Å/px",
+                'files': [
+                    [inputTsStar, 'TomogramGroupMetadata.star.relion.tomo.import']
+                ]
+            }
+        }
 
         if gain := self.acq.get('gain', None):
             self.log(f"{self.name}: Linking gain file: {gain}")
@@ -135,6 +152,9 @@ class WarpMotionCtf(WarpBasePipeline):
         tsAllTable = StarFile.getTableFromFile('global', self.inputTs)
 
         newTsStarFile = batch.join('tilt_series_ctf.star')
+        newPs = None
+        n = None
+        dims = None
 
         newPsLabel = 'rlnTomoTiltSeriesPixelSize'
         newTsAllTable = Table(tsAllTable.getColumnNames() + [newPsLabel])
@@ -152,7 +172,7 @@ class WarpMotionCtf(WarpBasePipeline):
             newTsAllTable.addRowValues(**tsDict)
 
             tsTable = StarFile.getTableFromFile(tsName, tsRow.rlnTomoTiltSeriesStarFile)
-
+            n = len(tsTable)
             # FIXME: Do not add even/odd when this option is not selected
             extra_cols = [
                 'rlnCtfPowerSpectrum', 'rlnMicrographName', 'rlnMicrographMetadata',
@@ -178,6 +198,9 @@ class WarpMotionCtf(WarpBasePipeline):
                     frameDict[k] = batch.join(self.FS, v, movieMrc)
                 frameDict['rlnMicrographMetadata'] = "None"
 
+                if dims is None:  # Compute image dims once
+                    dims = Image.get_dimensions(frameDict['rlnMicrographName'])
+
                 movieXml = batch.join(self.FS, moviePrefix + '.xml')
                 defocusDict = defaultdict(lambda: 0)
 
@@ -188,6 +211,8 @@ class WarpMotionCtf(WarpBasePipeline):
                     defocusDict['rlnCtfAstigmatism'] = _float(ctf['DefocusDelta'])
                     defocusDict['rlnDefocusV'] = _float(defocusDict['rlnDefocusU'] + defocusDict['rlnCtfAstigmatism'])
                     defocusDict['rlnDefocusAngle'] = _float(ctf['DefocusAngle'])
+                else:
+                    pass  # FIXME Do something when xml is missing
 
                 for k in extra_cols:
                     if k.startswith('rlnAccumMotion'):
@@ -202,6 +227,17 @@ class WarpMotionCtf(WarpBasePipeline):
 
         # Write the corrected_tilt_series.star
         self.write_ts_table('global', newTsAllTable, newTsStarFile)
+        x, y = dims
+        self.outputs = {
+            'TiltSeries': {
+                'label': 'Tilt Series',
+                'type': 'TiltSeries',
+                'info': f"{len(newTsAllTable)} items, {x} x {y} x {n}, {newPs:0.3f} Å/px",
+                'files': [
+                    [newTsStarFile, 'TomogramGroupMetadata.star.relion.tomo.import']
+                ]
+            }
+        }
 
         self.updateBatchInfo(batch)
 

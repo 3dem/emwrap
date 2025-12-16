@@ -119,7 +119,7 @@ class ProjectManager(FolderManager):
                     # FIXME Review all jobs to populate the info['outputs']
                     # and also check for the Relion convention to define
                     # the outputs
-                    for o in jobInfo['outputs']:
+                    for k, o in jobInfo['outputs'].items():
                         for fn, datatype in o['files']:
                             if not job.hasOutput(fn):
                                 job.registerOutput(fn, datatype=datatype)
