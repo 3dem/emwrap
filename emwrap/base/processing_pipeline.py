@@ -73,9 +73,23 @@ class ProcessingPipeline(Pipeline, FolderManager):
     def inputs(self):
         return self.info['inputs']
 
+    @inputs.setter
+    def inputs(self, value):
+        """Setter method for the radius with validation."""
+        if not isinstance(value, dict):
+            raise ValueError("self.inputs should be a dict")
+        self.info['inputs'] = value
+
     @property
     def outputs(self):
         return self.info['outputs']
+
+    @outputs.setter
+    def outputs(self, value):
+        """Setter method for the radius with validation."""
+        if not isinstance(value, dict):
+            raise ValueError("self.outputs should be a dict")
+        self.info['outputs'] = value
 
     def __validate(self, path, key):
         if not path:
