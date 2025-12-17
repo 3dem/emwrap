@@ -95,6 +95,8 @@ class PyTomPipeline(ProcessingPipeline):
                 sfOut.writeTable('global', self.outTable,
                                  timeStamp=True, computeFormat='left')
 
+            self._updateInput()
+            self._updateOutput()
             self.updateBatchInfo(batch)
 
         return batch
@@ -153,53 +155,43 @@ class PyTomPipeline(ProcessingPipeline):
                         tilt_angles=[float(r.wrpAngleTilt) for r in t],
                         dose_accumulation=[float(r.wrpDose) for r in t])
 
-        # while now - last_found < self.timeout:
-        #     self.log("Checking for new tomograms.")
-        #     tomoDict = self.__getTomoDict(recFolder, tomoPattern)
-        #
-        #     def _newTomo(fn):
-        #         tsName = Path.removeBaseExt(fn)
-        #         return fn not in seen and f"{tsName}_" in tomoDict
-        #
-        #     if newFiles := [fn for fn in glob(pattern) if _newTomo(fn)]:
-        #         self.log(f"Found new tomograms: {str(newFiles)}", flush=True)
-        #
-        #         for fn in newFiles:
-        #             # Let's create a batch for this tomogram
-        #             tsName = Path.removeBaseExt(fn)
-        #             nowPrefix = datetime.now().strftime('%y%m%d-%H%M%S')
-        #             counter += 1
-        #             batchId = f"{nowPrefix}_{counter:02}_{tsName}"
-        #
-        #             tomoFn = tomoDict[f'{tsName}_']
-        #
-        #             # Let's read the tilt_angles and the dose_accumulation from the .tomostar file
-        #             with StarFile(fn) as sf:
-        #                 t = sf.getTable('', guessType=False)
-        #             yield Batch(id=batchId, index=counter,
-        #                         path=os.path.join(self.tmpDir, batchId),
-        #                         tsName=tsName, tomogram=tomoFn,
-        #                         tilt_angles=[float(row.wrpAngleTilt) for row in t],
-        #                         dose_accumulation=[float(row.wrpDose) for row in t])
-        #             last_found = now
-        #             seen.add(fn)
-                    # else:
-                    #     pass
-                    #     # Note: In streaming we don't know if the tomograms are read
-                    #     # In warp all tomostar are generated
-                    #     self.log(f"ERROR: Reconstructed tomogram was not found "
-                    #              f"for name: {tsName}")
-            #
-            # else:
-            #     self.log("No new tomograms found, sleeping.")
-            #
-            # time.sleep(self.wait)
-            # now = datetime.now()
+    def _updateInput(self):
+        inputTomoTable = StarFile.getTableFromFile('global', self.inTomoStar)
+        first = inputTomoTable[0]
+        N = len(inputTomoTable)
+        if self._dims is None:
+            self._dims = Image.get_dimensions(first.rlnTomogram)
+        x, y, n = self._dims
+        ps = first.rlnTomogramPixelSize
+        bin = first.rlnTomoTomogramBinning
+        self.inputs = {
+            'Tomograms': {
+                'label': 'Tomograms',
+                'type': 'Tomograms',
+                'info': f"{N} items, {x} x {y} x {n}, {ps:0.3f} Å/px, bin {bin:0.1f}",
+                'files': [
+                    [self.inTomoStar, 'TomogramGroupMetadata.star.relion.tomo.tomograms']
+                ]
+            }
+        }
+
+    def _updateOutput(self):
+        N = len(self.outTable)
+        n = sum(row.rlnCoordinatesCount for row in self.outTable)
+        self.outputs = {
+            'TomogramsCoordinates': {
+                'label': 'Tomograms Coordiantes',
+                'type': 'TomogramsCoordinates',
+                'info': f"{n} particles from {N} tomograms",
+                'files': [
+                    [self.outTomoStar, 'TomogramGroupMetadata.star.relion.tomo.tomocoordinates']
+                ]
+            }
+        }
 
     def prerun(self):
-        self.info['inputs'] = [
-            {'tomograms': self.inTomoStar}
-        ]
+        self._dims = None
+        self._updateInput()
         self.writeInfo()
 
         g = self.addGenerator(self._getInputTomograms)

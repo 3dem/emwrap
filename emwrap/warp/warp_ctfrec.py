@@ -26,6 +26,7 @@ from datetime import datetime
 from emtools.utils import Color, FolderManager, Path, Process
 from emtools.jobs import Batch, Args
 from emtools.metadata import StarFile, Table, WarpXml
+from emtools.image import Image
 
 from .warp import WarpBasePipeline
 
@@ -38,6 +39,21 @@ class WarpCtfReconstruct(WarpBasePipeline):
     def runBatch(self, batch, **kwargs):
         inputTs = kwargs['inputTs']
         inputFolder = FolderManager(os.path.dirname(inputTs))
+        tsAllTable = StarFile.getTableFromFile('global', inputTs)
+        N = len(tsAllTable)
+        ps = tsAllTable[0].rlnTomoTiltSeriesPixelSize
+        x, y, n = Image.get_dimensions(tsAllTable[0].rlnTiltSeriesAligned)
+        self.inputs = {
+            'TiltSeriesAligned': {
+                'label': 'Tilt Series Aligned',
+                'type': 'TiltSeriesAligned',
+                'info': f"{N} items, {x} x {y} x {n}, {ps:0.3f} Å/px",
+                'files': [
+                    [inputTs, 'TomogramGroupMetadata.star.relion.tomo.aligntiltseries']
+                ]
+            }
+        }
+        self.writeInfo()
 
         if kwargs.get('importInputs', True):
             self._importInputs(inputFolder)
@@ -58,16 +74,6 @@ class WarpCtfReconstruct(WarpBasePipeline):
         args.update(subargs)
         self.batch_execute('ts_ctf', batch, args)
 
-        # # Run filter_quality
-        # args = Args({
-        #     'WarpTools': 'filter_quality',
-        #     '--settings': self.TSS,
-        #     "--resolution": [1, 6],
-        #     "--output": "warp_tiltseries_filtered.txt"
-        # })
-        # with batch.execute('filter_quality'):
-        #     batch.call(self.loader, args)
-
         # Run ts_reconstruct
         args = Args({
             'WarpTools': 'ts_reconstruct',
@@ -78,7 +84,6 @@ class WarpCtfReconstruct(WarpBasePipeline):
         subargs = self.get_subargs('ts_reconstruct', '--')
         args.update(subargs)
         self.batch_execute('ts_reconstruct', batch, args)
-
         self.updateBatchInfo(batch)
 
     def _output(self, batch):
@@ -97,6 +102,9 @@ class WarpCtfReconstruct(WarpBasePipeline):
             'rlnTomogramPixelSize',
             'rlnTomoTomogramBinning',
             'rlnDefocus',
+            'rlnTomoSizeX',
+            'rlnTomoSizeY',
+            'rlnTomoSizeZ',
             'rlnTomoReconstructedTomogramHalf1',
             'rlnTomoReconstructedTomogramHalf2',
             'wrpTomostar'
@@ -115,6 +123,8 @@ class WarpCtfReconstruct(WarpBasePipeline):
             tomoDict[tsName] = base
 
         newTsAllTable = Table(tsAllTable.getColumnNames() + extraLabels)
+        dims = None
+        bin = None
         for tsRow in tsAllTable:
             tsName = tsRow.rlnTomoName
             tsDict = tsRow._asdict()
@@ -122,6 +132,9 @@ class WarpCtfReconstruct(WarpBasePipeline):
             # FIXME: validate for missing tomograms
             if tomoFile := tomoDict.get(tsName, ''):
                 t, te, to = _rec(tomoFile), _rec('even', tomoFile), _rec('odd', tomoFile)
+                if dims is None:
+                    dims = Image.get_dimensions(t)
+                    bin = _float(newPs / tsDict['rlnTomoTiltSeriesPixelSize'])
             else:
                 t, te, to = '', '', ''
             xmlFile = self.join(self.TS, tsName + '.xml')
@@ -138,8 +151,11 @@ class WarpCtfReconstruct(WarpBasePipeline):
             tsDict.update({
                 'rlnTomogram': t,
                 'rlnTomogramPixelSize': newPs,
-                'rlnTomoTomogramBinning': _float(newPs / tsDict['rlnTomoTiltSeriesPixelSize']),
+                'rlnTomoTomogramBinning': bin,
                 'rlnDefocus': defocus,
+                'rlnTomoSizeX': dims[0],
+                'rlnTomoSizeY': dims[1],
+                'rlnTomoSizeZ': dims[2],
                 'rlnTomoReconstructedTomogramHalf1': te,
                 'rlnTomoReconstructedTomogramHalf2': to,
                 'wrpTomostar': tomostar
@@ -149,6 +165,18 @@ class WarpCtfReconstruct(WarpBasePipeline):
         # Write the corrected_tilt_series.star
         self.write_ts_table('global', newTsAllTable, newTsStarFile)
 
+        N = len(newTsAllTable)
+        x, y, n = dims
+        self.outputs = {
+            'Tomograms': {
+                'label': 'Tomograms',
+                'type': 'Tomograms',
+                'info': f"{N} items, {x} x {y} x {n}, {newPs:0.3f} Å/px, bin {bin}",
+                'files': [
+                    [newTsStarFile, 'TomogramGroupMetadata.star.relion.tomo.tomograms']
+                ]
+            }
+        }
         self.updateBatchInfo(batch)
 
     def prerun(self):
