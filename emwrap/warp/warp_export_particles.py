@@ -52,9 +52,23 @@ class WarpExportParticles(WarpBasePipeline):
                             "done after Warp ctfrec.")
 
         self.log(f"Input star file: {Color.bold(inTomoStar)}")
-        self.log(f"Total input tomograms: {Color.green(len(inTable))}")
-        total_pts = sum(row.rlnCoordinatesCount for row in inTable)
-        self.log(f"Input number of particles: {Color.green(total_pts)}")
+        N = len(inTable)
+        n = sum(row.rlnCoordinatesCount for row in inTable)
+        self.log(f"Total input tomograms: {Color.green(N)}")
+
+        self.log(f"Input number of particles: {Color.green(n)}")
+        # Register input in the info.json file
+        self.inputs = {
+            'TomogramCoordinates': {
+                'label': 'Tomogram Coordinates',
+                'type': 'TomogramCoordinates',
+                'info': f"{n} particles from {N} tomograms",
+                'files': [
+                    [inTomoStar, 'TomogramGroupMetadata.star.relion.tomo.tomocoordinates']
+                ]
+            }
+        }
+        self.writeInfo()
         warpPath = self.project.join(firstRow.wrpTomostar)
         warpFolder = os.path.dirname(os.path.dirname(warpPath))
 
@@ -64,29 +78,21 @@ class WarpExportParticles(WarpBasePipeline):
         self.mkdir('Particles')
 
         batch = Batch(id=self.name, path=self.path)
-
-        """
-        {
-    "gpus": "2",
-    "input_tomograms": "External/job006/tomograms.star",
-    "ts_export_particles.diameter": "140",
-    "ts_export_particles.output_angpix": "4.76",
-    "ts_export_particles.box": "64",
-    "ts_export_type": "2d"
-}
-        """
         subargs = self.get_subargs("ts_export_particles")
 
         # Run ts_ctf
+        box = subargs['box']
+        ps = subargs['output_angpix']
+        outStar = "warp_particles.star"
         args = Args({
             'WarpTools': "ts_export_particles",
             "--settings": self.TSS,
             "--input_star": "all_coordinates.star",
-            "--box": subargs['box'],
+            "--box": box,
             "--diameter": subargs['diameter'],
             "--coords_angpix": firstRow.rlnTomogramPixelSize,
-            "--output_angpix": subargs['output_angpix'],
-            "--output_star": "warp_particles.star",
+            "--output_angpix": ps,
+            "--output_star": outStar,
             "--output_processing": "Particles",
             f"--{self._args['ts_export_type']}": ""  # 2d or 3d
         })
@@ -95,6 +101,16 @@ class WarpExportParticles(WarpBasePipeline):
 
         self.batch_execute('ts_export_particles', batch, args)
 
+        self.outputs = {
+            'TomogramParticles': {
+                'label': 'Tomogram Particles',
+                'type': 'TomogramParticles',
+                'info': f"{n} items (box size: {box} px, {ps} Å/px)",
+                'files': [
+                    [outStar, 'TomogramGroupMetadata.star.relion.tomo.particles']
+                ]
+            }
+        }
         self.updateBatchInfo(batch)
 
     def _joinStarFiles(self, inTable):

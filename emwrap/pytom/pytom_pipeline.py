@@ -179,9 +179,9 @@ class PyTomPipeline(ProcessingPipeline):
         N = len(self.outTable)
         n = sum(row.rlnCoordinatesCount for row in self.outTable)
         self.outputs = {
-            'TomogramsCoordinates': {
-                'label': 'Tomograms Coordiantes',
-                'type': 'TomogramsCoordinates',
+            'TomogramCoordinates': {
+                'label': 'Tomogram Coordinates',
+                'type': 'TomogramCoordinates',
                 'info': f"{n} particles from {N} tomograms",
                 'files': [
                     [self.outTomoStar, 'TomogramGroupMetadata.star.relion.tomo.tomocoordinates']
