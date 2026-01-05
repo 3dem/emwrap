@@ -101,13 +101,27 @@ class WarpExportParticles(WarpBasePipeline):
 
         self.batch_execute('ts_export_particles', batch, args)
 
+        iosFn = self.join('warp_particles_optimisation_set.star')
+        ptsFn = self.join('warp_particles.star')
+        outFn = ptsFn
+
+        ptsTableName = ''
+
+        if os.path.exists(iosFn):
+            outFn = iosFn
+            ptsTableName = 'particles'
+            self._fixPaths(iosFn, '', ['rlnTomoParticlesFile', 'rlnTomoTomogramsFile'])
+
+        if os.path.exists(ptsFn):
+            self._fixPaths(ptsFn, ptsTableName, ['rlnImageName', 'rlnCtfImage'])
+
         self.outputs = {
             'TomogramParticles': {
                 'label': 'Tomogram Particles',
                 'type': 'TomogramParticles',
                 'info': f"{n} items (box size: {box} px, {ps} Å/px)",
                 'files': [
-                    [outStar, 'TomogramGroupMetadata.star.relion.tomo.particles']
+                    [outFn, 'TomogramGroupMetadata.star.relion.tomo.particles']
                 ]
             }
         }
@@ -140,6 +154,33 @@ class WarpExportParticles(WarpBasePipeline):
                                 del rowDict['rlnMicrographName']
                                 rowDict['rlnTomoName'] = os.path.basename(tomoRow.wrpTomostar)
                                 sfOut.writeRowValues(rowDict)
+
+    def _fixPaths(self, starFn, tableName, labels):
+        """ Add the run folder to the star file paths. """
+        starFnOut = starFn.replace('.star', '_fixed.star')
+        # Iterate over all tables and fix paths for the selected one
+        with StarFile(starFn) as sf:
+            with StarFile(starFnOut, 'w') as sfOut:
+                sfOut.writeTimeStamp()
+                tableNames = sf.getTableNames()
+                for tn in tableNames:
+                    table = sf.getTable(tn, guessType=False)
+
+                    if tn == tableName:
+                        newTable = table.cloneColumns()
+                        for row in table:
+                            rowDict = row._asdict()
+                            for label in labels:
+                                if label in rowDict:
+                                    rowDict[label] = self.join(rowDict[label])
+                            newTable.addRowValues(**rowDict)
+                    else:
+                        newTable = table
+
+                    singleRow = len(newTable) == 1
+                    sfOut.writeTable(tn, newTable, computeFormat='right', singleRow=singleRow)
+        # Override input star file
+        shutil.move(starFnOut, starFn)
 
 
 if __name__ == '__main__':

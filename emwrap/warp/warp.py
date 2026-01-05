@@ -58,6 +58,10 @@ class WarpBasePipeline(ProcessingPipeline):
     }
 
     @classmethod
+    def get_launcher(cls):
+        return ProcessingPipeline.get_launcher('Warp', 'WARP_LAUNCHER')
+
+    @classmethod
     def copyInputs(cls, inputFolder, outputFolder, keys=None, gain=None, force=False):
         """ Inspect the input run folder and copy or link input folder/files
         if necessary.
