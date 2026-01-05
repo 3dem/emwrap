@@ -40,6 +40,9 @@ class WarpMotionCtf(WarpBasePipeline):
     """
     name = 'emw-warp-mctf'
 
+    def targetPs(self, inputPs):
+        return float(self._args.get('create_settings.bin_angpix', 0)) or inputPs
+
     def runBatch(self, batch, **kwargs):
         """ This method can be run for only the Mctf pipeline
          or for the preprocessing one, where import inputs is not needed.
@@ -101,10 +104,15 @@ class WarpMotionCtf(WarpBasePipeline):
             '--angpix': ps,
             '--exposure': self.acq['total_dose']
         })
+        tPs = self.targetPs(ps)
+        if tPs > ps:
+            args['--bin_angpix'] = tPs
+
         if self.gain:
             args['--gain_path'] = self.gain
 
         subargs = self.get_subargs(cs, '--')
+        subargs.pop('--bin', None)  # Remove bin if it exists
         args.update(subargs)
 
         self.batch_execute('create_settings', batch, args)
@@ -162,8 +170,8 @@ class WarpMotionCtf(WarpBasePipeline):
             tsName = tsRow.rlnTomoName
             tsStarFile = self.join('tilt_series', tsName + '.star')
             ps = tsRow.rlnMicrographOriginalPixelSize
-            newPs = ps  # FIXME: Take into account if there is binning at Mc level
-
+            if newPs is None:
+                newPs = self.targetPs(ps)
             tsDict = tsRow._asdict()
             tsDict.update({
                 newPsLabel: newPs,

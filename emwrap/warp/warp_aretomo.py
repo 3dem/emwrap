@@ -156,13 +156,14 @@ class WarpAreTomo(WarpBasePipeline):
 
         self.write_ts_table('global', newTsAllTable, newTsStarFile)
         N = len(newTsAllTable)
-        ps = newTsAllTable[0].rlnTomoTiltSeriesPixelSize  # FIXME: Check if binning was used in Aretomo
+        # ps = newTsAllTable[0].rlnTomoTiltSeriesPixelSize
+        newPs = self._args['ts_aretomo.angpix']
         x, y, n = dims
         self.outputs = {
             'TiltSeriesAligned': {
                 'label': 'Tilt Series Aligned',
                 'type': 'TiltSeriesAligned',
-                'info': f"{N} items, {x} x {y} x {n}, {ps:0.3f} Å/px",
+                'info': f"{N} items, {x} x {y} x {n}, {newPs:0.3f} Å/px",
                 'files': [
                     [newTsStarFile, 'TomogramGroupMetadata.star.relion.tomo.aligntiltseries']
                 ]
