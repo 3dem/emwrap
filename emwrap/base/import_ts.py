@@ -33,21 +33,7 @@ from emwrap.base import ProcessingPipeline
 
 
 class ImportTsPipeline(ProcessingPipeline):
-    """
-    {
-        "tilt_images": "data/*.eer",
-        "mdoc_files": "data/Position*[1-9].mdoc",
-        "acq.gain": "",
-        "tilt_axis_angle": "85",
-        "acq.pixel_size": "1.19",
-        "acq.voltage": "300",
-        "acq.spherical_aberration": "2.7",
-        "acq.amplitude_contrast": "2.7",
-        "acq.total_dose": "4.01"
-    }
-    """
     name = 'emw-import-ts'
-    input_name = 'in_movies'
 
     def __init__(self, args, output):
         ProcessingPipeline.__init__(self, args, output)
