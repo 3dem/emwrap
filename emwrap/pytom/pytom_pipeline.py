@@ -116,17 +116,18 @@ class PyTomPipeline(ProcessingPipeline):
         counter = 0
         blacklist = []
         self.outTable = None
-        inTable = StarFile.getTableFromFile('global', self.inTomoStar)
+        inTable = StarFile.getTableFromFile('global', self.inTomoStar,
+                                            guessType=False)
         n = len(inTable)
         if os.path.exists(self.outTomoStar):
-            self.outTable = StarFile.getTableFromFile('global', self.outTomoStar)
+            self.outTable = StarFile.getTableFromFile('global', self.outTomoStar,
+                                            guessType=False)
             counter = len(self.outTable)
             self.log(f"Previously processed tomograms: {Color.cyan(counter)}")
             blacklist = self.outTable
         else:
             extraLabels = ['rlnCoordinatesMetadata', 'rlnCoordinatesCount']
             self.outTable = Table(inTable.getColumnNames() + extraLabels)
-
 
         self.acq.update(self._loadAcquisitionFromRow(inTable[0]))
         self.log(f"Input star file: {Color.bold(self.inTomoStar)}")
@@ -146,7 +147,8 @@ class PyTomPipeline(ProcessingPipeline):
             batchId = f"{nowPrefix}_{counter:03}_{tsName}"
             # FIXME: Now reading these values from Warp tomostar, but
             # it should be from Relion's star files
-            t = StarFile.getTableFromFile('', row.wrpTomostar)
+            t = StarFile.getTableFromFile('', row.wrpTomostar,
+                                          guessType=False)
             yield Batch(id=batchId, index=counter,
                         rowDict=row._asdict(),
                         path=os.path.join(self.tmpDir, batchId),
