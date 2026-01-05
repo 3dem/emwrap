@@ -28,10 +28,10 @@ from emtools.metadata import StarFile, Acquisition, Table
 from emtools.jobs import Batch, Args
 from emtools.image import Image
 
-from emwrap.base import ProcessingPipeline
+from . relion_base import RelionBasePipeline
 
 
-class RelionTomoRecons(ProcessingPipeline):
+class RelionTomoRecons(RelionBasePipeline):
     """ Script to run warp_ts_aretomo. """
     name = 'emw-relion-tomorecons'
 
@@ -48,24 +48,47 @@ class RelionTomoRecons(ProcessingPipeline):
                     raise Exception("Current implementation for relion_reconstruct "
                                     "only support particles extracted as 3d. ")
             ptsTableName = 'particles' if 'particles' in tableNames else ''
-            nParticles = sf.getTableSize(ptsTableName)
+            table = sf.getTable(ptsTableName, guessType=False)
+            n = len(table)
+            ps = '%0.3f' % float(table[0].rlnPixelSize)
+            box = Image.get_dimensions(table[0].rlnImageName)[0]
 
         self.log(f"Input star file: {Color.bold(inStar)}")
-        self.log(f"Total input particles: {Color.green(nParticles)}")
+        self.log(f"Total input particles: {Color.green(n)}")
+        self.inputs = {
+            'TomogramParticles': {
+                'label': 'Tomogram Particles',
+                'type': 'TomogramParticles',
+                'info': f"{n} items (box size: {box} px, {ps} Å/px)",
+                'files': [
+                    [inStar, 'TomogramGroupMetadata.star.relion.tomo.particles']
+                ]
+            }
+        }
+        self.writeInfo()
 
-        batch = Batch(id=self.name, path=self.path)
-
-        subargs = self.get_subargs("ts_export_particles")
-
+        batch = Batch(id=self.name, path=self.workingDir)
+        outVol = self.join('reconstructed_volume.mrc')
         # Run ts_ctf
         args = Args({
             'relion_reconstruct': cpus,
-            "--o": self.join('reconstructed.mrc')
+            "--i": inStar,
+            "--o": outVol
         })
         if doCtf:
             args['--ctf'] = ''
 
         self.batch_execute('relion_reconstruct', batch, args)
+        self.outputs = {
+            'Volume': {
+                'label': 'Reconstructed Volume',
+                'type': 'Volume',
+                'info': f"box size: {box} px, {ps} Å/px",
+                'files': [
+                    [outVol, 'TomogramGroupMetadata.star.relion.volume']
+                ]
+            }
+        }
         self.updateBatchInfo(batch)
 
 

@@ -26,103 +26,80 @@ from glob import glob
 
 from emtools.utils import Color, Timer, Path, Process, FolderManager, Pretty
 from emtools.jobs import Batch, Args
-from emtools.metadata import Mdoc, StarFile
+from emtools.metadata import Mdoc, StarFile, RelionStar
 
-from emwrap.base import ProcessingPipeline
+from . relion_base import RelionBasePipeline
 from .classify2d import RelionClassify2D
 
 
-class RelionTomoRefine(ProcessingPipeline):
+class RelionTomoRefine(RelionBasePipeline):
     """ Wrapper around relion_refine for subtomograms 3D refinement. """
     name = 'emw-relion-tomorefine'
 
-    def __init__(self, input_args):
-        ProcessingPipeline.__init__(self, input_args)
-        #self.gpuList = args['gpu'].split()
-
     def prerun(self):
         """
-        mpirun -n 9 `which relion_refine_mpi` \
-        --o refine_output/run \
-        --auto_refine \
-        --split_random_halves \
-        --ios warp_particles_optimisation_set.star \
-        --ref reconstruct.mrc \
-        --firstiter_cc \
-        --ini_high 60 \
-        --dont_combine_weights_via_disc \
-        --pool 50 \
-        --pad 2  \
-        --ctf \
-        --particle_diameter 140 \
-        --flatten_solvent \
-        --zero_mask \
-        --oversampling 1 \
-        --healpix_order 2 \
-        --auto_local_healpix_order 4 \
-        --offset_range 5 \
-        --offset_step 2 \
-        --sym O \
-        --low_resol_join_halves 40 \
-        --norm --scale  \
-        --j 8 --gpu ""
+        {
+    "gpus": "",
+    "relion_refine.ios": "External/job069/warp_particles_optimisation_set.star",
+    "relion_refine.ref": "External/job070/reconstructed_volume.mrc",
+    "relion_refine.solvent_mask": "",
+    "relion_refine.firstiter_cc": "false",
+    "relion_refine.trust_ref_size": "true",
+    "relion_refine.ini_high": "40",
+    "relion_refine.sym": "C1",
+    "relion_refine.ctf": "true",
+    "relion_refine.ctf_intact_first_peak": "false",
+    "relion_refine.particle_diameter": "150",
+    "relion_refine.zero_mask": "true",
+    "relion_refine.solvent_correct_fsc": "false",
+    "relion_refine.blush": "false",
+    "relion_refine.healpix_order": "2",
+    "relion_refine.offset_range": "5",
+    "relion_refine.offset_step": "1",
+    "relion_refine.auto_local_healpix_order": "4",
+    "relion_refine.relax_sym": ""
+}
         """
-        inputParticles = self._args['in_particles']
-        if not os.path.exists(inputParticles):
-            raise Exception(f"Input particles '{inputParticles}' do not exist.")
-        inputFm = FolderManager(os.path.dirname(inputParticles))
-        inputPts = inputFm.join('Particles')
-        if not os.path.exists(inputPts):
-            raise Exception(f"Expected folder '{inputPts}' does not exist.")
-        inputBase = Path.removeBaseExt(inputParticles)
-        inputs = inputFm.glob(f"{inputBase}*.star") + [inputPts]
+        inputOS = self._args['relion_refine.ios']
+        if not os.path.exists(inputOS):
+            raise Exception(f"Input optimization set '{inputOS}' do not exist.")
 
-        if inputFm.exists('dummy_tiltseries.mrc'):
-            inputs.append(inputFm.join('dummy_tiltseries.mrc'))
+        refVol = self._args['relion_refine.ref']
+        if not os.path.exists(refVol):
+            raise Exception(f"Reference volume '{refVol}' do not exist.")
 
-        batch = Batch(id=self.name, path=self.path)
-        for fn in inputs:
-            batch.link(fn)
-        refVol = batch.link('data/reference_vol.mrc')
+        batch = Batch(id=self.name, path=self.workingDir)
+        self.mkdir('output')
 
-        batch.mkdir('output')
+        subargs = self.get_subargs('relion_refine')
 
+        threads = 10
+        gpus = int(self._args['gpus'])
+        cpus = gpus * threads
+        mpis = gpus + 1
         # Run ts_import
         args = Args({
-            "--o": "output/run",
+            'relion_refine': mpis,
+            "--o": self.join("output/run"),
             "--auto_refine": "",
             "--split_random_halves": "",
-            "--ios": f"{inputBase}_optimisation_set.star",
-            "--ref": refVol,
-            "--firstiter_cc": "",
-            "--ini_high": 60,
+            "--flatten_solvent": "",  # TODO: Check the param for this
             "--dont_combine_weights_via_disc": "",
             "--pool": 50,
             "--pad": 2,
-            "--ctf": "",
-            "--flatten_solvent": "",
-            "--zero_mask": "",
             "--oversampling": 1,
-            "--healpix_order": 2,
-            "--auto_local_healpix_order": 4,
-            "--offset_range": 5,
-            "--offset_step": 2,
             "--low_resol_join_halves": 40,
             "--norm": "",
             "--scale": "",
-            "--j": 8,
-            "--gpu": ""
+            "--gpu": "",  # Use all submitted in the job
+            "--j": threads
+            # TODO allow extra_args
         })
+        args.update(subargs)
+        self.batch_execute('relion_refine', batch, args)
 
-        # FIXME: Handle better MPIs and threads
-        args.update(self._args['relion_refine']['extra_args'])
-        with batch.execute('relion_refine_mpi'):
-            batch.call(os.environ['RELION_TOMOREFINE'], args)
-
-
-def main():
-    RelionTomoRefine.runFromArgs()
+        self.updateBatchInfo(batch)
 
 
 if __name__ == '__main__':
-    main()
+    RelionTomoRefine.main()
