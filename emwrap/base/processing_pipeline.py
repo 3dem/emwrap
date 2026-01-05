@@ -139,8 +139,9 @@ class ProcessingPipeline(Pipeline, FolderManager):
     def batch_execute(self, label, batch, args, logfile=None):
         """ Shortcut to execute a batch using the internal launcher. """
         logfile = logfile or self.join('run.out')
+        launcher = self.get_launcher()
         with batch.execute(label):
-            batch.call(self.launcher, args, logfile=logfile)
+            batch.call(launcher, args, logfile=logfile)
 
     def prerun(self):
         """ This method will be called before the run. """
@@ -194,6 +195,19 @@ class ProcessingPipeline(Pipeline, FolderManager):
             return ' '.join(str(g) for g in gpu_list)
         else:
             return gpu_list
+
+    @classmethod
+    def get_launcher(cls, packageName, var):
+        """ Get a launcher script to 'launch' programs from
+        certain packages (e.g. Relion, Warp). A launcher variable
+        will be used to read the value from os.environ. """
+        if program := os.environ.get(var, None):
+            if not os.path.exists(program):
+                raise Exception(f"{packageName} launcher ({var}={program}) does not exists.")
+        else:
+            raise Exception(f"{packageName} launcher variable {var} is not defined.")
+
+        return program
 
     def run(self):
         try:

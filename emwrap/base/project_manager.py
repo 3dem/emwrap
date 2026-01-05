@@ -272,13 +272,14 @@ class ProjectManager(FolderManager):
         uniqueTs = now.strftime("%Y%m%d_%H%M%S_%f")
         newName = f"{uniqueTs}_{os.path.basename(jobId)}"
         self.log(f"Deleting job {jobId}: mv {self.join(jobId)} {self.join('.Trash', newName)}")
-        shutil.move(self.join(jobId), self.join('.Trash', newName))
+        if self.exists(jobId):
+            shutil.move(self.join(jobId), self.join('.Trash', newName))
 
     def deleteJob(self, jobId):
         """ Clean up job's folder. """
         jobId = Path.rmslash(jobId)
 
-        if job := self._getJob(jobId):
+        if job := self._getJob(jobId, validateExists=False):
             self._deleteJobFolder(job)
             self._wf.deleteJob(job)
             self._update_pipeline_star()
@@ -327,7 +328,7 @@ class ProjectManager(FolderManager):
             self.log(f"Writing script file: {scriptFile}")
             with open(scriptFile, 'w') as f:
                 gpus = int(job_params.get('gpus', 1))   # FIXME Get gpu list and take the length
-                cpus = max(10, gpus * 10)
+                cpus = max(int(job_params.get('cpus', 1)), gpus * 10)
                 if gpus:
                     # FIXME: Use emgoat for a more general interaction with HPC
                     gpu_line = f'#BSUB -gpu "num={gpus}/host:mode=shared"'
@@ -415,25 +416,16 @@ class ProjectManager(FolderManager):
     def _hasJob(self, jobId):
         return self._wf.hasJob(Path.rmslash(jobId))
 
-    def _getJob(self, jobId):
+    def _getJob(self, jobId, validateExists=True):
         """ Load a given job and check its folder exist. """
         jid = Path.rmslash(jobId)
         if not self._wf.hasJob(jid):
             raise Exception(f"There is not job with id: '{jobId}'")
 
-        if not self.exists(jobId):
+        if validateExists and not self.exists(jobId):
             raise Exception(f"Missing folder for job: '{jobId}'")
 
         return self._wf.getJob(jid)
-
-    # def restart(self, jobId, clean=False, wait=False):
-    #     job = self._getJob(jobId)
-    #     job['status'] = 'Launched'
-    #     cmd = self._loadCmd(jobId)
-    #     if clean:
-    #         FolderManager(self.join(jobId)).create()
-    #
-    #     self._runCmd(cmd, jobId, wait=wait)
 
     def loadJobInfo(self, job):
         """ Load the info.json file for a given run. """
