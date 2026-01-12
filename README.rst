@@ -8,20 +8,6 @@ Python wrappers for CryoEM/CryoET programs that can be executed from the command
 designed to be compatible with the definition of external jobs in Relion. They have only two arguments: input JSON values 
 with key=value pairs and the output folder. 
 
-Installation
-============
-
-.. code-block:: bash
-
-    pip install emwrap
-
-Or for development:
-
-.. code-block:: bash
-
-    git clone git@github.com:3dem/emwrap.git
-    pip install -e emwrap/
-
 Tomography
 ==========
 
@@ -65,3 +51,16 @@ Tomography
      - 3D Refine sub-tomogram particles
      - WORK-IN-PROGRESS
      - `Relion`_
+
+Installation
+------------
+
+*emwrap* is currently under development, and installation instructions might change. Current instructions are intended for a development environment. 
+
+.. code-block:: bash
+
+    conda create -y --name=emstack python=3.8
+    conda activate emstack
+    wget https://raw.githubusercontent.com/3dem/emconfig/refs/heads/main/scripts/emstack_install.sh
+    bash emstack_install.sh
+    
