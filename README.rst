@@ -59,8 +59,18 @@ Installation
 
 .. code-block:: bash
 
-    conda create -y --name=emstack python=3.8
-    conda activate emstack
-    wget https://raw.githubusercontent.com/3dem/emconfig/refs/heads/main/scripts/emstack_install.sh
-    bash emstack_install.sh
+   # Create a folder for the installation
+   mkdir emstack
+   cd emstack
+
+   # Create a conda environment and activate it
+   conda create -y --name=emstack python=3.8
+   conda activate emstack
+
+   # Download and run the install script
+   wget -qO- https://raw.githubusercontent.com/3dem/emconfig/refs/heads/main/scripts/install.sh | bash
+
+   # Run the server
+   ./run.sh
+
     
