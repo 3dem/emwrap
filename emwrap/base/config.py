@@ -21,7 +21,7 @@ from emtools.utils import FolderManager
 
 
 class ProcessingConfig:
-    _path = os.path.join(os.environ['EMCONFIG_FOLDER'])
+    _path = os.path.join(os.environ.get('EMCONFIG_FOLDER', ''))
     _fm = FolderManager(_path)
     _config = {}
     _jobs_dict = {}
