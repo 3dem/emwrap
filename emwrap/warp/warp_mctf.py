@@ -40,8 +40,14 @@ class WarpMotionCtf(WarpBasePipeline):
     """
     name = 'emw-warp-mctf'
 
+    def get_float(self, key, defaultValue):
+        if v := self._args.get(key, None):
+            return float(v)
+        return defaultValue
+
     def targetPs(self, inputPs):
-        return float(self._args.get('create_settings.bin_angpix', 0)) or inputPs
+        v = self._args.get('create_settings.bin_angpix', '') or 0
+        return float(v) or inputPs
 
     def runBatch(self, batch, **kwargs):
         """ This method can be run for only the Mctf pipeline
@@ -59,6 +65,7 @@ class WarpMotionCtf(WarpBasePipeline):
         ps = None
         dims = None
         N = None
+        eer = False
 
         # Input movies pattern for the frame series
         inputTsStar = kwargs['inputTs']
@@ -93,6 +100,16 @@ class WarpMotionCtf(WarpBasePipeline):
             self.log(f"{self.name}: Linking gain file: {gain}")
             self.link(gain)
 
+        if ext == '.eer':
+            ngroups = int(self.get_float(f'{cs}.eer_ngroups', 0))
+            if not ngroups:
+                # TODO: Maybe provide a wizard to calculate the number of eer_groups
+                raise Exception("Input frames are in eer and you must provide "
+                                "the number of eer_groups")
+            eer = True
+        else:
+            ngroups = n
+
         cs = 'create_settings'  # shortcut
         # Run create_settings
         args = Args({
@@ -104,26 +121,19 @@ class WarpMotionCtf(WarpBasePipeline):
             '--angpix': ps,
             '--exposure': self.acq['total_dose']
         })
-        tPs = self.targetPs(ps)
+        tPs = self.get_float(ps, 0)
         if tPs > ps:
             args['--bin_angpix'] = tPs
 
         if self.gain:
             args['--gain_path'] = self.gain
 
-        subargs = self.get_subargs(cs, '--')
-        subargs.pop('--bin', None)  # Remove bin if it exists
-        args.update(subargs)
+        if eer:
+            args['--eer_ngroups'] = ngroups
+
+        # TODO: Allow for some extra args
 
         self.batch_execute('create_settings', batch, args)
-
-        n = int(self._args.get(f'{cs}.eer_ngroups', 0))
-
-        if n:
-            ngroups = n
-        else:
-            ngroups = None  # FIXME: Read the number of frames from movies
-            raise Exception("Only working with .eer for now")
 
         # Run fs_motion_and_ctf
         args = Args({
@@ -135,7 +145,6 @@ class WarpMotionCtf(WarpBasePipeline):
             '--c_cs': self.acq.cs,
             '--c_amplitude': self.acq.amplitude_contrast
         })
-
         subargs = self.get_subargs('fs_motion_and_ctf')
         if self.gpuList:
             args['--device_list'] = self.gpuList

@@ -142,7 +142,8 @@ class WarpAreTomo(WarpBasePipeline):
             tsStarFile = self.join('tilt_series', tsName + '.star')
             tsAligned = self.join(self.TS, 'tiltstack', tsName, f"{tsName}_aligned.mrc")
             if not os.path.exists(tsAligned):
-                tsAligned = ""  # FIXME Handle missing aligned TS
+                self.log(f"ERROR: Missing expected aligned TS: {tsAligned}")
+                tsAligned = "None"  # FIXME Handle missing aligned TS
             else:
                 newDims = Image.get_dimensions(tsAligned)
                 if newDims[2] > dims[2]:
@@ -157,7 +158,7 @@ class WarpAreTomo(WarpBasePipeline):
         self.write_ts_table('global', newTsAllTable, newTsStarFile)
         N = len(newTsAllTable)
         # ps = newTsAllTable[0].rlnTomoTiltSeriesPixelSize
-        newPs = self._args['ts_aretomo.angpix']
+        newPs = float(self._args['ts_aretomo.angpix'])
         x, y, n = dims
         self.outputs = {
             'TiltSeriesAligned': {
