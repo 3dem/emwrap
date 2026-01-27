@@ -140,7 +140,6 @@ class ProjectManager(FolderManager):
                         if not job.hasOutput(dataId):
                             job.registerOutput(dataId, datatype='File')
 
-
         if update:
             self._update_pipeline_star()
 
@@ -201,6 +200,69 @@ class ProjectManager(FolderManager):
         job = self._getJob(jobId)
         job_params = self._readJobParams(job, extraParams=params)
         self.saveJob(job['jobtype'], job_params)
+
+    def _instanciateJobs(self, jobDict):
+        """
+        Instanciate jobs in jobDict giving new Ids and preserving dependencies.
+        This method can be called from duplicateJobs or from loadWorkflow
+        """
+        # Compute graph with dependencies
+        for jobId, jobInfo in jobDict.items():
+            for k, v in jobInfo['params'].items():
+                for jobId2 in jobDict:
+                    if isinstance(v, str) and v.startswith(jobId2):
+                        jobInfo['parents'].add(jobId2)
+                        jobDict[jobId2]['children'].add(jobId)
+
+        # Let's start with root nodes
+        toDuplicate = [jobId for jobId in jobDict if not jobDict[jobId]['parents']]
+        newIdsDict = {}  # Map old ids to new ids
+
+        def _new_value(v, parents):
+            for p in parents:
+                if isinstance(v, str) and v.startswith(p):
+                    return v.replace(p, newIdsDict[p])
+            return v
+
+        while toDuplicate:
+            jobId = toDuplicate.pop(0)
+            jobInfo = jobDict[jobId]
+            params = jobInfo['params']
+            # Fix the params with the new ids of the parents
+            new_params = {k: _new_value(v, jobInfo['parents'])
+                          for k, v in params.items()}
+            newJob = self.saveJob(jobInfo['jobtype'], new_params)
+            newIdsDict[jobId] = newJob.id
+            toDuplicate.extend(jobInfo['children'])
+
+        return list(newIdsDict.values())
+
+    def duplicateJobs(self, jobIds):
+        """ Duplicate one or many jobs.
+        If there are more than one job, the links will be
+        fixed to preserve relations to the newly created jobs.
+        """
+        def _jobInfo(jobId):
+            job = self._getJob(jobId)
+            return {
+                'jobtype': job['jobtype'],
+                'params': self._readJobParams(job),
+                'parents': set(),
+                'children': set()
+            }
+
+        return self._instanciateJobs({jobId: _jobInfo(jobId) for jobId in jobIds})
+
+    def loadWorkflow(self, workflowJobs):
+        """ Load a workflow with jobs templates. """
+        def _jobInfo(jobEntry):
+            return {
+                'jobtype': jobEntry['jobtype'],
+                'params': jobEntry['params'],
+                'parents': set(),
+                'children': set()
+            }
+        return self._instanciateJobs({e['jobid']: _jobInfo(e) for e in workflowJobs})
 
     def runJob(self, jobTypeOrId, params=None, clean=False, wait=False, update=True):
         """ Run a job.
@@ -275,16 +337,20 @@ class ProjectManager(FolderManager):
         if self.exists(jobId):
             shutil.move(self.join(jobId), self.join('.Trash', newName))
 
-    def deleteJob(self, jobId):
+    def deleteJobs(self, jobIds):
         """ Clean up job's folder. """
-        jobId = Path.rmslash(jobId)
+        deleted = []
+        for jobId in jobIds:
+            jobId = Path.rmslash(jobId)
+            if job := self._getJob(jobId, validateExists=False):
+                self._deleteJobFolder(job)
+                self._wf.deleteJob(job)
+                deleted.append(jobId)
+            else:
+                raise Exception(f"{jobTypeOrId} is not an existing jobId or job type.")
 
-        if job := self._getJob(jobId, validateExists=False):
-            self._deleteJobFolder(job)
-            self._wf.deleteJob(job)
-            self._update_pipeline_star()
-        else:
-            raise Exception(f"{jobTypeOrId} is not an existing jobId or job type.")
+        self._update_pipeline_star()
+        return deleted
 
     def _isActiveJob(self, job):
         return job['status'] in JOB_STATUS_ACTIVE
@@ -467,8 +533,11 @@ class ProjectManager(FolderManager):
                        metavar=('JOB_ID', 'PARAMS'),
                        help="Copy an existing job and optionally, "
                             "updating some parameters")
-        g.add_argument('--delete', '-d', metavar='JOB_ID',
-                       help="Delete an existing job.")
+        g.add_argument('--duplicate', nargs='+',
+                       metavar='JOB_IDS',
+                       help="Duplicate one or more jobs, preserving relations.")
+        g.add_argument('--delete', '-d', nargs='+', metavar='JOB_IDS',
+                       help="Delete one or more jobs.")
 
         g.add_argument('-k', '--check', action='count', default=0,
                        help='Check and/or kill processes related to this project.'
@@ -519,13 +588,16 @@ class ProjectManager(FolderManager):
             jobId = args.copy[0]
             pm.copyJob(jobId,  _params(args.copy, 1))
 
+        elif args.duplicate:
+            pm.duplicateJobs(args.duplicate)
+
         elif args.save:
             jobIdOrType = args.save[0]
             params = json.loads(args.save[1])
             pm.saveJob(jobIdOrType, params)
 
         elif args.delete:
-            pm.deleteJob(args.delete)
+            pm.deleteJobs(args.delete)
 
         elif args.check > 0:
             kill = args.check > 1
