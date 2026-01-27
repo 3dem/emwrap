@@ -33,14 +33,12 @@ from .motioncor import Motioncor
 class McPipelineTomo(ProcessingPipeline):
     """ Pipeline specific to Motioncor tilt-series processing. """
     name = 'emw-mc-tomo'
-    input_name = 'in_movies'
 
     def __init__(self, input_args):
         ProcessingPipeline.__init__(self, input_args)
         args = self._args
         self.gpuList = args['gpu'].split()
         self.outputMicDir = self.join('Micrographs')
-        self.inputStar = args['in_movies']
         self.inputLen = 0
         self.acq = self.loadAcquisition()
         self.inputGain = self.acq.get('gain', None)
@@ -168,7 +166,8 @@ class McPipelineTomo(ProcessingPipeline):
 
     def _getInputTsTable(self):
         """ Read input star file and return the 'global' table. """
-        with StarFile(self.inputStar) as sf:
+        inputStar = self._args['input_tiltseries']
+        with StarFile(inputStar) as sf:
             t = sf.getTable('global')
             self.inputLen = len(t)  # Let's update the inputLen property
             return t
@@ -218,9 +217,5 @@ class McPipelineTomo(ProcessingPipeline):
         self.addProcessor(outputQueue, self._output)
 
 
-def main():
-    McPipelineTomo.runFromArgs()
-
-
 if __name__ == '__main__':
-    main()
+    McPipelineTomo.main()
