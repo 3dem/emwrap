@@ -100,6 +100,8 @@ class WarpMotionCtf(WarpBasePipeline):
             self.log(f"{self.name}: Linking gain file: {gain}")
             self.link(gain)
 
+        cs = 'create_settings'  # shortcut
+
         if ext == '.eer':
             ngroups = int(self.get_float(f'{cs}.eer_ngroups', 0))
             if not ngroups:
@@ -110,7 +112,6 @@ class WarpMotionCtf(WarpBasePipeline):
         else:
             ngroups = n
 
-        cs = 'create_settings'  # shortcut
         # Run create_settings
         args = Args({
             'WarpTools': cs,
@@ -151,6 +152,7 @@ class WarpMotionCtf(WarpBasePipeline):
         if pd := subargs['perdevice']:
             args['--perdevice'] = int(pd)
 
+        ###args["--out_averages"] = ""
         for a in ['c_use_sum', 'out_averages', 'out_average_halves']:
             if subargs[a]:
                 args[f"--{a}"] = ""

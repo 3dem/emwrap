@@ -409,7 +409,15 @@ class ProjectManager(FolderManager):
             submit = ProcessingConfig.get_cluster()['submit']
             submitCmd = submit.format(job_script=scriptFile)
             self.log(f"Executing: {Color.green(submitCmd)}")
-            os.system(submitCmd)
+            ###os.system(submitCmd)
+            try:
+                subprocess.run(shlex.split(submitCmd), check=True,
+                               capture_output=True, text=True)
+            except subprocess.CalledProcessError as e:
+                self.log("Submission to cluster failed")
+                self.log(f"  Error: '{e.stderr.rstrip()}'")
+                self.log(f"  Cluster configured in config: {ProcessingConfig._fm.join('config.json')}")
+                self.log( "  Maybe try to run locally?\n")
         else:
             args = shlex.split(cmd)
             stdout = open(self.join(jobId, 'run.out'), 'a')
