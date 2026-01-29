@@ -21,6 +21,14 @@ from emtools.jobs import Args
 from emtools.metadata import Table, StarFile, TextFile, Acquisition
 from emtools.image import Image
 
+from emwrap.base import ProcessingPipeline
+
+
+class PyTomBase:
+    """ Base class to implement basic methods. """
+
+
+
 
 class PyTom:
     """ PyTom wrapper to run in a batch folder. """
@@ -41,9 +49,11 @@ class PyTom:
         batch.create()
         outputDir = batch.mkdir('output')
         fm = FolderManager(outputDir)
+        launcher = PyTom.get_launcher()
 
-        # Load parameters from acquision
-        args = self.argsFromAcq(self.acq)
+        # Initialize with the launcher and load parameters from acquisition
+        args = {'pytom_match_template.py': ''}
+        args.update(self.argsFromAcq(self.acq))
         args.update({
             '--destination': 'output',
             '--tomogram': batch.link(batch['tomogram']),
@@ -64,9 +74,7 @@ class PyTom:
                 args[f'--{k}'] = v
 
         with batch.execute('pytom_match'):
-            pytom = PyTom.get_program("PYTOM_MATCH")
-            batch.call(pytom, args)
-            # print(f"{Color.green(pytom)} {Color.bold(args.toLine())}")
+            batch.call(launcher, args)
 
         def _rename_star(newSuffix):
             """ Rename output star files to avoid overwrite. """
@@ -81,15 +89,14 @@ class PyTom:
             subargs = self.args['pytom_extract']
             # pytom_extract arguments
             args = {
+                'pytom_extract_candidates.py': '',
                 '-j': f'output/{jsonFile}',
                 '-n': subargs['n'],
                 "--particle-diameter": subargs['particle-diameter']
             }
 
             with batch.execute('pytom_extract'):
-                pytom_extract = PyTom.get_program("PYTOM_EXTRACT")
-                batch.call(pytom_extract, args)
-                #print(f"{Color.green(pytom_extract)} {Color.bold(args.toLine())}")
+                batch.call(launcher, args)
                 _rename_star('default')
 
                 if subargs['tophat-filter']:
@@ -97,15 +104,10 @@ class PyTom:
                         '--tophat-filter': "",
                         '--tophat-connectivity': subargs['tophat-connectivity']
                     })
-                    batch.call(pytom_extract, args)
-                    #print(f"{Color.green(pytom_extract)} {Color.bold(args.toLine())}")
+                    batch.call(launcher, args)
                     _rename_star('tophat')
         else:
             batch.log("No output json files, not running pytom_extract")
-
-    @staticmethod
-    def get_program(var):
-        return os.environ.get(var, None)
 
     def argsFromAcq(self, acq):
         """ Define arguments from a given acquisition """
@@ -115,3 +117,7 @@ class PyTom:
             '--amplitude-contrast': acq.amplitude_contrast,
             '--voxel-size-angstrom': acq.pixel_size
         })
+
+    @staticmethod
+    def get_launcher(cls):
+        return ProcessingPipeline.get_launcher('PyTOM', 'PYTOM_LAUNCHER')
