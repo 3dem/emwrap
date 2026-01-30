@@ -48,18 +48,6 @@ class PyTomCreateTemplate(ProcessingPipeline):
         args.update(subargs)
         self.batch_execute('pytom_create_template', batch, args)
 
-        """
-         --invert              
-  -m, --mirror          
-        
-        
-        Create a mask for template matching. -- Marten Chaillet (@McHaillet)
-
-  --radius-minor1 RADIUS_MINOR1
-                        Radius of the ellipsoidal mask along the y-axis in number of pixels.
-  --radius-minor2 RADIUS_MINOR2
-        """
-
         # Create the mask
         subargs2 = self.get_subargs('pytom_create_mask', '--')
         outPs = float(subargs['--output-voxel-size-angstrom'])
