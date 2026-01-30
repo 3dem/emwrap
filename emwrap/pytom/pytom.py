@@ -24,12 +24,6 @@ from emtools.image import Image
 from emwrap.base import ProcessingPipeline
 
 
-class PyTomBase:
-    """ Base class to implement basic methods. """
-
-
-
-
 class PyTom:
     """ PyTom wrapper to run in a batch folder. """
     def __init__(self, acq, args):
@@ -119,5 +113,5 @@ class PyTom:
         })
 
     @staticmethod
-    def get_launcher(cls):
+    def get_launcher():
         return ProcessingPipeline.get_launcher('PyTOM', 'PYTOM_LAUNCHER')

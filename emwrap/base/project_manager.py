@@ -97,7 +97,7 @@ class ProjectManager(FolderManager):
         self.update()
 
         header = ["JOB_ID", "JOB_TYPE", "JOB_STATUS"]
-        format = u'{:<25}{:<25}{:<25}'
+        format = u'{:<25}{:<35}{:<25}'
         print(format.format(*header))
 
         for job in self._wf.jobs():
