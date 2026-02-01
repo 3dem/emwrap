@@ -68,6 +68,9 @@ class ProjectManager(FolderManager):
         else:
             raise Exception(f"'{self.pipeline_star} does not exist")
 
+    def get_workflow(self):
+        return self._wf
+
     @property
     def pipeline_star(self):
         return self.join('default_pipeline.star')
@@ -103,6 +106,51 @@ class ProjectManager(FolderManager):
         for job in self._wf.jobs():
             print(format.format(job.id, job['jobtype'], job['status']))
 
+    def listOutputs(self):
+        """ List current jobs. """
+        self.update()
+
+        header = ["JOB_ID", "OUTPUT", "DATATYPE", "INFO"]
+        format = u'{:<20}{:<55}{:<45}{:<45}'
+        print(format.format(*header))
+
+        for job in self._wf.jobs():
+            filesDict = self.loadJobOutputs(job)
+            for o in job.outputs:
+                if oInfo := filesDict.get(o.id, None):
+                    datatype = oInfo['type']
+                    info = oInfo['info']
+                else:
+                    datatype = 'No-type'
+                    info = 'No-info'
+
+                print(format.format(job.id, o.id, datatype, info))
+
+    def listInputs(self):
+        header = ["JOB_ID", "KEY", "INPUT", "DATATYPE", "INFO"]
+        format = u'{:<20}{:25}{:<45}{:<35}{:<45}'
+
+        # Build the list of outputs for all jobs
+        filesDict = {}
+        for job in self._wf.jobs():
+            jobFilesDict = self.loadJobOutputs(job)
+            filesDict.update(jobFilesDict)
+            # for k, v in jobFilesDict.items():
+            #     if not job.hasOutput(k):
+            #         job.registerOutput(k, )
+
+        for job in self._wf.jobs():
+            params = self._readJobParams(job)
+            for k, v in params.items():
+                if v in filesDict:
+                    info = filesDict[v]
+                    print(format.format(job.id, k, v, info['type'], info['info']))
+                    if not job.hasInput(v):
+                        job.addInputs([self._wf.getData(v)])
+
+        self._update_pipeline_star()
+
+
     def update(self):
         """ Update status of the running jobs. """
         self.log("Updating project.")
@@ -116,29 +164,26 @@ class ProjectManager(FolderManager):
                         update = True
 
                 if jobInfo := self.loadJobInfo(job):
-                    # FIXME Review all jobs to populate the info['outputs']
-                    # and also check for the Relion convention to define
-                    # the outputs
                     for k, o in jobInfo['outputs'].items():
                         for fn, datatype in o['files']:
                             if not job.hasOutput(fn):
                                 job.registerOutput(fn, datatype=datatype)
                                 update = True
 
-                # FIXME: this is a quick and dirty to define some known
-                # output star files for tomography
-                jobPath = self.join(job.id)
-
-                def _is_output(fn):
-                    return (fn.endswith('.star') and
-                            (fn.startswith('tomograms') or
-                             fn.startswith('tilt_series')))
-
-                for fn in os.listdir(jobPath):
-                    if _is_output(fn):
-                        dataId = os.path.join(job.id, fn)
-                        if not job.hasOutput(dataId):
-                            job.registerOutput(dataId, datatype='File')
+                # # FIXME: this is a quick and dirty to define some known
+                # # output star files for tomography
+                # jobPath = self.join(job.id)
+                #
+                # def _is_output(fn):
+                #     return (fn.endswith('.star') and
+                #             (fn.startswith('tomograms') or
+                #              fn.startswith('tilt_series')))
+                #
+                # for fn in os.listdir(jobPath):
+                #     if _is_output(fn):
+                #         dataId = os.path.join(job.id, fn)
+                #         if not job.hasOutput(dataId):
+                #             job.registerOutput(dataId, datatype='File')
 
         if update:
             self._update_pipeline_star()
@@ -509,6 +554,12 @@ class ProjectManager(FolderManager):
                 return json.load(f)
         return None
 
+    def loadJobOutputs(self, job):
+        filesDict = {}
+        if jobInfo := self.loadJobInfo(job):
+            filesDict = {o['files'][0][0]: o for o in jobInfo['outputs'].values()}
+        return filesDict
+
     @staticmethod
     def main():
         p = argparse.ArgumentParser(
@@ -527,12 +578,18 @@ class ProjectManager(FolderManager):
         g.add_argument('--list', '-l', action='store_true',
                        help="List jobs in the current project.")
 
+        g.add_argument('--outputs', '-o', action='store_true',
+                       help="List outputs from each job.")
+
+        g.add_argument('--inputs', '-i', action='store_true',
+                       help="List inputs from each job.")
+
         g.add_argument('--run', '-r', nargs='+',
                        metavar=('JOB_TYPE_OR_ID', 'PARAMS'),
                        help="Run a new job, passing job type and params"
                             "or re-run an existing one passing job_id."
                             "If --clean is added, the output folder will "
-                            "be cleaned before running the jbo. ")
+                            "be cleaned before running the job. ")
         g.add_argument('--save', '-s', nargs=2,
                        metavar=('JOB_TYPE_OR_ID', 'PARAMS'),
                        help="Save an existing job or create a new one, "
@@ -585,6 +642,12 @@ class ProjectManager(FolderManager):
 
         elif args.list:
             pm.listJobs()
+
+        elif args.outputs:
+            pm.listOutputs()
+
+        elif args.inputs:
+            pm.listInputs()
 
         elif args.run:
             jobTypeOrId = args.run[0]
