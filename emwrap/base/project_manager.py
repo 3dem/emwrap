@@ -153,7 +153,7 @@ class ProjectManager(FolderManager):
 
     def _updateJobInputs(self, job, params):
         # Clear jobs inputs and add new ones
-        job.inputs = []
+        job.clearInputs()
         for k, v in params.items():
             for job2 in self._wf.jobs():
                 if isinstance(v, str) and job2.id in v:
