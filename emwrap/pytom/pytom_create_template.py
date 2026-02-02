@@ -18,16 +18,11 @@ from emtools.utils import Path
 from emtools.jobs import Batch
 from emwrap.base import ProcessingPipeline
 
-from .pytom import PyTom
-
 
 class PyTomCreateTemplate(ProcessingPipeline):
     """ Simple wrapper to create a template and a mask with PyTom. """
+    PROGRAM = 'PYTOM'
     name = 'emw-pytom-create_template'
-
-    @classmethod
-    def get_launcher(cls):
-        return PyTom.get_launcher()
 
     def create_template_and_mask(self):
         batch = Batch(id=self.name, path=self.path)

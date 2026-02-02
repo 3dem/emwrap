@@ -26,10 +26,7 @@ class RelionBasePipeline(ProcessingPipeline):
     """ Base class to organize common functions/properties of different
     Relion pipelines.
     """
-
-    @classmethod
-    def get_launcher(cls):
-        return ProcessingPipeline.get_launcher('Relion', 'RELION_LAUNCHER')
+    PROGRAM = 'RELION'
 
     def get_subargs(self, prefix, new_prefix='--'):
         subargs = ProcessingPipeline.get_subargs(self, prefix, new_prefix=new_prefix)

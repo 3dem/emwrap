@@ -39,6 +39,10 @@ class ProcessingConfig:
         return cls._get_config('jobs')
 
     @classmethod
+    def get_programs(cls):
+        return cls._get_config('programs')
+
+    @classmethod
     def get_cluster(cls):
         return cls._get_config('cluster')
 

@@ -43,7 +43,7 @@ class PyTom:
         batch.create()
         outputDir = batch.mkdir('output')
         fm = FolderManager(outputDir)
-        launcher = PyTom.get_launcher()
+        launcher = ProcessingPipeline.get_launcher('PYTOM')
 
         # Initialize with the launcher and load parameters from acquisition
         args = {'pytom_match_template.py': ''}
@@ -111,7 +111,3 @@ class PyTom:
             '--amplitude-contrast': acq.amplitude_contrast,
             '--voxel-size-angstrom': acq.pixel_size
         })
-
-    @staticmethod
-    def get_launcher():
-        return ProcessingPipeline.get_launcher('PyTOM', 'PYTOM_LAUNCHER')

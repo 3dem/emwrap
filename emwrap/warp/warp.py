@@ -22,22 +22,11 @@ from emtools.metadata import StarFile, Acquisition
 from emtools.jobs import Batch
 
 
-def get_launcher():
-    varPath = 'WARP_LAUNCHER'
-
-    if program := os.environ.get(varPath, None):
-        if not os.path.exists(program):
-            raise Exception(f"Warp path ({varPath}={program}) does not exists.")
-    else:
-        raise Exception(f"Warp path variable {varPath} is not defined.")
-
-    return program
-
-
 class WarpBasePipeline(ProcessingPipeline):
     """ Base class to organize common functions/properties of different
     Warp pipelines.
     """
+    PROGRAM = 'WARP'  # Key used in the config for getting the launcher
     FRAMES = 'frames'
     MDOCS = 'mdocs'
     FS = 'warp_frameseries'
@@ -56,10 +45,6 @@ class WarpBasePipeline(ProcessingPipeline):
         FRAMES: FRAMES,
         MDOCS: MDOCS
     }
-
-    @classmethod
-    def get_launcher(cls):
-        return ProcessingPipeline.get_launcher('Warp', 'WARP_LAUNCHER')
 
     @classmethod
     def copyInputs(cls, inputFolder, outputFolder, keys=None, gain=None, force=False):

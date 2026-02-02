@@ -31,6 +31,7 @@ from emtools.jobs import BatchManager, Args, Pipeline
 from emtools.metadata import (Table, Column, StarFile, StarMonitor, TextFile,
                               Acquisition, RelionStar)
 
+from .config import ProcessingConfig
 
 class ProcessingPipeline(Pipeline, FolderManager):
     """ Subclass of Pipeline that is commonly used to run programs.
@@ -197,17 +198,20 @@ class ProcessingPipeline(Pipeline, FolderManager):
             return gpu_list
 
     @classmethod
-    def get_launcher(cls, packageName, var):
+    def get_launcher(cls, packageName=None):
         """ Get a launcher script to 'launch' programs from
         certain packages (e.g. Relion, Warp). A launcher variable
         will be used to read the value from os.environ. """
-        if program := os.environ.get(var, None):
-            if not os.path.exists(program):
-                raise Exception(f"{packageName} launcher ({var}={program}) does not exists.")
-        else:
-            raise Exception(f"{packageName} launcher variable {var} is not defined.")
+        if packageName := packageName or getattr(cls, 'PROGRAM', None):
+            if launcher := ProcessingConfig.get_programs().get(packageName, {}).get('launcher', None):
+                if not os.path.exists(launcher):
+                    raise Exception(f"{packageName} launcher '{launcher}' does not exists.")
+            else:
+                raise Exception(f"{packageName} not found in EMWRAP_CONFIG['programs']")
 
-        return program
+            return launcher
+        else:
+            raise Exception(f"Expecting packageName or cls.PROGRAM defined")
 
     def run(self):
         try:
