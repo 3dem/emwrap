@@ -1,0 +1,53 @@
+#!/bin/bash
+
+# Get the directory of the current script
+export ROOT="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+
+# Load the required Python environment, either a conda or virtualenv
+
+export SCRIPTS=$ROOT/scripts
+
+export EMWRAP_CONFIG=$(cat <<EOF
+{
+    "jobs": {
+        "emw-import-ts": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.base.import_ts"},
+        "emw-warp-mctf": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_mctf"},
+        "emw-warp-aretomo": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_aretomo"},
+        "emw-warp-etomo_patches": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_etomo_patches"},
+        "emw-warp-ctfrec": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_ctfrec"},
+        "emw-pytom-create_template": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.pytom.pytom_create_template"},
+        "emw-pytom": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.pytom.pytom_pipeline"},
+        "emw-pytme": {"launcher": "$SCRIPTS/emw-pytme.sh"},
+        "emw-warp-export_particles": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_export_particles"},
+        "emw-relion-tomorecons": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.relion.tomorecons"},
+        "emw-relion-tomorefine": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.relion.tomorefine"}
+    },
+    "cluster": {
+        "template": "$SCRIPTS/lsf_template.sh",
+        "submit": "$SCRIPTS/lsf_submit.sh {job_script}"
+    },
+    "forms": "$ROOT/source/emwrap/config/forms",
+    "worfklows": "$ROOT/source/emwrap/config/workflows",
+    "programs": {
+        "WARP": {"launcher": "$SCRIPTS/warp_launcher.sh"},
+        "PYTOM": {"launcher": "$SCRIPTS/pytom_launcher.sh"},
+        "RELION": {"launcher": "$SCRIPTS/relion_launcher.sh"},
+        "MOTIONCOR2": {"launcher": "$SCRIPTS/motioncor2.sh"},
+        "MOTIONCOR3": {"launcher": "$SCRIPTS/motioncor3.sh"},
+        "ARETOMO2": {"launcher": "$SCRIPTS/aretomo2.sh"},
+        "ARETOMO3": {"launcher": "$SCRIPTS/aretomo3.sh"},
+        "CTFFIND": {"launcher": "$SCRIPTS/ctffind5.sh", "version": 5},
+        "CRYOCARE": {"launcher": "$SCRIPTS/cryocare_launcher.sh"}
+    }
+}
+EOF
+)
+
+# Some alias for shortcut access
+# Shortcut to PurifiedApoF benchmark
+alias bench='python -m emwrap.tests.benchmark_apof_purified'
+
+alias emw-relion='python -m emwrap.relion'
+alias emw-otf='python -m emwrap.mix.otf'
+alias emw-pytom='python -m emwrap.pytom.pytom_pipeline'
+alias emw-warp='python -m emwrap.warp'

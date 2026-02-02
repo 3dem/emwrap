@@ -1,0 +1,4 @@
+#!/bin/bash
+
+module load aretomo2/1.0.0 -s && AreTomo2 "$@"
+

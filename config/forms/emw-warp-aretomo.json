@@ -1,0 +1,79 @@
+{
+    "sections": [
+        {
+            "label": "Aretomo",
+            "params": [
+                {
+                    "name": "input_tiltseries",
+                    "label": "Input tilt series:",
+                    "pattern": "",
+                    "help": "STAR file with input tilt-series"
+                },
+                {
+                    "name": "ts_import.min_ntilts",
+                    "label": "Min number of tilts",
+                    "help": "",
+                    "default": 35
+                },
+                {
+                    "name": "ts_import.override_axis",
+                    "label": "Angle for Tilt Axis (deg)",
+                    "default": 85,
+                    "paramClass": "FloatParam",
+                    "help": ""
+                },
+                {
+                    "name": "create_settings.tomo_dimensions",
+                    "label": "Tomogram dimensions:",
+                    "default": "4096x4096x2000",
+                    "help": ""
+                },
+                {
+                    "name": "ts_aretomo.angpix",
+                    "label": "Output pixel size (A/pix)",
+                    "paramClass": "FloatParam",
+                    "help": "Rescale tilt images to this pixel size; normally 10–15 A for cryo data; leave out to keep the original pixel size."
+                },
+                {
+                    "name": "ts_aretomo.alignz",
+                    "label": "Align Z (px)",
+                    "default": 1800,
+                    "paramClass": "FloatParam",
+                    "help": ""
+                },
+                {
+                    "name": "ts_aretomo.axis_iter",
+                    "label": "Axis Iter",
+                    "default": 0,
+                    "paramClass": "FloatParam",
+                    "help": ""
+                },
+                {
+                    "name": "ts_aretomo.axis_batch",
+                    "label": "Axis Batch",
+                    "default": 0,
+                    "paramClass": "FloatParam",
+                    "help": ""
+                }
+            ]
+        },
+        {
+            "label": "Compute",
+            "paramClass": "Group",
+            "params": [
+                {
+                    "name": "gpus",
+                    "label": "GPUs",                    
+                    "help": "If it is a single number (N), it will represent the total number of GPUs (0..N-1). It there are multiple values, it will be the specific GPUs ID."
+                },
+                {
+                    "name": "ts_aretomo.perdevice",
+                    "label": "Processes per device",
+                    "default": 2,
+                    "paramClass": "IntParam",
+                    "help": "(--per_device in ts_aretomo)"
+                }
+            ]
+        }
+    ]
+}

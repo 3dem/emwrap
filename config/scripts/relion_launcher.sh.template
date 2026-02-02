@@ -1,0 +1,16 @@
+#!/bin/bash
+
+module purge && module load -s relion/v5.0
+
+export PROGRAM=$1
+shift
+export MPI=$1
+shift
+# FIXME: Check if MPI > 0 to add the _mpi suffix
+
+export CMD="mpirun -np ${MPI} ${PROGRAM}_mpi $@"
+echo Running command: ${CMD}
+
+$CMD
+
+

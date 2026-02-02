@@ -1,0 +1,156 @@
+{
+    "sections": [        
+        {
+            "label": "Motion",
+            "params": [
+                {
+                    "name": "input_tiltseries",
+                    "label": "Input tilt series:",
+                    "pattern": "",
+                    "help": "STAR file with input tilt-series",
+                    "paramClass": "PathParam"
+                },
+                {
+                    "name": "create_settings.bin_angpix",
+                    "label": "Target pixel size",
+                    "help": "--bin_angpix in create_settings: Choose the binning exponent automatically to match this target pixel size in Angstrom. \n0 = No binning, 1 = Bin 2x, etc. ",
+                    "default": 0
+                },
+                {
+                    "name": "create_settings.eer_ngroups",
+                    "label": "EER groups",
+                    "help": "(--eer_ngroups) EER grouping."
+                },
+                {
+                    "paramClass": "Line",
+                    "label": "Resolution range:",
+                    "params": [
+                        {
+                            "name": "fs_motion_and_ctf.m_range_min",
+                            "label": "min",
+                            "default": 500,
+                            "paramClass": "FloatParam",
+                            "help": "(--m_range_min) Default: 500. Minimum resolution in Angstrom to consider in fit"
+                        },
+                        {
+                            "name": "fs_motion_and_ctf.m_range_max",
+                            "label": "max",
+                            "default": 10,
+                            "paramClass": "FloatParam",
+                            "help": "(--m_range_max) Default: 10. Maximum resolution in Angstrom to consider in fit"
+                        }
+                    ]
+                },
+                {
+                    "name": "fs_motion_and_ctf.m_bfac",
+                    "label": "Bfactor (Aˆ2)",
+                    "default": -500,
+                    "paramClass": "FloatParam",
+                    "help": "(--m_bfac)  Default: -500. Downweight higher spatial frequencies using a B-factor, in Angstrom^2"
+                },
+                {
+                    "name": "fs_motion_and_ctf.m_grid",
+                    "label": "Grid (XxYxN):",
+                    "default": "5x5",
+                    "paramClass": "StringParam",
+                    "help": "(--m_grid) Default: 5x5xN. Resolution of the motion model grid in X, Y, and temporal dimensions, separated by 'x': e.g. 5x5x40; empty = auto"
+                }
+            ]
+        },
+        {
+            "label": "CTF",
+            "params": [
+                {
+                    "paramClass": "Line",
+                    "label": "Resolution range:",
+                    "params": [
+                        {
+                            "name": "fs_motion_and_ctf.c_range_min",
+                            "label": "min",
+                            "default": 30,
+                            "paramClass": "FloatParam",
+                            "help": "(--c_range_min) Default: 500. Minimum resolution in Angstrom to consider in fit"
+                        },
+                        {
+                            "name": "fs_motion_and_ctf.c_range_max",
+                            "label": "max",
+                            "default": 4,
+                            "paramClass": "FloatParam",
+                            "help": "(--c_range_max) Default: 10. Maximum resolution in Angstrom to consider in fit"
+                        }
+                    ]
+                },
+                {
+                    "paramClass": "Line",
+                    "label": "Defocus range:",
+                    "params": [
+                        {
+                            "name": "fs_motion_and_ctf.c_defocus_min",
+                            "label": "min",
+                            "default": 0.5,
+                            "paramClass": "FloatParam",
+                            "help": "(--c_defocus_min) Default: 500. Minimum resolution in Angstrom to consider in fit"
+                        },
+                        {
+                            "name": "fs_motion_and_ctf.c_defocus_max",
+                            "label": "max",
+                            "default": 5,
+                            "paramClass": "FloatParam",
+                            "help": "(--c_defocus_max) Default: 10. Maximum resolution in Angstrom to consider in fit"
+                        }
+                    ]
+                },                
+                {
+                    "name": "fs_motion_and_ctf.c_window",
+                    "label": "Window (px)",
+                    "default": 512,
+                    "paramClass": "FloatParam",
+                    "help": "(--c_window) Default: 512. Patch size for CTF estimation in binned pixels"
+                },                
+                {
+                    "name": "fs_motion_and_ctf.c_grid",
+                    "label": "Grid (XxYxN):",
+                    "default": "1x1",
+                    "paramClass": "StringParam",
+                    "help": "(--c_grid) Resolution of the defocus model grid in X, Y, and temporal dimensions, separated by 'x': e.g. 5x5x40; empty = auto; Z > 1 is purely experimental"
+                },
+                {
+                    "name": "fs_motion_and_ctf.c_use_sum",
+                    "label": "Use sum",
+                    "paramClass": "BooleanParam",
+                    "help": "(--c_use_sum) "
+                },
+                {
+                    "name": "fs_motion_and_ctf.out_averages",
+                    "label": "Output averages",
+                    "paramClass": "BooleanParam",
+                    "help": "(--out_averages) "
+                },
+                {
+                    "name": "fs_motion_and_ctf.out_average_halves",
+                    "label": "Output averages halves",
+                    "paramClass": "BooleanParam",
+                    "help": "(--out_average_halves) "
+                }
+            ]
+        }, 
+        {
+            "label": "Compute",
+            "paramClass": "Group",
+            "params": [
+                {
+                    "name": "gpus",
+                    "label": "GPUs",                    
+                    "help": "If it is a single number (N), it will represent the total number of GPUs (0..N-1). It there are multiple values, it will be the specific GPUs ID."
+                },
+                {
+                    "name": "fs_motion_and_ctf.perdevice",
+                    "label": "Processes per device",
+                    "default": 2,
+                    "paramClass": "IntParam",
+                    "help": "(--per_device in fs_motion_and_ctf)"
+                }
+            ]
+        }
+    ]
+}

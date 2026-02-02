@@ -71,7 +71,8 @@ setup(
            'emw-rln2d = emwrap.relion.classify2d_pipeline:main',
            'emw-import-movies = emwrap.base.import_movies:main',
            'emw-mc-tomo = emwrap.motioncor.mcpipeline_tomo:main',
-           'emw = emwrap.base:ProjectManager.main'
+           'emw = emwrap.base:ProjectManager.main',
+           'emw-config = emwrap.base:ProcessingConfig.main'
        ],
 
     }

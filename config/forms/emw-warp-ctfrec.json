@@ -1,0 +1,104 @@
+{
+    "sections": [
+        {
+            "label": "Input",
+            "params": [
+                {
+                    "name": "input_tiltseries",
+                    "label": "Input tilt series:",
+                    "pattern": "",
+                    "help": "STAR file with input tilt-series"
+                },
+                {
+                    "label": "Reconstruct",
+                    "paramClass": "Group",
+                    "params": [                
+                        {
+                            "name": "ts_reconstruct.angpix",
+                            "label": "Reconstruction Voxel size (A/pix)",
+                            "paramClass": "FloatParam",
+                            "help": ""
+                        },
+                        {
+                            "name": "ts_reconstruct.halfmap_frames",
+                            "label": "Output half-tomograms from frames",
+                            "paramClass": "BooleanParam",
+                            "help": "Also produce two half-tomograms, each reconstructed from half of the frames (requires running align_frameseries with --average_halves previously)"
+                        }
+                    ]
+                },
+                {
+                    "label": "CTF",
+                    "paramClass": "Group",
+                    "params": [
+                        {
+                            "name": "ts_ctf.window",
+                            "label": "Window (px)",
+                            "default": 512,
+                            "paramClass": "FloatParam",
+                            "help": "(--window) Default: 512. Patch size for CTF estimation in binned pixels"
+                        },
+                        {
+                            "paramClass": "Line",
+                            "label": "Resolution range:",
+                            "params": [
+                                {
+                                    "name": "ts_ctf.range_low",
+                                    "label": "low",
+                                    "default": 30,
+                                    "paramClass": "FloatParam",
+                                    "help": "(--range_min) Default: 500. Minimum resolution in Angstrom to consider in fit"
+                                },
+                                {
+                                    "name": "ts_ctf.range_high",
+                                    "label": "high",
+                                    "default": 4,
+                                    "paramClass": "FloatParam",
+                                    "help": "(--range_high) Default: 10. Maximum resolution in Angstrom to consider in fit"
+                                }
+                            ]
+                        },
+                        {
+                            "paramClass": "Line",
+                            "label": "Defocus range:",
+                            "params": [
+                                {
+                                    "name": "ts_ctf.defocus_min",
+                                    "label": "min",
+                                    "default": 0.5,
+                                    "paramClass": "FloatParam",
+                                    "help": "(--defocus_min) Default: 500. Minimum resolution in Angstrom to consider in fit"
+                                },
+                                {
+                                    "name": "ts_ctf.defocus_max",
+                                    "label": "max",
+                                    "default": 5,
+                                    "paramClass": "FloatParam",
+                                    "help": "(--defocus_max) Default: 10. Maximum resolution in Angstrom to consider in fit"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        },               
+        {
+            "label": "Compute",
+            "paramClass": "Group",
+            "params": [
+                {
+                    "name": "gpus",
+                    "label": "GPUs",                    
+                    "help": "If it is a single number (N), it will represent the total number of GPUs (0..N-1). It there are multiple values, it will be the specific GPUs ID."
+                },
+                {
+                    "name": "ts_ctf.perdevice",
+                    "label": "Processes per device",
+                    "default": 2,
+                    "paramClass": "IntParam",
+                    "help": "(--per_device in ts_ctf and ts_reconstruct)"
+                }
+            ]
+        }
+    ]
+}

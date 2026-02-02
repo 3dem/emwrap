@@ -1,0 +1,10 @@
+#!/bin/bash
+
+#export CUDAHOME=/usr/local/cuda-11.8
+#export LD_LIBRARY_PATH=$CUDAHOME/lib64:$LD_LIBRARY_PATH
+#export PATH=$CUDAHOME/bin:$PATH
+
+#/home/jdela80/work/development/tests/AreTomo3/AreTomo3 $@
+#/home/jdela80/work/development/tests/AreTomo3_HPC/AreTomo3/AreTomo3 $@
+module load aretomo3/1.0.15 -s && AreTomo3 "$@"
+#singularity exec --bind /scr:/scr  --bind /jude/coescb:/jude/coescb  --nv /usr/local/em/containers/aretomo/aretomo3.sif /opt/aretomo3/AreTomo3 $@

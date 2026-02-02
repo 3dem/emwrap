@@ -1,0 +1,95 @@
+{
+    "sections": [
+        {
+            "label": "Input",
+            "params": [                             
+                {
+                    "name": "tilt_images",
+                    "label": "Tilt images folder",
+                    "default": ""
+                },
+                {
+                    "name": "mdoc_files",
+                    "label": "Mdoc files",
+                    "help": "Leave it empty for using all GPUs",
+                    "default": "mdocs/Position*[1-9].mdoc"
+                },
+                {
+                    "name": "acq.gain",
+                    "label": "Gain file",
+                    "help": "",
+                    "default": ""                
+                },
+                {
+                    "name": "tilt_axis_angle",
+                    "label": "Tilt axis angle (deg)",                    
+                    "paramClass": "FloatParam",
+                    "default": 85,
+                    "help": "This is the nominal value for the tilt-axis orientation to the Y-axis (positive is CCW from Y))"
+                },
+                {
+                    "label": "Acquisition",
+                    "paramClass": "Group",
+                    "params": [
+                        {
+                            "name": "acq.pixel_size",
+                            "label": "Pixel Size (Å)",
+                            "paramClass": "FloatParam",
+                            "help": ""
+                        },
+                        {
+                            "name": "acq.voltage",
+                            "label": "Voltage (kV)",
+                            "default": 300,
+                            "paramClass": "FloatParam",
+                            "help": ""
+                        },
+                        {
+                            "name": "acq.cs",
+                            "label": "Spherical Aberration (mm)",
+                            "default": 2.7,
+                            "paramClass": "FloatParam",
+                            "help": ""
+                        },
+                        {
+                            "name": "acq.amplitude_constrast",
+                            "label": "Amplitude Constrast",
+                            "default": 0.1,
+                            "paramClass": "FloatParam",
+                            "help": ""
+                        },
+                        {
+                            "name": "acq.total_dose",
+                            "label": "Total dose per tilt",
+                            "paramClass": "FloatParam",
+                            "help": "Total dose per tilt image."
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "label": "Streaming",
+            "params": [                             
+                {
+                    "name": "wait.timeout",
+                    "label": "Wait time for new files",
+                    "default": 1,
+                    "help": "Wait time (in minutes) after which, if no new files are found, the import will stop."
+                },
+                {
+                    "name": "wait.file_change",
+                    "label": "File change wait time",
+                    "default": 1,
+                    "help": "Wait this time (in minutes) without modifications in a file to report as new."
+                },
+                {
+                    "name": "wait.sleep",
+                    "label": "Sleep time between checks",
+                    "default": 1,
+                    "help": "Sleep this time (in minutes) after not files are found to check again."
+                }
+            ]
+        }
+    ]
+}

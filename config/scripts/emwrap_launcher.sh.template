@@ -1,0 +1,13 @@
+#!/bin/bash
+
+
+# Get the directory of the current script
+DIR="$(dirname "$(readlink -f "$0")")"
+
+MODULE=$1
+shift
+
+# Source the other script using the determined directory
+. "${DIR}/../emwrap.bashrc"
+
+python -m $MODULE "$@"

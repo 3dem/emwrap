@@ -198,7 +198,7 @@ class ProjectManager(FolderManager):
 
     def _updateJobInputs(self, job, params):
         # Clear jobs inputs and add new ones
-        job.inputs = []
+        job.clearInputs()
         for k, v in params.items():
             for job2 in self._wf.jobs():
                 if isinstance(v, str) and job2.id in v:
@@ -477,6 +477,9 @@ class ProjectManager(FolderManager):
 
             if wait:
                 p.wait()
+
+    def get_workflow(self):
+        return self._wf
 
     def _writeJobParams(self, job, params):
         """ Write the job.star for the given job. """

@@ -1,0 +1,6 @@
+#!/bin/bash
+
+module load Anaconda3/2024.02-1
+module load CUDA/12.4.0
+. /hpcf/authorized_apps/rhel8_apps/easybuild/software/Anaconda3/2024.02-1/etc/profile.d/conda.sh && conda activate pytom_tm
+
