@@ -28,32 +28,32 @@ from emtools.jobs import Batch, Args
 from emtools.metadata import StarFile, Table, WarpXml
 from emtools.image import Image
 
+
 from .warp import WarpBaseTsAlign
 
 
-class WarpAreTomo(WarpBaseTsAlign):
+class WarpEtomoPatches(WarpBaseTsAlign):
     """ Warp wrapper to run warp_ts_aretomo.
     It will run:
         - ts_import -> mdocs
         - create_settings -> warp_tiltseries.settings
         - ts_aretomo -> ts alignment
     """
-    name = 'emw-warp-aretomo'
+    name = 'emw-warp-etomo_patches'
 
     def runAlignment(self, batch):
         # Run ts_aretomo wrapper
         args = Args({
-            'WarpTools': 'ts_aretomo',
-            '--settings': self.TSS,
-            '--exe': os.environ['ARETOMO2']
+            'WarpTools': 'ts_etomo_patches',
+            '--settings': self.TSS
         })
         if self.gpuList:
             args['--device_list'] = self.gpuList
 
-        subargs = self.get_subargs('ts_aretomo', '--')
+        subargs = self.get_subargs('ts_etomo_patches', '--')
         args.update(subargs)
-        self.batch_execute('ts_aretomo', batch, args)
+        self.batch_execute('ts_etomo_patches', batch, args)
 
 
 if __name__ == '__main__':
-    WarpAreTomo.main()
+    WarpEtomoPatches.main()

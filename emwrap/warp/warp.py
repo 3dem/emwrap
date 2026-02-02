@@ -191,3 +191,155 @@ class WarpBasePipeline(ProcessingPipeline):
         self.log(f"Writing: {starFile}")
         with StarFile(starFile, 'w') as sfOut:
             sfOut.writeTable(tableName, table, computeFormat='left', timeStamp=True)
+
+
+class WarpBaseTsAlign(WarpBasePipeline):
+    """ Base class for all Warp TS alignment wrappers:
+        ts_aretomo, ts_aretomo3
+        ts_etomo_patches, ts_etomo_fiducials.
+    It will run:
+        - ts_import -> mdocs
+        - create_settings -> warp_tiltseries.settings
+        - run the specific alignment step
+    """
+
+    def _getInfo(self, tsAllTable):
+        """ Load input or output information. """
+        first = tsAllTable[0]
+        ps = first.rlnTomoTiltSeriesPixelSize
+        tsTable = StarFile.getTableFromFile(first.rlnTomoName, first.rlnTomoTiltSeriesStarFile)
+        N = len(tsAllTable)
+        n = len(tsTable)
+        movieFn = tsTable[0].rlnMicrographMovieName
+        dim = Image.get_dimensions(movieFn)
+        self.log(f"get_dimensions: {dim}")
+        x = dim[0]
+        y = dim[1]
+        return N, x, y, n, ps
+
+    def runAlignment(self, batch):
+        """ Abstract method that should be implemented in subclasses. """
+        raise Exception("Missing implementation in base class.")
+
+    def runBatch(self, batch, importInputs=True, **kwargs):
+        # Input run folder from the Motion correction and CTF job
+        inputTs = kwargs['inputTs']
+        tsAllTable = StarFile.getTableFromFile('global', inputTs)
+        N, x, y, n, ps = self._getInfo(tsAllTable)
+
+        self.inputs = {
+            'TiltSeries': {
+                'label': 'Tilt Series',
+                'type': 'TiltSeries',
+                'info': f"{N} items, {x} x {y} x {n}, {ps:0.3f} Å/px",
+                'files': [
+                    [inputTs, 'TomogramGroupMetadata.star.relion.tomo.motioncorr']
+                ]
+            }
+        }
+        self.writeInfo()
+
+        inputFolder = FolderManager(os.path.dirname(inputTs))
+
+        # FIXME: Add validations if the input star exists and required warp folders
+        batch.mkdir(self.TS)
+        batch.mkdir(self.TM)
+
+        # Link input frameseries folder, settings and gain reference
+        if importInputs:
+            self._importInputs(inputFolder, keys=['fs', 'fss', 'frames', 'mdocs'])
+
+        # Run ts_import
+        args = Args({
+            'WarpTools': 'ts_import',
+            '--frameseries': self.FS,
+            '--tilt_exposure': self.acq['total_dose'],
+            '--output': self.TM,
+            '--mdocs': 'mdocs'
+        })
+        subargs = self.get_subargs('ts_import', '--')
+        args.update(subargs)
+        self.batch_execute('ts_import', batch, args)
+
+        # Run create_settings
+        args = Args({
+            'WarpTools': 'create_settings',
+            '--folder_data': self.TM,
+            '--extension': "*.tomostar",
+            '--folder_processing': self.TS,
+            '--output': self.TSS,
+            '--angpix': ps,
+            '--exposure': self.acq['total_dose']
+        })
+        subargs = self.get_subargs('create_settings', '--')
+        args.update(subargs)
+        self.batch_execute('create_settings', batch, args)
+
+        self.runAlignment(batch)
+
+        # Run ts_aretomo wrapper
+        args = Args({
+            'WarpTools': 'ts_aretomo',
+            '--settings': self.TSS,
+            '--exe': os.environ['ARETOMO2']
+        })
+        if self.gpuList:
+            args['--device_list'] = self.gpuList
+
+        subargs = self.get_subargs('ts_aretomo', '--')
+        args.update(subargs)
+        self.batch_execute('ts_aretomo', batch, args)
+
+        self.updateBatchInfo(batch)
+
+    def _output(self, batch):
+        """ Register output STAR files. """
+        def _float(v):
+            return round(float(v), 2)
+
+        batch.mkdir('tilt_series')
+        self.log("Registering output STAR files.")
+        tsAllTable = StarFile.getTableFromFile('global', self.inputTs)
+
+        newTsStarFile = batch.join('tilt_series_aln.star')
+
+        newTsAllTable = Table(tsAllTable.getColumnNames() + ['rlnTiltSeriesAligned'])
+        dims = 0, 0, 0
+        for tsRow in tsAllTable:
+            tsName = tsRow.rlnTomoName
+            # FIXME: The proper star files for each aligned TS needs to be generated
+            tsStarFile = self.join('tilt_series', tsName + '.star')
+            tsAligned = self.join(self.TS, 'tiltstack', tsName, f"{tsName}_aligned.mrc")
+            if not os.path.exists(tsAligned):
+                self.log(f"ERROR: Missing expected aligned TS: {tsAligned}")
+                tsAligned = "None"  # FIXME Handle missing aligned TS
+            else:
+                newDims = Image.get_dimensions(tsAligned)
+                if newDims[2] > dims[2]:
+                    dims = newDims
+            tsDict = tsRow._asdict()
+            tsDict.update({
+                'rlnTomoTiltSeriesStarFile': tsStarFile,
+                'rlnTiltSeriesAligned': tsAligned
+            })
+            newTsAllTable.addRowValues(**tsDict)
+
+        self.write_ts_table('global', newTsAllTable, newTsStarFile)
+        N = len(newTsAllTable)
+        # ps = newTsAllTable[0].rlnTomoTiltSeriesPixelSize
+        newPs = float(self._args['ts_aretomo.angpix'])
+        x, y, n = dims
+        self.outputs = {
+            'TiltSeriesAligned': {
+                'label': 'Tilt Series Aligned',
+                'type': 'TiltSeriesAligned',
+                'info': f"{N} items, {x} x {y} x {n}, {newPs:0.3f} Å/px",
+                'files': [
+                    [newTsStarFile, 'TomogramGroupMetadata.star.relion.tomo.aligntiltseries']
+                ]
+            }
+        }
+        self.updateBatchInfo(batch)
+
+    def prerun(self):
+        self.prerunTs()
