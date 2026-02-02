@@ -16,10 +16,11 @@
 
 import os
 
-from emtools.utils import FolderManager, Path, Process
+from emtools.utils import FolderManager
+from emtools.metadata import StarFile, Table
+from emtools.jobs import Batch, Args
+from emtools.image import Image
 from emwrap.base import ProcessingPipeline
-from emtools.metadata import StarFile, Acquisition
-from emtools.jobs import Batch
 
 
 class WarpBasePipeline(ProcessingPipeline):
@@ -105,7 +106,6 @@ class WarpBasePipeline(ProcessingPipeline):
         gpus = self._args.get('gpus', '')
         self.gpuList = self.get_gpu_list(gpus) if gpus else []
         self.acq = self.loadAcquisition()
-        self.launcher = get_launcher()
         if gainFile := self.acq.get('gain', None):
             self.gain = os.path.basename(gainFile)
         else:
