@@ -1,0 +1,372 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/3dem/emconfig/forms/form-schema.json",
+  "title": "EMConfig Form Schema",
+  "description": "Schema for validating EMConfig form JSON files as defined in https://github.com/3dem/emconfig/blob/main/forms/README.md",
+  "type": "object",
+  "required": ["sections"],
+  "properties": {
+    "sections": {
+      "type": "array",
+      "description": "Array of section objects that group parameters",
+      "items": {
+        "$ref": "#/$defs/section"
+      },
+      "minItems": 1
+    }
+  },
+  "$defs": {
+    "section": {
+      "type": "object",
+      "description": "A section represents a grouping of parameters, often displayed as a tab or framed box",
+      "required": ["label", "params"],
+      "properties": {
+        "label": {
+          "type": "string",
+          "description": "The title of the section displayed in the UI"
+        },
+        "params": {
+          "type": "array",
+          "description": "Array of parameter objects in this section",
+          "items": {
+            "$ref": "#/$defs/parameter"
+          }
+        },
+        "paramClass": {
+          "type": "string",
+          "enum": ["Group"],
+          "description": "Optional paramClass for section styling (e.g., Group)"
+        }
+      },
+      "additionalProperties": false
+    },
+    "parameter": {
+      "oneOf": [
+        { "$ref": "#/$defs/labelParam" },
+        { "$ref": "#/$defs/stringParam" },
+        { "$ref": "#/$defs/pathParam" },
+        { "$ref": "#/$defs/intParam" },
+        { "$ref": "#/$defs/floatParam" },
+        { "$ref": "#/$defs/booleanParam" },
+        { "$ref": "#/$defs/enumParam" },
+        { "$ref": "#/$defs/lineParam" },
+        { "$ref": "#/$defs/groupParam" },
+        { "$ref": "#/$defs/simpleParam" },
+        { "$ref": "#/$defs/unnamedParam" },
+        { "$ref": "#/$defs/emptyObject" }
+      ]
+    },
+    "commonAttributes": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Internal name used to identify the parameter and its value"
+        },
+        "label": {
+          "type": "string",
+          "description": "Display name for the parameter in the UI"
+        },
+        "default": {
+          "description": "Default value for the parameter"
+        },
+        "help": {
+          "type": "string",
+          "description": "Help text or tooltip providing more information"
+        },
+        "paramClass": {
+          "type": "string",
+          "description": "Type of graphical parameter"
+        },
+        "pointerClass": {
+          "type": "string",
+          "description": "Meta class that this parameter represents (e.g., 'Particles')"
+        },
+        "condition": {
+          "type": "string",
+          "description": "Condition to be evaluated with other parameters"
+        },
+        "validators": {
+          "type": "string",
+          "description": "Additional validations beyond default validators"
+        },
+        "allowsEmpty": {
+          "type": "boolean",
+          "description": "If true, empty values are allowed"
+        },
+        "readOnly": {
+          "type": "boolean",
+          "description": "If true, parameter is displayed but cannot be modified"
+        },
+        "hidden": {
+          "type": "boolean",
+          "description": "If true, param is not displayed but included in job values"
+        },
+        "tableMin": {
+          "type": "integer",
+          "description": "Minimum rows for table display"
+        },
+        "tableMax": {
+          "type": "integer",
+          "description": "Maximum rows for table display"
+        },
+        "expertLevel": {
+          "type": "integer",
+          "description": "Expert level for the parameter visibility"
+        }
+      }
+    },
+    "simpleParam": {
+      "description": "A parameter without explicit paramClass (defaults to StringParam behavior)",
+      "allOf": [
+        { "$ref": "#/$defs/commonAttributes" }
+      ],
+      "type": "object",
+      "required": ["name", "label"],
+      "not": {
+        "required": ["paramClass"]
+      },
+      "properties": {
+        "pattern": {
+          "type": "string",
+          "description": "File-browsing pattern, e.g., 'STAR Files (*.star)'"
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "labelParam": {
+      "description": "A simple text label for displaying information",
+      "allOf": [
+        { "$ref": "#/$defs/commonAttributes" }
+      ],
+      "type": "object",
+      "required": ["paramClass"],
+      "properties": {
+        "paramClass": {
+          "const": "LabelParam"
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "stringParam": {
+      "description": "A standard text input field",
+      "allOf": [
+        { "$ref": "#/$defs/commonAttributes" }
+      ],
+      "type": "object",
+      "required": ["name", "label", "paramClass"],
+      "properties": {
+        "paramClass": {
+          "const": "StringParam"
+        },
+        "default": {
+          "type": "string"
+        },
+        "pattern": {
+          "type": "string",
+          "description": "File-browsing pattern, e.g., 'STAR Files (*.star)'"
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "pathParam": {
+      "description": "A file or directory path input field with browsing capability",
+      "allOf": [
+        { "$ref": "#/$defs/commonAttributes" }
+      ],
+      "type": "object",
+      "required": ["name", "label", "paramClass"],
+      "properties": {
+        "paramClass": {
+          "const": "PathParam"
+        },
+        "default": {
+          "type": "string"
+        },
+        "pattern": {
+          "type": "string",
+          "description": "File-browsing pattern, e.g., 'STAR Files (*.star)'"
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "intParam": {
+      "description": "A field for entering integer values",
+      "allOf": [
+        { "$ref": "#/$defs/commonAttributes" }
+      ],
+      "type": "object",
+      "required": ["name", "label", "paramClass"],
+      "properties": {
+        "paramClass": {
+          "const": "IntParam"
+        },
+        "default": {
+          "type": "integer"
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "floatParam": {
+      "description": "A field for entering floating-point values",
+      "allOf": [
+        { "$ref": "#/$defs/commonAttributes" }
+      ],
+      "type": "object",
+      "required": ["name", "label", "paramClass"],
+      "properties": {
+        "paramClass": {
+          "const": "FloatParam"
+        },
+        "default": {
+          "type": "number"
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "booleanParam": {
+      "description": "A checkbox for true/false values",
+      "allOf": [
+        { "$ref": "#/$defs/commonAttributes" }
+      ],
+      "type": "object",
+      "required": ["name", "label", "paramClass"],
+      "properties": {
+        "paramClass": {
+          "const": "BooleanParam"
+        },
+        "default": {
+          "type": "boolean"
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "enumParam": {
+      "description": "A dropdown menu for selecting from a list of options",
+      "allOf": [
+        { "$ref": "#/$defs/commonAttributes" }
+      ],
+      "type": "object",
+      "required": ["name", "label", "paramClass", "choices"],
+      "properties": {
+        "paramClass": {
+          "const": "EnumParam"
+        },
+        "choices": {
+          "oneOf": [
+            {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "List of choices (items are both display and value)"
+            },
+            {
+              "type": "object",
+              "additionalProperties": { "type": "string" },
+              "description": "Dict of choices (keys are values, values are display)"
+            }
+          ]
+        },
+        "display": {
+          "type": "string",
+          "enum": ["combo", "hlist", "vlist"],
+          "description": "Display style for the enum"
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "lineParam": {
+      "description": "Groups parameters to be displayed on a single line",
+      "type": "object",
+      "required": ["paramClass", "label", "params"],
+      "properties": {
+        "paramClass": {
+          "const": "Line"
+        },
+        "label": {
+          "type": "string",
+          "description": "Label for the line group"
+        },
+        "params": {
+          "type": "array",
+          "description": "Parameters to display on the same line",
+          "items": {
+            "$ref": "#/$defs/parameter"
+          }
+        },
+        "condition": {
+          "type": "string"
+        },
+        "expertLevel": {
+          "type": "integer"
+        },
+        "help": {
+          "type": "string",
+          "description": "Help text for the line group"
+        },
+        "hidden": {
+          "type": "boolean",
+          "description": "If true, line is not displayed but included in job values"
+        }
+      },
+      "additionalProperties": false
+    },
+    "groupParam": {
+      "description": "Groups parameters in a grouped section",
+      "type": "object",
+      "required": ["paramClass", "label", "params"],
+      "properties": {
+        "paramClass": {
+          "const": "Group"
+        },
+        "label": {
+          "type": "string",
+          "description": "Label for the group"
+        },
+        "params": {
+          "type": "array",
+          "description": "Parameters to display in the group",
+          "items": {
+            "$ref": "#/$defs/parameter"
+          }
+        },
+        "condition": {
+          "type": "string"
+        },
+        "expertLevel": {
+          "type": "integer"
+        },
+        "help": {
+          "type": "string",
+          "description": "Help text for the group"
+        },
+        "hidden": {
+          "type": "boolean",
+          "description": "If true, group is not displayed but included in job values"
+        }
+      },
+      "additionalProperties": false
+    },
+    "unnamedParam": {
+      "description": "Unnamed parameters for direct command-line arguments",
+      "type": "object",
+      "not": {
+        "anyOf": [
+          { "required": ["name"] },
+          { "required": ["paramClass"] },
+          { "required": ["label"] }
+        ]
+      },
+      "patternProperties": {
+        "^--": {
+          "description": "Command-line argument flag and its value"
+        }
+      },
+      "minProperties": 1
+    },
+    "emptyObject": {
+      "description": "Empty object used as a spacer in the UI",
+      "type": "object",
+      "maxProperties": 0
+    }
+  }
+}

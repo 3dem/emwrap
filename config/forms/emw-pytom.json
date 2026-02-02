@@ -1,0 +1,127 @@
+{
+    "sections": [
+
+    {
+            "label": "Template Matching",
+
+            "params": [
+                {
+                    "label": "Input",
+                    "paramClass": "Group",
+                    "params": [
+                        {
+                            "name": "input_tomograms",
+                            "label": "Input tomograms (STAR):",
+                            "paramClass": "PathParam",
+                            "pointerClass": "Tomograms",
+                            "help": "STAR file with input tomograms"
+                        },
+                        {
+                            "name": "pytom.template",
+                            "label": "Template volume (MRC)",
+                            "paramClass": "PathParam",
+                            "pointerClass": "Volume"
+                        },
+                        {
+                            "name": "pytom.mask",
+                            "label": "Template mask (MRC)",
+                            "paramClass": "PointerParam",
+                            "pointerClass": "VolumeMask"
+                        }
+                    ]
+                },
+                {
+                    "name": "pytom.angular-search",
+                    "label": "Angular search (deg)",
+                    "paramClass": "FloatParam",
+                    "help": ""
+                },
+                {
+                    "paramClass": "Line",
+                    "label": "Filter:",
+                    "params": [
+                        {
+                            "name": "pytom.low-pass",
+                            "label": "Low-pass",
+                            "default": 20,
+                            "paramClass": "FloatParam",
+                            "help": ""
+                        },
+                        {
+                            "name": "pytom.high-pass",
+                            "label": "High-pass",
+                            "default": 400,
+                            "paramClass": "FloatParam",
+                            "help": ""
+                        }
+                    ]
+                },
+                {
+                    "name": "pytom.random-phase-correction",
+                    "label": "Random phase correction?",
+                    "paramClass": "BooleanParam",
+                    "default": true,
+                    "help": ""
+                },
+                {
+                    "name": "pytom.per-tilt-weighting",
+                    "label": "Per tilt weighting?",
+                    "paramClass": "BooleanParam",
+                    "default": true,
+                    "help": ""
+                },
+                {
+                    "name": "pytom.tomogram-ctf-model",
+                    "label": "Tomogram CTF model:",
+                    "default": "phase-flip",
+                    "help": ""
+                }
+
+            ]
+        },
+        {
+            "label": "Extraction",
+            "params": [
+                {
+                    "name": "pytom_extract.particle-diameter",
+                    "label": "Particle diameter (A)",
+                    "default": "140",
+                    "paramClass": "IntParam",
+                    "help": ""
+                },
+                {
+                    "name": "pytom_extract.n",
+                    "label": "Maximum number of particles",
+                    "default": "2500",
+                    "paramClass": "IntParam",
+                    "help": ""
+                },
+                {
+                    "name": "pytom_extract.tophat-filter",
+                    "label": "Extract also with tophat filter?",
+                    "paramClass": "BooleanParam",
+                    "default": true,
+                    "help": ""
+                },
+                {
+                    "name": "pytom_extract.tophat-connectivity",
+                    "label": "Tophat connectivity:",
+                    "paramClass": "IntParam",
+                    "default": 1,
+                    "help": ""
+                }
+            ]
+        },
+        {
+            "label": "Compute",
+            "paramClass": "Group",
+            "params": [
+                {
+                    "name": "gpus",
+                    "label": "GPUs",                    
+                    "help": "If it is a single number (N), it will represent the total number of GPUs (0..N-1). It there are multiple values, it will be the specific GPUs ID."
+                }
+            ]
+        }
+    ]
+}

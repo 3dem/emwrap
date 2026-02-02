@@ -1,0 +1,10 @@
+#!/bin/bash
+
+# Get the directory of the current script
+export DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+
+# Source the other script using the determined directory
+. "${DIR}/pytom.bashrc"
+
+"$@"
+

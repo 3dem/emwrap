@@ -1,0 +1,4 @@
+#!/bin/bash
+
+module load imod/4.11.24 -s && batchruntomo $@
+

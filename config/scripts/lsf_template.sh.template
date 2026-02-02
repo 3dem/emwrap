@@ -1,0 +1,19 @@
+#!/bin/bash
+#BSUB -P emwrap-tomo
+{gpu_line}
+#BSUB -R "rusage[mem=5000]"
+#BSUB -q cryo_core
+#BSUB -n {cpus}
+#BSUB -R "span[ptile={cpus}]"
+#BSUB -e {workingDir}/{jobId}/run.err -o {workingDir}/{jobId}/run.out
+
+cd {workingDir}
+
+hostname -f
+
+# For debugging, avoid cleanning temporary batch folders
+export EMWRAP_CLEAN=0
+source /etc/bashrc.modules
+
+{command}
+

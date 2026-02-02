@@ -1,0 +1,8 @@
+#!/bin/bash
+
+set -e
+
+. instance/bashrc
+. source/emconfig/emwrap.bashrc
+
+flask run --debug --port 5000

@@ -1,0 +1,95 @@
+{
+    "sections": [
+        {
+            "label": "Settings",
+            "params": [
+                {
+                    "name": "input_tiltseries",
+                    "label": "Input tilt series:",
+                    "pattern": "",
+                    "help": "STAR file with input tilt-series"
+                },
+                {
+                    "name": "ts_import.min_ntilts",
+                    "label": "Min number of tilts",
+                    "help": "",
+                    "default": 35
+                },
+                {
+                    "name": "ts_import.override_axis",
+                    "label": "Angle for Tilt Axis (deg)",
+                    "default": 85,
+                    "paramClass": "FloatParam",
+                    "help": ""
+                },
+                {
+                    "name": "create_settings.tomo_dimensions",
+                    "label": "Tomogram dimensions:",
+                    "default": "4096x4096x2000",
+                    "help": ""
+                }
+            ]
+        },
+        {
+            "label": "Etomo Patches",
+            "params": [
+                {
+                    "name": "ts_etomo_patches.angpix",
+                    "label": "Output pixel size (A/pix)",
+                    "paramClass": "FloatParam",
+                    "help": "Rescale tilt images to this pixel size; normally 10–15 A for cryo data; leave out to keep the original pixel size."
+                },
+                {
+                    "name": "ts_etomo_patches.patch_size",
+                    "label": "Patch size (A)",
+                    "default": 500,
+                    "paramClass": "FloatParam",
+                    "help": "Patch size for patch tracking in Angstroms"
+                },
+                {
+                    "name": "ts_etomo_patches.mask",
+                    "label": "Mask",
+                    "paramClass": "BooleanParam",
+                    "help": "Apply mask to each image if available; masked areas will be filled with Gaussian noise"
+                },
+                {
+                    "name": "ts_etomo_patches.initial_axis",
+                    "label": "Initial axis",
+                    "paramClass": "FloatParam",
+                    "help": "Override initial tilt axis angle with this value"
+                },
+                {
+                    "name": "ts_etomo_patches.do_axis_search",
+                    "label": "Do axis search",
+                    "paramClass": "BooleanParam",
+                    "help": "Fit a new tilt axis angle for the whole dataset"
+                },
+                {
+                    "name": "ts_etomo_patches.min_fov",
+                    "label": "Min FOV",
+                    "default": 0,
+                    "paramClass": "FloatParam",
+                    "help": "Disable tilts that contain less than this fraction of the tomogram's field of view due to excessive shifts"
+                }
+            ]
+        },
+        {
+            "label": "Compute",
+            "paramClass": "Group",
+            "params": [
+                {
+                    "name": "gpus",
+                    "label": "GPUs",                    
+                    "help": "If it is a single number (N), it will represent the total number of GPUs (0..N-1). It there are multiple values, it will be the specific GPUs ID."
+                },
+                {
+                    "name": "ts_etomo_patches.perdevice",
+                    "label": "Processes per device",
+                    "default": 1,
+                    "paramClass": "IntParam",
+                    "help": "(--per_device in ts_etomo_patches)"
+                }
+            ]
+        }
+    ]
+}

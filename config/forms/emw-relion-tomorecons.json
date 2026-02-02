@@ -1,0 +1,36 @@
+{
+    "sections": [
+        {
+            "label": "Input",
+            "params": [
+                {
+                    "label": "Compute",
+                    "paramClass": "LabelParam"
+                },
+                {
+                    "name": "cpus",
+                    "label": "CPUs",                    
+                    "help": "Number of CPUs used for MPI processes."
+                },                
+                {
+                    "label": "Input",
+                    "paramClass": "LabelParam"
+                },
+                {
+                    "name": "relion_reconstruct.i",
+                    "label": "Input images STAR file:",
+                    "pattern": "",
+                    "help": ""
+                },               
+                {
+                    "name": "relion_reconstruct.ctf",
+                    "label": "Do CTF-correction?",
+                    "paramClass": "BooleanParam",
+                    "default": true,
+                    "help": ""
+                }               
+                
+            ]
+    }
+  ]
+}

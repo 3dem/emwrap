@@ -1,0 +1,13 @@
+#!/bin/bash
+
+PROGRAM=$1
+shift
+
+export MODULES="warp/2.0dev33-latest aretomo2/1.0.0"
+#export MODULES="warp/2.0dev36 aretomo2/1.0.0"
+
+echo Loading modules $MODULES
+module load -s $MODULES
+
+$PROGRAM $@
+

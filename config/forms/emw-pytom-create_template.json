@@ -1,0 +1,84 @@
+{
+    "sections": [
+
+    {
+            "label": "Create",
+
+            "params": [
+                {
+                    "label": "Template",
+                    "paramClass": "Group",
+                    "params": [
+                        {
+                            "name": "pytom_create_template.input-map",
+                            "label": "Input map (MAP)",
+                            "paramClass": "PathParam",
+                            "pointerClass": "Volume"
+                        },
+                        {
+                            "label": "Voxel Size (A)",
+                            "paramClass": "Line",
+                            "params": [
+                                {
+                                    "name": "pytom_create_template.input-voxel-size-angstrom",
+                                    "label": "Input",
+                                    "paramClass": "FloatParam"
+                                },
+                                {
+                                    "name": "pytom_create_template.output-voxel-size-angstrom",
+                                    "label": "Output",
+                                    "paramClass": "FloatParam"
+                                }
+                            ]
+                        },
+                        {
+                            "name": "pytom_create_template.box-size",
+                            "label": "Output box size (px)",
+                            "paramClass": "IntParam"
+                        },
+                        {
+                            "label": "Operations",
+                            "paramClass": "Group",
+                            "params": [
+                                {
+                                    "name": "pytom_create_template.center",
+                                    "label": "Center",
+                                    "paramClass": "BooleanParam",
+                                    "help": "Set this flag to automatically center the density in the volume by measuring the center of mass."
+                                },
+                                {
+                                    "name": "pytom_create_template.invert",
+                                    "label": "Invert",
+                                    "paramClass": "BooleanParam",
+                                    "help": "Multiply template by -1. WARNING: not needed if ctf with defocus is already applied!"
+                                },
+                                {
+                                    "name": "pytom_create_template.mirror",
+                                    "label": "Mirror",
+                                    "paramClass": "BooleanParam",
+                                    "help": "Mirror the final template before writing to disk."
+                                }
+                                ]
+                        }
+                    ]
+                },
+                {
+                    "label": "Mask",
+                    "paramClass": "Group",
+                    "params": [
+                        {
+                           "name": "pytom_create_mask.radius",
+                           "label": "Radius (px)",
+                           "paramClass": "FloatParam"
+                        },
+                        {
+                           "name": "pytom_create_mask.sigma",
+                           "label": "Sigma (px)",
+                           "paramClass": "FloatParam"
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}
