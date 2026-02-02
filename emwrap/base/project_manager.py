@@ -433,6 +433,9 @@ class ProjectManager(FolderManager):
             if wait:
                 p.wait()
 
+    def get_workflow(self):
+        return self._wf
+
     def _writeJobParams(self, job, params):
         """ Write the job.star for the given job. """
         # Write job params in the output folder

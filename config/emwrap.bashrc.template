@@ -4,40 +4,46 @@
 export ROOT="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
 # Load the required Python environment, either a conda or virtualenv
-. ${ROOT}/../bashrc
+
 export SCRIPTS=$ROOT/scripts
 
-# emwrap config
-export EMCONFIG_FOLDER=$ROOT
+export EMWRAP_CONFIG=$(cat <<EOF
+{
+    "jobs": {
+        "emw-import-ts": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.base.import_ts"},
+        "emw-warp-mctf": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_mctf"},
+        "emw-warp-aretomo": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_aretomo"},
+        "emw-warp-etomo_patches": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_etomo_patches"},
+        "emw-warp-ctfrec": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_ctfrec"},
+        "emw-pytom-create_template": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.pytom.pytom_create_template"},
+        "emw-pytom": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.pytom.pytom_pipeline"},
+        "emw-pytme": {"launcher": "$SCRIPTS/emw-pytme.sh"},
+        "emw-warp-export_particles": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_export_particles"},
+        "emw-relion-tomorecons": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.relion.tomorecons"},
+        "emw-relion-tomorefine": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.relion.tomorefine"}
+    },
+    "cluster": {
+        "template": "$SCRIPTS/lsf_template.sh",
+        "submit": "$SCRIPTS/lsf_submit.sh {job_script}"
+    },
+    "forms": "$ROOT/source/emwrap/config/forms",  
+    "worfklows": "$ROOT/source/emwrap/config/workflows",
+    "programs": {
+        "WARP": {"launcher": "$SCRIPTS/warp_launcher.sh"},
+        "PYTOM": {"launcher": "$SCRIPTS/pytom_launcher.sh"},
+        "RELION": {"launcher": "$SCRIPTS/relion_launcher.sh"},
+        "MOTIONCOR2": {"launcher": "$SCRIPTS/motioncor2.sh"},
+        "MOTIONCOR3": {"launcher": "$SCRIPTS/motioncor3.sh"},
+        "ARETOMO2": {"launcher": "$SCRIPTS/aretomo2.sh"},
+        "ARETOMO3": {"launcher": "$SCRIPTS/aretomo3.sh"},
+        "CTFFIND": {"launcher": "$SCRIPTS/ctffind5.sh", "version": 5},
+        "CRYOCARE": {"launcher": "$SCRIPTS/cryocare_launcher.sh"}
+    }
+}
+EOF
+)
 
-# Motioncor
-export MOTIONCOR_PATH=$SCRIPTS/motioncor3.sh
-export MOTIONCOR_VERSION=3
-
-# Ctffind
-export CTFFIND_PATH=/usr/local/em/ctffind-5.0/bin/ctffind
-export CTFFIND_VERSION=5
-
-# AreTomo
-export ARETOMO_PATH=$SCRIPTS/aretomo3.sh
-export ARETOMO_VERSION=3
-
-export ARETOMO2=$SCRIPTS/aretomo2.sh
-
-# CryoCare
-#export CRYOCARE_PATH=$ROOT/cryocare.sh
-export CRYOCARE_TRAIN=$SCRIPTS/cryocare_train.sh
-export CRYOCARE_DENOISE=$SCRIPTS/cryocare_denoise.sh
-
-# WarpTools
-export WARP_LAUNCHER=$SCRIPTS/warp_launcher.sh
-
-# PyTOM
-export PYTOM_LAUNCHER=$SCRIPTS/pytom_launcher.sh
-
-# Relion
-export RELION_LAUNCHER=$SCRIPTS/relion_launcher.sh
-
+# Some alias for shortcut access
 # Shortcut to PurifiedApoF benchmark
 alias bench='python -m emwrap.tests.benchmark_apof_purified'
 
@@ -45,23 +51,3 @@ alias emw-relion='python -m emwrap.relion'
 alias emw-otf='python -m emwrap.mix.otf'
 alias emw-pytom='python -m emwrap.pytom.pytom_pipeline'
 alias emw-warp='python -m emwrap.warp'
-
-# Jobs configuration (type -> launcher mapping)
-export EMW_JOBS='{
-    "emw-import-ts": {"launcher": "scripts/emwrap_launcher.sh emwrap.base.import_ts"},
-    "emw-warp-mctf": {"launcher": "scripts/emwrap_launcher.sh emwrap.warp.warp_mctf"},
-    "emw-warp-aretomo": {"launcher": "scripts/emwrap_launcher.sh emwrap.warp.warp_aretomo"},
-    "emw-warp-etomo_patches": {"launcher": "scripts/emwrap_launcher.sh emwrap.warp.warp_etomo_patches"},
-    "emw-warp-ctfrec": {"launcher": "scripts/emwrap_launcher.sh emwrap.warp.warp_ctfrec"},
-    "emw-pytom-create_template": {"launcher": "scripts/emwrap_launcher.sh emwrap.pytom.pytom_create_template"},
-    "emw-pytom": {"launcher": "scripts/emwrap_launcher.sh emwrap.pytom.pytom_pipeline"},
-    "emw-pytme": {"launcher": "scripts/emw-pytme.sh"},
-    "emw-warp-export_particles": {"launcher": "scripts/emwrap_launcher.sh emwrap.warp.warp_export_particles"},
-    "emw-relion-tomorecons": {"launcher": "scripts/emwrap_launcher.sh emwrap.relion.tomorecons"},
-    "emw-relion-tomorefine": {"launcher": "scripts/emwrap_launcher.sh emwrap.relion.tomorefine"}
-}'
-
-export EMW_CLUSTER='{
-    "template": "scripts/lsf_template.sh",
-    "submit": "/hpcf/authorized_apps/cryo_apps/emconfig/scripts/lsf_submit.sh {job_script}",
-}'

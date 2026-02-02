@@ -14,83 +14,62 @@
 # *
 # **************************************************************************
 
+import sys
 import os
 import json
+import argparse
+from pprint import pprint
 
-from emtools.utils import FolderManager
+from emtools.utils import FolderManager, Color
 
 
 class ProcessingConfig:
-    _path = os.path.join(os.environ.get('EMCONFIG_FOLDER', ''))
-    _fm = FolderManager(_path)
-    _config = {}
-    _jobs_dict = {}
+    _config = None
     _forms_dict = {}
 
     @classmethod
-    def load_config(cls):
-        if cls._fm.exists('config.json'):
-            with open(cls._fm.join('config.json')) as f:
-                cls._config = json.load(f)
+    def _get_config(cls, key='', default=None):
+        if cls._config is None:
+            cls._config = json.loads(os.environ.get('EMWRAP_CONFIG', '{}'))
 
-            cls._jobs_dict = {job['type']: job for job in cls.get_jobs()}
-
-    @classmethod
-    def get_menu(cls):
-        return cls._config['menu']
+        return cls._config.get(key, default or {}) if key else cls._config
 
     @classmethod
     def get_jobs(cls):
-        return cls._config['jobs']
+        return cls._get_config('jobs')
 
     @classmethod
     def get_cluster(cls):
-        return cls._config.get('cluster', {})
+        return cls._get_config('cluster')
 
     @classmethod
     def get_cluster_template(cls):
-        if cluster := cls.get_cluster():
-            return cls._fm.join(cluster['template'])
-        else:
-            return None
+        return cls.get_cluster().get('template', None)
 
     @classmethod
     def get_cluster_submit(cls):
         cls.get_cluster().get('submit', None)
 
     @classmethod
-    def get_jobs_dict(cls):
-        return cls._jobs_dict
+    def get_job_conf(cls, jobtype):
+        return cls.get_jobs().get(jobtype)
 
     @classmethod
-    def get_job_conf(cls, jobtype, default=None):
-        return cls._jobs_dict.get(jobtype, default)
+    def get_job_form_file(cls, jobtype):
+        return os.path.join(cls._get_config('forms'), f'{jobtype}.json')
 
     @classmethod
     def get_job_form(cls, jobtype):
-        if jobtype not in cls._forms_dict:
-            form = None
-            formJson = cls._jobs_dict.get(jobtype, {}).get('form', '')
-            if formJson and cls._fm.exists(formJson):
-                with open(cls._fm.join(formJson)) as f:
-                    form = json.load(f)
-            cls._forms_dict[jobtype] = form
-
-        return cls._forms_dict[jobtype]
+        if jobtype in cls.get_jobs():
+            jsonFile = cls.get_job_form_file(jobtype)
+            if os.path.exists(jsonFile):
+                with open(jsonFile) as f:
+                    return json.load(f)
+        return None
 
     @classmethod
     def get_job_launcher(cls, jobtype):
-        jobConf = cls.get_job_conf(jobtype)
-        if launcher := jobConf.get('launcher', None):
-            # The launcher string value could have the script path and some
-            # extra arguments. The script path could be relative to the config
-            # file, so we add the config prefix and check that it exist
-            parts = launcher.split()
-            launcher_path = cls._fm.join(parts[0])
-            if os.path.exists(launcher_path):
-                parts[0] = launcher_path
-                return ' '.join(parts)
-        return None
+        return cls.get_job_conf(jobtype).get('launcher', None)
 
     @classmethod
     def iter_form_params(cls, jobForm):
@@ -121,5 +100,34 @@ class ProcessingConfig:
                 values[name] = v
         return values
 
+    @classmethod
+    def print_config(cls):
+        print(json.dumps(cls._get_config(), indent=4))
 
-ProcessingConfig.load_config()
+    @classmethod
+    def main(cls):
+        p = argparse.ArgumentParser(
+            prog='emw',
+            description='emwrap config manager')
+
+        g = p.add_mutually_exclusive_group()
+
+        g.add_argument('--print', '-p', action='store_true',
+                       help="Print the existing configuration.")
+        g.add_argument('--form', '-f', metavar='JOB_TYPE',
+                       help="Print the corresponding form for this job type.")
+
+        args = p.parse_args()
+        n = len(sys.argv)
+
+        if n == 1 or args.print:
+            cls.print_config()
+
+        elif jobtype := args.form:
+            if not jobtype in ProcessingConfig.get_jobs():
+                raise Exception(f"Job type: {jobtype} not found in EMWRAP_CONFIG['jobs']")
+            formFile = ProcessingConfig.get_job_form_file(jobtype)
+            if not os.path.exists(formFile):
+                raise Exception(f"Form file: {Color.red(formFile)} does not exists.")
+            form = ProcessingConfig.get_job_form(jobtype)
+            print(json.dumps(form, indent=4))
