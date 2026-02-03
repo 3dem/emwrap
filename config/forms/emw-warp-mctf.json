@@ -8,7 +8,8 @@
                     "label": "Input tilt series:",
                     "pattern": "",
                     "help": "STAR file with input tilt-series",
-                    "paramClass": "PathParam"
+                    "paramClass": "PathParam",
+                    "pointerClass": "TiltSeries"
                 },
                 {
                     "name": "create_settings.bin_angpix",

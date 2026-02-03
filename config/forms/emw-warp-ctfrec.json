@@ -7,7 +7,9 @@
                     "name": "input_tiltseries",
                     "label": "Input tilt series:",
                     "pattern": "",
-                    "help": "STAR file with input tilt-series"
+                    "help": "STAR file with input tilt-series",
+                    "paramClass": "PathParam",
+                    "pointerClass": "TiltSeriesAligned"
                 },
                 {
                     "label": "Reconstruct",

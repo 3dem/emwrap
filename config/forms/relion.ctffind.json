@@ -7,7 +7,9 @@
                     "name": "input_star_mics",
                     "label": "Input micrographs STAR file:",
                     "pattern": "STAR Files (*.star)",
-                    "help": "A STAR file with all micrographs to run CTFFIND or Gctf on"
+                    "help": "A STAR file with all micrographs to run CTFFIND or Gctf on",
+                    "paramClass": "PathParam",
+                    "pointerClass": "Micrographs"
                 },
                 {
                     "name": "use_noDW",

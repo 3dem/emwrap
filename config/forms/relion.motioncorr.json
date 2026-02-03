@@ -7,7 +7,9 @@
                     "name": "input_star_mics",
                     "label": "Input movies STAR file:",
                     "pattern": "STAR Files (*.star)",
-                    "help": "A STAR file with all micrographs to run MOTIONCORR on"
+                    "help": "A STAR file with all micrographs to run MOTIONCORR on",
+                    "paramClass": "PathParam",
+                    "pointerClass": "Movies"
                 },
                 {
                     "name": "first_frame_sum",

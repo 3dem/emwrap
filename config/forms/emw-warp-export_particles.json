@@ -22,7 +22,9 @@
                     "name": "input_tomograms",
                     "label": "Input tomograms (STAR):",
                     "pattern": "",
-                    "help": "Input tomograms with coordinates"
+                    "help": "Input tomograms with coordinates",
+                    "paramClass": "PathParam",
+                    "pointerClass": "Tomograms"
                 },
                 {
                     "name": "ts_export_particles.diameter",
