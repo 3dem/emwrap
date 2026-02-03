@@ -32,6 +32,7 @@ export EMWRAP_CONFIG=$(cat <<EOF
         "WARP": {"launcher": "$SCRIPTS/warp_launcher.sh"},
         "PYTOM": {"launcher": "$SCRIPTS/pytom_launcher.sh"},
         "RELION": {"launcher": "$SCRIPTS/relion_launcher.sh"},
+        "IMOD": {"launcher": "$SCRIPTS/imod_launcher.sh"},
         "MOTIONCOR2": {"launcher": "$SCRIPTS/motioncor2.sh"},
         "MOTIONCOR3": {"launcher": "$SCRIPTS/motioncor3.sh"},
         "ARETOMO2": {"launcher": "$SCRIPTS/aretomo2.sh"},

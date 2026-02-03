@@ -1,0 +1,11 @@
+#!/bin/bash
+
+module purge && module load -s imod/5.1.9
+
+export PROGRAM=$1
+shift
+
+$PROGRAM "$@"
+
+
+
