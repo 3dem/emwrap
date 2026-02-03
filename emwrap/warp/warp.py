@@ -262,19 +262,6 @@ class WarpBaseTsAlign(WarpBasePipeline):
 
         self.runAlignment(batch)
 
-        # Run ts_aretomo wrapper
-        args = Args({
-            'WarpTools': 'ts_aretomo',
-            '--settings': self.TSS,
-            '--exe': os.environ['ARETOMO2']
-        })
-        if self.gpuList:
-            args['--device_list'] = self.gpuList
-
-        subargs = self.get_subargs('ts_aretomo', '--')
-        args.update(subargs)
-        self.batch_execute('ts_aretomo', batch, args)
-
         self.updateBatchInfo(batch)
 
     def _output(self, batch):
@@ -312,7 +299,7 @@ class WarpBaseTsAlign(WarpBasePipeline):
         self.write_ts_table('global', newTsAllTable, newTsStarFile)
         N = len(newTsAllTable)
         # ps = newTsAllTable[0].rlnTomoTiltSeriesPixelSize
-        newPs = float(self._args['ts_aretomo.angpix'])
+        newPs = float(self._args[self.output_angpix])
         x, y, n = dims
         self.outputs = {
             'TiltSeriesAligned': {

@@ -14,20 +14,7 @@
 # *
 # **************************************************************************
 
-import os
-import shutil
-import json
-import argparse
-import time
-import sys
-from glob import glob
-from datetime import datetime
-
-from emtools.utils import Color, FolderManager, Path, Process
-from emtools.jobs import Batch, Args
-from emtools.metadata import StarFile, Table, WarpXml
-from emtools.image import Image
-
+from emtools.jobs import Args
 
 from .warp import WarpBaseTsAlign
 
@@ -40,6 +27,7 @@ class WarpEtomoPatches(WarpBaseTsAlign):
         - ts_aretomo -> ts alignment
     """
     name = 'emw-warp-etomo_patches'
+    output_angpix = "ts_etomo_patches.angpix"
 
     def runAlignment(self, batch):
         # Run ts_aretomo wrapper
@@ -50,7 +38,8 @@ class WarpEtomoPatches(WarpBaseTsAlign):
         if self.gpuList:
             args['--device_list'] = self.gpuList
 
-        subargs = self.get_subargs('ts_etomo_patches', '--')
+        subargs = Args(self._args).subset('ts_etomo_patches', '--', 
+                                          filters=['remove_false', 'remove_empty'])
         args.update(subargs)
         self.batch_execute('ts_etomo_patches', batch, args)
 

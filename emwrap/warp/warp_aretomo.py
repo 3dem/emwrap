@@ -29,6 +29,7 @@ class WarpAreTomo(WarpBaseTsAlign):
         - ts_aretomo -> ts alignment
     """
     name = 'emw-warp-aretomo'
+    output_angpix = "ts_aretomo.angpix"
 
     def runAlignment(self, batch):
         # Run ts_aretomo wrapper
