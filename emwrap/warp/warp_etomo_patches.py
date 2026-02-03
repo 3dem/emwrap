@@ -14,7 +14,11 @@
 # *
 # **************************************************************************
 
+import os
+
 from emtools.jobs import Args
+from emtools.metadata import StarFile, Table
+from emwrap.base import ProcessingPipeline
 
 from .warp import WarpBaseTsAlign
 
@@ -42,6 +46,25 @@ class WarpEtomoPatches(WarpBaseTsAlign):
                                           filters=['remove_false', 'remove_empty'])
         args.update(subargs)
         self.batch_execute('ts_etomo_patches', batch, args)
+
+        # Generate aligned TS using IMOD's newstack
+        imod_launcher = ProcessingPipeline.get_launcher('IMOD')
+
+        tsAllTable = StarFile.getTableFromFile('global', self.inputTs)
+
+        def _tsFile(tsName, suffix):
+            # Paths relative to the job directory, since will be executed from the batch there
+            return os.path.join(self.TS, 'tiltstack', tsName, f"{tsName}{suffix}")
+
+        for tsRow in tsAllTable:
+            tsName = tsRow.rlnTomoName
+            args = Args({
+                'newstack': '',
+                '-InputFile': _tsFile(tsName, '.st'),
+                '-OutputFile': _tsFile(tsName, '_aligned.mrc'),
+                '-TransformFile': _tsFile(tsName, '.xf')
+            })
+            batch.call(imod_launcher, args, logfile=self.join('run.out'))
 
 
 if __name__ == '__main__':
