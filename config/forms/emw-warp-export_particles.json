@@ -24,7 +24,7 @@
                     "pattern": "",
                     "help": "Input tomograms with coordinates",
                     "paramClass": "PathParam",
-                    "pointerClass": "Tomograms"
+                    "pointerClass": "TomogramCoordinates"
                 },
                 {
                     "name": "ts_export_particles.diameter",

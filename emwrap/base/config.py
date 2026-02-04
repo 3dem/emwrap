@@ -81,7 +81,7 @@ class ProcessingConfig:
         the form definition. """
         for sectionDef in jobForm['sections']:
             for paramDef in sectionDef['params']:
-                if paramDef.get('paramClass', '') == 'Line':
+                if paramDef.get('paramClass', '') in ['Group', 'Line']:
                     for paramDef2 in paramDef['params']:
                         yield paramDef2
                 else:
