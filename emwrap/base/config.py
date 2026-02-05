@@ -72,6 +72,19 @@ class ProcessingConfig:
         return None
 
     @classmethod
+    def get_workflow_file(cls, workflowId):
+        return os.path.join(cls._get_config('workflows'), f'{workflowId}.json')
+
+    @classmethod
+    def get_workflow(cls, workflowId):
+        workflowFile = cls.get_workflow_file(workflowId)
+        if not os.path.exists(workflowFile):
+            raise Exception(f"Workflow file: {Color.red(workflowFile)} does not exists.")
+            
+        with open(workflowFile) as f:
+            return json.load(f)
+
+    @classmethod
     def get_job_launcher(cls, jobtype):
         return cls.get_job_conf(jobtype).get('launcher', None)
 

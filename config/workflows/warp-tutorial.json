@@ -1,5 +1,4 @@
-[
-    {
+{
         "label": "Warp Tutorial",
         "description": "Basic steps to follow the Warp tutorial",
         "jobs": [
@@ -48,4 +47,3 @@
             }
         ]
     }
-]

@@ -298,8 +298,15 @@ class ProjectManager(FolderManager):
 
         return self._instanciateJobs({jobId: _jobInfo(jobId) for jobId in jobIds})
 
-    def loadWorkflow(self, workflowJobs):
+    def loadWorkflow(self, **kwargs):
         """ Load a workflow with jobs templates. """
+        if 'workflow_id' in kwargs:
+            workflow = ProcessingConfig.get_workflow(kwargs['workflow_id'])
+        elif 'workflow' in kwargs:
+            workflow = kwargs['workflow']
+        else:
+            raise Exception("workflow_id or workflow is required.")
+
         def _jobInfo(jobEntry):
             return {
                 'jobtype': jobEntry['jobtype'],
@@ -307,7 +314,7 @@ class ProjectManager(FolderManager):
                 'parents': set(),
                 'children': set()
             }
-        return self._instanciateJobs({e['jobid']: _jobInfo(e) for e in workflowJobs})
+        return self._instanciateJobs({e['jobid']: _jobInfo(e) for e in workflow['jobs']})
 
     def runJob(self, jobTypeOrId, params=None, clean=False, wait=False, update=True):
         """ Run a job.
@@ -318,6 +325,9 @@ class ProjectManager(FolderManager):
         If it is a new job:
             - Must provide jobType and params
         """
+        if not jobTypeOrId:
+            raise Exception("Job type or id is required to run a job.")
+
         if update:
             self.update()
 

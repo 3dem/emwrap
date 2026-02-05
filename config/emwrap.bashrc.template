@@ -27,7 +27,7 @@ export EMWRAP_CONFIG=$(cat <<EOF
         "submit": "$SCRIPTS/lsf_submit.sh {job_script}"
     },
     "forms": "$ROOT/source/emwrap/config/forms",
-    "worfklows": "$ROOT/source/emwrap/config/workflows",
+    "workflows": "$ROOT/source/emwrap/config/workflows",
     "programs": {
         "WARP": {"launcher": "$SCRIPTS/warp_launcher.sh"},
         "PYTOM": {"launcher": "$SCRIPTS/pytom_launcher.sh"},
