@@ -38,25 +38,23 @@
                         },
                         {
                             "label": "Operations",
-                            "paramClass": "Group",
+                            "paramClass": "Line",
+                            "help": "*Center*: Set this flag to automatically center the density in the volume by measuring the center of mass.\n\nInvert: Multiply template by -1. WARNING: not needed if ctf with defocus is already applied!\nMirror: Mirror the final template before writing to disk.",
                             "params": [
                                 {
                                     "name": "pytom_create_template.center",
                                     "label": "Center",
-                                    "paramClass": "BooleanParam",
-                                    "help": "Set this flag to automatically center the density in the volume by measuring the center of mass."
+                                    "paramClass": "BooleanParam"
                                 },
                                 {
                                     "name": "pytom_create_template.invert",
                                     "label": "Invert",
-                                    "paramClass": "BooleanParam",
-                                    "help": "Multiply template by -1. WARNING: not needed if ctf with defocus is already applied!"
+                                    "paramClass": "BooleanParam"
                                 },
                                 {
                                     "name": "pytom_create_template.mirror",
                                     "label": "Mirror",
-                                    "paramClass": "BooleanParam",
-                                    "help": "Mirror the final template before writing to disk."
+                                    "paramClass": "BooleanParam"
                                 }
                                 ]
                         }
