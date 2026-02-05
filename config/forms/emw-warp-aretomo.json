@@ -56,6 +56,12 @@
                     "default": 0,
                     "paramClass": "FloatParam",
                     "help": ""
+                },
+                {
+                    "name": "ts_aretomo.patches",
+                    "label": "Patches",
+                    "default": "1x1",
+                    "help": "Number of patches for local alignments in X, Y, separated by 'x': e.g. 6x4. Increases processing time."                      
                 }
             ]
         },
