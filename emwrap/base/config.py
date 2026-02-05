@@ -79,13 +79,18 @@ class ProcessingConfig:
     def iter_form_params(cls, jobForm):
         """ Iterate over all params in sections, groups, lines of
         the form definition. """
+        def _iter_params(containerDef):            
+            if params := containerDef.get('params', None):
+                for p in params:
+                    for paramDef in _iter_params(p):
+                        yield paramDef
+            else:
+                yield containerDef
+
+
         for sectionDef in jobForm['sections']:
-            for paramDef in sectionDef['params']:
-                if paramDef.get('paramClass', '') in ['Group', 'Line']:
-                    for paramDef2 in paramDef['params']:
-                        yield paramDef2
-                else:
-                    yield paramDef
+            for paramDef in _iter_params(sectionDef):
+                yield paramDef
 
     @classmethod
     def get_form_values(cls, jobForm, all=False):
