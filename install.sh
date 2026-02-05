@@ -12,7 +12,19 @@ BOLD='\033[1m'
 NORMAL='\033[0m' # Resets the color to default
 
 DIR="source"
+CURRENT_STEP=""
 
+# Error handler function
+error_handler() {
+  echo -e "\n${RED}${BOLD}======================================${NORMAL}"
+  echo -e "${RED}${BOLD}ERROR:${NORMAL} Installation failed during: ${GREEN}${CURRENT_STEP}${NORMAL}"
+  echo -e "${RED}Script terminated at line $1${NORMAL}"
+  echo -e "${RED}${BOLD}======================================${NORMAL}"
+  exit 1
+}
+
+# Set up the trap to catch errors
+trap 'error_handler ${LINENO}' ERR
 
 # Echo the command and arguments with some color code
 # and then execute it
@@ -23,15 +35,18 @@ run_cmd() {
 
 # Clone a development repo and pip install it
 clone() {
+  CURRENT_STEP="cloning ${1}"
   echo -e ">>> Installing ${GREEN} ${1} ${NORMAL}..."
   run_cmd git clone --branch ${2} https://github.com/3dem/${1}.git ${DIR}/${1}
   if [ "$#" -lt 3 ]; then
+    CURRENT_STEP="pip install ${1}"
     run_cmd pip install -e ${DIR}/${1}
   fi
 }
 
 # Detect conda installation and active environment
 detect_conda() {
+  CURRENT_STEP="detecting conda installation"
   echo -e ">>> Detecting conda installation..."
   
   CONDA_BASE=""
@@ -61,6 +76,7 @@ detect_conda() {
 
 # Generate activation script for later use
 generate_activate_script() {
+  CURRENT_STEP="generating activation script"
   local SOURCE_FILE="${DIR}/bashrc"
   # Create empty placeholder file
   touch "$SOURCE_FILE"
@@ -113,6 +129,7 @@ EOF
 }
 
 link_scripts() {
+  CURRENT_STEP="linking scripts"
   run_cmd ln -s ${DIR}/emconfig/scripts/update.sh update.sh
   run_cmd ln -s ${DIR}/emconfig/scripts/run.sh run.sh
   run_cmd chmod +x update.sh run.sh
@@ -126,17 +143,21 @@ if [ -d "$DIR" ]; then
 fi
 
 
+CURRENT_STEP="creating source directory"
 run_cmd mkdir ${DIR}
 clone emtools devel
 clone emhub devel
 clone emwrap main
-clone emconfig main pip_install=false
 
 # Detect conda installation
 detect_conda || true
 generate_activate_script
 link_scripts
-emh-data --create_minimal instance 
+
+CURRENT_STEP="creating minimal instance"
+emh-data --create_minimal instance
+
+CURRENT_STEP="copying processing extras"
 run_cmd cp -r ${DIR}/emhub/extras/processing instance/extra 
 echo -e "\n${GREEN}${BOLD}Installation complete!${NORMAL}"
 

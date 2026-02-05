@@ -9,6 +9,19 @@ BOLD='\033[1m'
 NORMAL='\033[0m' # Resets the color to default
 
 DIR="$(pwd)/source"
+CURRENT_REPO=""
+
+# Error handler function
+error_handler() {
+  echo -e "\n${RED}${BOLD}======================================${NORMAL}"
+  echo -e "${RED}${BOLD}ERROR:${NORMAL} Update failed for ${GREEN}${CURRENT_REPO}${NORMAL}"
+  echo -e "${RED}Script terminated at line $1${NORMAL}"
+  echo -e "${RED}${BOLD}======================================${NORMAL}"
+  exit 1
+}
+
+# Set up the trap to catch errors
+trap 'error_handler ${LINENO}' ERR
 
 # Echo the command and arguments with some color code
 # and then execute it
@@ -19,16 +32,16 @@ run_cmd() {
 
 # Clone a development repo and pip install it
 update() {
+  CURRENT_REPO=$1  # Track which repo we're updating
   echo -e ">>> Updating ${GREEN} ${1} ${NORMAL}..."
-  run_cmd cd ${DIR}/${1}
-  run_cmd git pull --prune 
-  if [ "$#" -lt 2 ]; then
-    run_cmd pip install -e ${DIR}/${1}
-  fi
+  run_cmd cd "${DIR}/${1}"
+  run_cmd git pull --prune
+  run_cmd pip install -e "${DIR}/${1}" # Always reinstall the package
 }
 
 # Update the each repository
 update emtools
-update emhub 
+update emhub
 update emwrap
-update emconfig pip_install=false
+
+echo -e "\n${GREEN}${BOLD}All updates completed successfully!${NORMAL}"
