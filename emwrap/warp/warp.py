@@ -177,11 +177,6 @@ class WarpBasePipeline(ProcessingPipeline):
         with StarFile(starFile, 'w') as sfOut:
             sfOut.writeTable(tableName, table, computeFormat='left', timeStamp=True)
 
-    def batch_execute(self, label, batch, args, logfile=None, logcmd=True):
-        """ Override the batch_execute method to log the command to the commands.txt file. """
-        return super().batch_execute(label, batch, args, 
-                                     logfile=logfile, logcmd=logcmd)
-
 
 class WarpBaseTsAlign(WarpBasePipeline):
     """ Base class for all Warp TS alignment wrappers:
