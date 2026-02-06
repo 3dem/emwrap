@@ -1,4 +1,6 @@
 {
+    "name": "emw-warp-aretomo",
+    "help": "Warp wrapper to run *ts_aretomo* for tilt-series alignment. \n\n*REFERENCES*:\n[[https://warpem.github.io/warp/reference/warptools/api/tilt_series/?h=ts_aretomo#ts_aretomo][ts_aretomo]]",
     "sections": [
         {
             "label": "Aretomo",

@@ -1,4 +1,6 @@
 {
+    "name": "emw-warp-ctfrec",
+    "help": "Warp wrapper to run CTF estimation and tomogram reconstruction. It will run the following programs:\n\n*REFERENCES*:\n[[https://warpem.github.io/warp/reference/warptools/api/tilt_series/?h=ts_ctf#ts_ctf][ts_ctf]]\n[[https://warpem.github.io/warp/reference/warptools/api/tilt_series/?h=ts_reconstruct#ts_reconstruct][ts_reconstruct]]",
     "sections": [
         {
             "label": "Input",

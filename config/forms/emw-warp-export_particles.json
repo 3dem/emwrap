@@ -1,4 +1,6 @@
 {
+    "name": "emw-warp-export_particles",
+    "help": "Warp wrapper to export particle images (2D or 3D) from tilt-series for subtomogram averaging. It will run the following program:\n\n*REFERENCES*:\n[[https://warpem.github.io/warp/reference/warptools/api/tilt_series/?h=ts_export_particles#ts_export_particles][ts_export_particles]]",
     "sections": [
         {
             "label": "Input",

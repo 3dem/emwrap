@@ -1,4 +1,6 @@
 {
+    "name": "emw-pytom",
+    "help": "Wrapper for *pytom-match-pick*, a GPU-accelerated template matching for CryoET, developed by Marten L. Chaillet and Sander Roet in the group of Friedrich Förster at Utrecht University.\n\n*Tutorial*:\nhttps://sbc-utrecht.github.io/pytom-match-pick/\n\n*CITATIONS*:\n\nChaillet, M. L., Roet, S., Veltkamp, R. C., & Förster, F. (2025). pytom-match-pick: A tophat-transform constraint for automated classification in template matching. Journal of Structural Biology: X, 11, 100125. https://doi.org/10.1016/j.yjsbx.2025.100125\n\nChaillet, M. L., van der Schot, G., Gubins, I., Roet, S., Veltkamp, R. C., & Förster, F. (2023). Extensive angular sampling enables the sensitive localization of macromolecules in electron tomograms. International Journal of Molecular Sciences, 24(17), 13375. https://doi.org/10.3390/ijms241713375",
     "sections": [
 
     {
