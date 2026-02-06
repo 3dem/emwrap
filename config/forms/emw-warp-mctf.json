@@ -11,7 +11,7 @@
                     "pattern": "",
                     "help": "STAR file with input tilt-series",
                     "paramClass": "PathParam",
-                    "pointerClass": "FramesSeries"
+                    "pointerClass": "FrameSeries"
                 },
                 {
                     "name": "create_settings.bin_angpix",
@@ -122,7 +122,7 @@
                     "label": "Use sum",
                     "paramClass": "BooleanParam",
                     "help": "(--c_use_sum) "
-                },                
+                },
                 {
                     "name": "fs_motion_and_ctf.out_average_halves",
                     "label": "Output averages halves",

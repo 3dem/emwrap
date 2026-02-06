@@ -6,17 +6,20 @@
                 {
                     "name": "tilt_images",
                     "label": "Tilt images folder",
+                    "paramClass": "PathParam",
                     "default": ""
                 },
                 {
                     "name": "mdoc_files",
                     "label": "Mdoc files",
+                    "paramClass": "PathParam",
                     "help": "Leave it empty for using all GPUs",
                     "default": "mdocs/Position*[1-9].mdoc"
                 },
                 {
                     "name": "acq.gain",
                     "label": "Gain file",
+                    "paramClass": "PathParam",
                     "help": "",
                     "default": ""                
                 },
