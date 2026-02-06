@@ -3,7 +3,7 @@
     "help": "Warp wrapper to run *ts_aretomo* for tilt-series alignment. \n\n*REFERENCES*:\n[[https://warpem.github.io/warp/reference/warptools/api/tilt_series/?h=ts_aretomo#ts_aretomo][ts_aretomo]]",
     "sections": [
         {
-            "label": "Aretomo",
+            "label": "Import",
             "params": [
                 {
                     "name": "input_tiltseries",
@@ -32,6 +32,18 @@
                     "default": "4096x4096x2000",
                     "help": ""
                 },
+                {
+                    "name": "extra_ts_import",
+                    "label": "ts_import extra arguments",
+                    "paramClass": "StringParam",
+                    "help": "Extra arguments to pass to ts_import"
+                }
+            ]
+        },
+        {
+            "label": "Aretomo",
+            "paramClass": "Group",
+            "params": [
                 {
                     "name": "ts_aretomo.angpix",
                     "label": "Output pixel size (A/pix)",
@@ -82,6 +94,25 @@
                     "default": 2,
                     "paramClass": "IntParam",
                     "help": "(--per_device in ts_aretomo)"
+                },
+                {
+                    "label": "Launchers",
+                    "paramClass": "Group",
+                    "help": "Launchers to use for the different programs",
+                    "params": [
+                        {
+                            "name": "launcher_warp",
+                            "label": "WARP",
+                            "paramClass": "StringParam",
+                            "help": "Launcher to use for Warp"
+                        },
+                        {
+                            "name": "launcher_aretomo",
+                            "label": "ARETOMO",
+                            "paramClass": "StringParam",
+                            "help": "Launcher to use for Aretomo"
+                        }
+                    ]
                 }
             ]
         }
