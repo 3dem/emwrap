@@ -144,7 +144,8 @@ class WarpMotionCtf(WarpBasePipeline):
             '--c_grid': '2x2x1',  # FIXME: Read c_grid option
             '--c_voltage': int(self.acq.voltage),
             '--c_cs': self.acq.cs,
-            '--c_amplitude': self.acq.amplitude_contrast
+            '--c_amplitude': self.acq.amplitude_contrast,
+            '--out_averages': "",  # We always generate averages, if not the job will fail
         })
         subargs = self.get_subargs('fs_motion_and_ctf')
         if self.gpuList:
@@ -153,7 +154,7 @@ class WarpMotionCtf(WarpBasePipeline):
             args['--perdevice'] = int(pd)
 
         ###args["--out_averages"] = ""
-        for a in ['c_use_sum', 'out_averages', 'out_average_halves']:
+        for a in ['c_use_sum', 'out_average_halves']:
             if subargs[a]:
                 args[f"--{a}"] = ""
 

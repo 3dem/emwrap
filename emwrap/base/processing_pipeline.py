@@ -137,11 +137,22 @@ class ProcessingPipeline(Pipeline, FolderManager):
         return {_new_key(k): v
                 for k, v in self._args.items() if k.startswith(full_prefix)}
 
-    def batch_execute(self, label, batch, args, logfile=None):
+    def log_cmd(self, args):
+        """ Log a command to the logfile. """
+        with open(self.join('commands.txt'), 'a') as f:
+            e = ''
+            for k, v in args.items():
+                f.write(f"{k} {v} {e}\n")
+                e = '\\'
+            f.flush()
+
+    def batch_execute(self, label, batch, args, logfile=None, logcmd=False):
         """ Shortcut to execute a batch using the internal launcher. """
         logfile = logfile or self.join('run.out')
         launcher = self.get_launcher()
         with batch.execute(label):
+            if logcmd:
+                self.log_cmd(args)
             batch.call(launcher, args, logfile=logfile)
 
     def prerun(self):
