@@ -44,7 +44,7 @@ class ProcessingPipeline(Pipeline, FolderManager):
     MIC_ID = re.compile('(?P<prefix>\w+)-(?P<id>\d{6})')
 
     def __init__(self, args, output):
-        self._args = args
+        self._args = Args(args)
         workingDir = args.get('working_dir', os.getcwd())
         scratchDir = args.get('scratch', None)
         Pipeline.__init__(self, debug=args.get('debug', False))
@@ -145,10 +145,12 @@ class ProcessingPipeline(Pipeline, FolderManager):
             f.write(f"{logStr}\n\n")
             f.flush()
 
-    def batch_execute(self, label, batch, args, logfile=None, logcmd=True):
+    def batch_execute(self, label, batch, args, 
+                      logfile=None, logcmd=True, launcher=None):
         """ Shortcut to execute a batch using the internal launcher. """
         logfile = logfile or self.join('run.out')
-        launcher = self.get_launcher()
+        launcher = launcher or self._get_launcher()
+        print(f">>>> Using launcher: {launcher}", flush=True)
         with batch.execute(label):
             if logcmd:
                 self.log_cmd(args)
@@ -213,7 +215,7 @@ class ProcessingPipeline(Pipeline, FolderManager):
         certain packages (e.g. Relion, Warp). A launcher variable
         will be used to read the value from os.environ. """
         if packageName := packageName or getattr(cls, 'PROGRAM', None):
-            if launcher := ProcessingConfig.get_programs().get(packageName, {}).get('launcher', None):
+            if launcher := ProcessingConfig.get_programs().get(packageName, {}).get('launcher', ''):
                 if not os.path.exists(launcher):
                     raise Exception(f"{packageName} launcher '{launcher}' does not exists.")
             else:
@@ -222,6 +224,9 @@ class ProcessingPipeline(Pipeline, FolderManager):
             return launcher
         else:
             raise Exception(f"Expecting packageName or cls.PROGRAM defined")
+
+    def _get_launcher(self):
+        ProcessingPipeline.get_launcher(self.PROGRAM)
 
     def run(self):
         try:

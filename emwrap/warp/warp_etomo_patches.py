@@ -42,8 +42,8 @@ class WarpEtomoPatches(WarpBaseTsAlign):
         if self.gpuList:
             args['--device_list'] = self.gpuList
 
-        subargs = Args(self._args).subset('ts_etomo_patches', '--', 
-                                          filters=['remove_false', 'remove_empty'])
+        subargs = self._args.subset('ts_etomo_patches', '--', 
+                                    filters=['remove_false', 'remove_empty'])
         args.update(subargs)
         self.batch_execute('ts_etomo_patches', batch, args)
 

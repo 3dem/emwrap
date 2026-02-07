@@ -176,6 +176,12 @@ class WarpBasePipeline(ProcessingPipeline):
         self.log(f"Writing: {starFile}")
         with StarFile(starFile, 'w') as sfOut:
             sfOut.writeTable(tableName, table, computeFormat='left', timeStamp=True)
+    
+    def get_launcher_arg(self, argName, varName):
+        return self._args.get(argName, None) or ProcessingPipeline.get_launcher(varName)
+
+    def _get_launcher(self):
+        return self.get_launcher_arg('launcher_warp', 'WARP')
 
 
 class WarpBaseTsAlign(WarpBasePipeline):
