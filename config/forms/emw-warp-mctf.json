@@ -133,7 +133,6 @@
         }, 
         {
             "label": "Compute",
-            "paramClass": "Group",
             "params": [
                 {
                     "name": "gpus",
@@ -146,6 +145,19 @@
                     "default": 2,
                     "paramClass": "IntParam",
                     "help": "(--per_device in fs_motion_and_ctf)"
+                },
+                {
+                    "label": "Launchers",
+                    "paramClass": "Group",
+                    "help": "Launchers to use for the different programs",
+                    "params": [
+                        {
+                            "name": "launcher_warp",
+                            "label": "WARP",
+                            "paramClass": "StringParam",
+                            "help": "Launcher to use for Warp"
+                        }
+                    ]
                 }
             ]
         }
