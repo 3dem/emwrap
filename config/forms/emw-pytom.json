@@ -116,7 +116,6 @@
         },
         {
             "label": "Compute",
-            "paramClass": "Group",
             "params": [
                 {
                     "name": "gpus",

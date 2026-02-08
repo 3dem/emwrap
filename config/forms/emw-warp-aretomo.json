@@ -42,7 +42,6 @@
         },
         {
             "label": "Aretomo",
-            "paramClass": "Group",
             "params": [
                 {
                     "name": "ts_aretomo.angpix",
@@ -81,7 +80,6 @@
         },
         {
             "label": "Compute",
-            "paramClass": "Group",
             "params": [
                 {
                     "name": "gpus",
@@ -99,6 +97,7 @@
                     "label": "Launchers",
                     "paramClass": "Group",
                     "help": "Launchers to use for the different programs",
+                    "collapsed": false,
                     "params": [
                         {
                             "name": "launcher_warp",
