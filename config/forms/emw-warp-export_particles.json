@@ -3,63 +3,62 @@
     "help": "Warp wrapper to export particle images (2D or 3D) from tilt-series for subtomogram averaging. It will run the following program:\n\n*REFERENCES*:\n[[https://warpem.github.io/warp/reference/warptools/api/tilt_series/?h=ts_export_particles#ts_export_particles][ts_export_particles]]",
     "sections": [
         {
-            "label": "Input",
-            "params": [
+            "label": "General",
+            "params": [       
                 {
-                    "name": "label_compute",
-                    "label": "Compute",
-                    "paramClass": "LabelParam"
+                    "label": "Input", 
+                    "paramClass": "Group",
+                    "params": [
+                        {
+                            "name": "input_tomograms",
+                            "label": "Input tomograms (STAR):",
+                            "pattern": "",
+                            "help": "Input tomograms with coordinates",
+                            "paramClass": "PathParam",
+                            "pointerClass": "TomogramCoordinates"
+                        },
+                        {
+                            "name": "ts_export_particles.diameter",
+                            "label": "Particle diameter (A)",
+                            "paramClass": "FloatParam",
+                            "help": "REQUIRED Particle diameter in Angstroms"
+                        }
+                    ]
                 },
                 {
-                    "name": "gpus",
-                    "label": "GPUs",                    
-                    "help": "If it is a single number (N), it will represent the total number of GPUs (0..N-1). It there are multiple values, it will be the specific GPUs ID."
+                    "label": "Output", 
+                    "paramClass": "Group",
+                    "params": [
+                        {
+                            "name": "ts_export_particles.output_angpix",
+                            "label": "Output Pixel size",
+                            "paramClass": "FloatParam",
+                            "help": "REQUIRED Pixel size at which to export particles"
+                        },
+                        {
+                            "name": "ts_export_particles.box",
+                            "label": "Output Box size",
+                            "paramClass": "FloatParam",
+                            "help": "REQUIRED Output has this many pixels/voxels on each side"
+                        },
+                        {
+                            "name": "ts_export_type",
+                            "label": "Export type: ",
+                            "paramClass": "EnumParam",
+                            "choices": ["2d", "3d"],
+                            "display": "combo"
+        
+                        }
+                    ]
                 },                
                 {
-                    "name": "label_input",
-                    "label": "Input",
-                    "paramClass": "LabelParam"
-                },
-                {
-                    "name": "input_tomograms",
-                    "label": "Input tomograms (STAR):",
-                    "pattern": "",
-                    "help": "Input tomograms with coordinates",
-                    "paramClass": "PathParam",
-                    "pointerClass": "TomogramCoordinates"
-                },
-                {
-                    "name": "ts_export_particles.diameter",
-                    "label": "Particle diameter (A)",
-                    "paramClass": "FloatParam",
-                    "help": "REQUIRED Particle diameter in angstroms"
-                },
-                {
-                    "name": "label_output",
-                    "label": "Output",
-                    "paramClass": "LabelParam"
-                },
-                {
-                    "name": "ts_export_particles.output_angpix",
-                    "label": "Output Pixel size",
-                    "paramClass": "FloatParam",
-                    "help": "REQUIRED Pixel size at which to export particles"
-                },
-                {
-                    "name": "ts_export_particles.box",
-                    "label": "Output Box size",
-                    "paramClass": "FloatParam",
-                    "help": "REQUIRED Output has this many pixels/voxels on each side"
-                },
-                {
-                    "name": "ts_export_type",
-                    "label": "Export type: ",
-                    "paramClass": "EnumParam",
-                    "choices": ["2d", "3d"],
-                    "display": "combo"
-
-                }
-                
+                    "name": "gpus",
+                    "label": "GPUs",  
+                    "default": 1,
+                    "paramClass": "IntParam",
+                    "condition": "false",                  
+                    "help": "Always use only one GPU"
+                }                
             ]
     }
     ]

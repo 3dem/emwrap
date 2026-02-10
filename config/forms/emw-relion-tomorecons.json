@@ -1,26 +1,14 @@
 {
     "sections": [
         {
-            "label": "Input",
+            "label": "General",
             "params": [
                 {
-                    "label": "Compute",
-                    "paramClass": "LabelParam"
-                },
-                {
-                    "name": "cpus",
-                    "label": "CPUs",                    
-                    "help": "Number of CPUs used for MPI processes."
-                },                
-                {
-                    "label": "Input",
-                    "paramClass": "LabelParam"
-                },
-                {
                     "name": "relion_reconstruct.i",
-                    "label": "Input images STAR file:",
-                    "pattern": "",
-                    "help": ""
+                    "label": "Input particles STAR file:",
+                    "paramClass": "PathParam",
+                    "pointerClass": "TomogramParticles",
+                    "help": "Input particles STAR file with particles extracted from tomograms"
                 },               
                 {
                     "name": "relion_reconstruct.ctf",
@@ -28,7 +16,18 @@
                     "paramClass": "BooleanParam",
                     "default": true,
                     "help": ""
-                }               
+                },
+                {
+                    "label": "Compute",
+                    "paramClass": "Group",
+                    "params": [
+                        {
+                            "name": "cpus",
+                            "label": "CPUs",                    
+                            "help": "Number of CPUs used for MPI processes."
+                        }
+                    ]
+                }              
                 
             ]
     }

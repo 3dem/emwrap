@@ -97,7 +97,7 @@
                     "label": "Launchers",
                     "paramClass": "Group",
                     "help": "Launchers to use for the different programs",
-                    "collapsed": false,
+                    "collapsed": true,
                     "params": [
                         {
                             "name": "launcher_warp",

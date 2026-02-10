@@ -14,12 +14,7 @@
 # *
 # **************************************************************************
 
-import os
-import shutil
-import json
-import argparse
-import time
-import sys
+
 from glob import glob
 from datetime import datetime
 
@@ -55,17 +50,6 @@ class RelionTomoRecons(RelionBasePipeline):
 
         self.log(f"Input star file: {Color.bold(inStar)}")
         self.log(f"Total input particles: {Color.green(n)}")
-        self.inputs = {
-            'TomogramParticles': {
-                'label': 'Tomogram Particles',
-                'type': 'TomogramParticles',
-                'info': f"{n} items (box size: {box} px, {ps} Å/px)",
-                'files': [
-                    [inStar, 'TomogramGroupMetadata.star.relion.tomo.particles']
-                ]
-            }
-        }
-        self.writeInfo()
 
         batch = Batch(id=self.name, path=self.workingDir)
         outVol = self.join('reconstructed_volume.mrc')

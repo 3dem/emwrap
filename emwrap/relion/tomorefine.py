@@ -15,12 +15,6 @@
 # **************************************************************************
 
 import os
-import subprocess
-import pathlib
-import sys
-import time
-import json
-import argparse
 from datetime import timedelta, datetime
 from glob import glob
 
@@ -37,29 +31,6 @@ class RelionTomoRefine(RelionBasePipeline):
     name = 'emw-relion-tomorefine'
 
     def prerun(self):
-        """
-        {
-    "gpus": "",
-    "relion_refine.ios": "External/job069/warp_particles_optimisation_set.star",
-    "relion_refine.ref": "External/job070/reconstructed_volume.mrc",
-    "relion_refine.solvent_mask": "",
-    "relion_refine.firstiter_cc": "false",
-    "relion_refine.trust_ref_size": "true",
-    "relion_refine.ini_high": "40",
-    "relion_refine.sym": "C1",
-    "relion_refine.ctf": "true",
-    "relion_refine.ctf_intact_first_peak": "false",
-    "relion_refine.particle_diameter": "150",
-    "relion_refine.zero_mask": "true",
-    "relion_refine.solvent_correct_fsc": "false",
-    "relion_refine.blush": "false",
-    "relion_refine.healpix_order": "2",
-    "relion_refine.offset_range": "5",
-    "relion_refine.offset_step": "1",
-    "relion_refine.auto_local_healpix_order": "4",
-    "relion_refine.relax_sym": ""
-}
-        """
         inputOS = self._args['relion_refine.ios']
         if not os.path.exists(inputOS):
             raise Exception(f"Input optimization set '{inputOS}' do not exist.")
@@ -97,7 +68,17 @@ class RelionTomoRefine(RelionBasePipeline):
         })
         args.update(subargs)
         self.batch_execute('relion_refine', batch, args)
-
+        outVol = self.join('output', 'run_class001.mrc')
+        self.outputs = {
+            'Volume': {
+                'label': 'Refined Volume',
+                'type': 'Volume',
+                'info': f"box size: {box} px, {ps} Å/px",
+                'files': [
+                    [outVol, 'TomogramGroupMetadata.star.relion.volume']
+                ]
+            }
+        }
         self.updateBatchInfo(batch)
 
 
