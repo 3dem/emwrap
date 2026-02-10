@@ -103,6 +103,8 @@ class WarpExportParticles(WarpBasePipeline):
 
         iosFn = self.join('warp_particles_optimisation_set.star')
         ptsFn = self.join('warp_particles.star')
+        tomoPtsFn = self.join('warp_particles_tomograms.star')
+
         outFn = ptsFn
 
         ptsTableName = ''
@@ -114,6 +116,9 @@ class WarpExportParticles(WarpBasePipeline):
 
         if os.path.exists(ptsFn):
             self._fixPaths(ptsFn, ptsTableName, ['rlnImageName', 'rlnCtfImage'])
+
+        if os.path.exists(tomoPtsFn):
+            self._fixPaths(tomoPtsFn, 'global', ['rlnTomoTiltSeriesName'])
 
         self.outputs = {
             'TomogramParticles': {
