@@ -39,3 +39,6 @@ class RelionBasePipeline(ProcessingPipeline):
                 elif not RelionStar.false_value(v):
                     newargs[k] = v
         return newargs
+
+    def _get_launcher(self):
+        return ProcessingPipeline.get_launcher('RELION')
