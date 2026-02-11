@@ -18,9 +18,9 @@ import os
 from datetime import timedelta, datetime
 from glob import glob
 
-from emtools.utils import Color, Timer, Path, Process, FolderManager, Pretty
+from emtools.image import Image
 from emtools.jobs import Batch, Args
-from emtools.metadata import Mdoc, StarFile, RelionStar
+from emtools.metadata import StarFile
 
 from . relion_base import RelionBasePipeline
 from .classify2d import RelionClassify2D
@@ -66,10 +66,28 @@ class RelionTomoRefine(RelionBasePipeline):
             "--j": threads
             # TODO allow extra_args
         })
-        args.update(subargs)
+        args.update(self.get_subargs('relion_refine'))
         self.batch_execute('relion_refine', batch, args)
+
+        # Register output Volume and Particle STAR file
+        outStar = self.join('output', 'run_data.star')
+        with StarFile(outStar) as sf:
+            o = sf.getTable('optics')
+            box = o[0].rlnImageSizeX
+            ps = o[0].rlnImagePixelSize
+            N = sf.getTableSize('particles')
+            
         outVol = self.join('output', 'run_class001.mrc')
+
         self.outputs = {
+            'TomogramParticles': {
+                'label': 'Refined Particles',
+                'type': 'TomogramParticles',
+                'info': f"{N} pts (size: {box} px, {ps} Å/px)",
+                'files': [
+                    [outStar, 'TomogramGroupMetadata.star.relion.tomo.particles']
+                ]
+            },
             'Volume': {
                 'label': 'Refined Volume',
                 'type': 'Volume',

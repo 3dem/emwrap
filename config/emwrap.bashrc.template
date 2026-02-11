@@ -21,6 +21,8 @@ export EMWRAP_CONFIG=$(cat <<EOF
         "emw-warp-export_particles": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_export_particles"},
         "emw-relion-tomorecons": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.relion.tomorecons"},
         "emw-relion-tomorefine": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.relion.tomorefine"}
+        "emw-mtools-create": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_mtools_create"},
+        "emw-mcore": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_mcore"}
     },
     "cluster": {
         "template": "$SCRIPTS/lsf_template.sh",

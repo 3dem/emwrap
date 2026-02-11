@@ -14,12 +14,7 @@
 # *
 # **************************************************************************
 
-import os
-
-from emtools.utils import FolderManager, Path, Process
 from emwrap.base import ProcessingPipeline
-from emtools.metadata import StarFile, Acquisition, RelionStar
-from emtools.jobs import Batch
 
 
 class RelionBasePipeline(ProcessingPipeline):
@@ -29,16 +24,7 @@ class RelionBasePipeline(ProcessingPipeline):
     PROGRAM = 'RELION'
 
     def get_subargs(self, prefix, new_prefix='--'):
-        subargs = ProcessingPipeline.get_subargs(self, prefix, new_prefix=new_prefix)
-        newargs = {}
-        # Fix boolean params
-        for k, v in subargs.items():
-            if v:
-                if RelionStar.true_value(v):
-                    newargs[k] = ''  # Boolean options will be passed
-                elif not RelionStar.false_value(v):
-                    newargs[k] = v
-        return newargs
+        return self._args.subset(prefix, new_prefix=new_prefix, filters=['remove_empty', 'remove_false'])
 
     def _get_launcher(self):
         return ProcessingPipeline.get_launcher('RELION')
