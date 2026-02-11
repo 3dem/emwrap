@@ -83,6 +83,10 @@ class PyTomCreateTemplate(ProcessingPipeline):
     def prerun(self):
         self.create_template_and_mask()
 
+    
+    def _get_launcher(self):
+        return ProcessingPipeline.get_launcher('PYTOM')
+
 
 if __name__ == '__main__':
     PyTomCreateTemplate.main()
