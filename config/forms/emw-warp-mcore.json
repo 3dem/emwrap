@@ -1,0 +1,263 @@
+{
+  "name": "emw-warp-mcore",
+  "help": "Warp wrapper to run MCore refinements (MTools/M). Input is typically from a Relion tomorefine job from Warp export particles.\n\n*REFERENCES*:\n[[https://warpem.github.io/warp/reference/mtools/api/mcore/?h=mcore][MCore API]]",
+  "sections": [
+    {
+      "label": "Input",
+      "params": [
+        {
+          "name": "in_particles",
+          "label": "Input particles (Warp export):",
+          "pattern": "",
+          "help": "Job folder containing Particles link to Warp export particles output (e.g. from tomorefine). Used to resolve population/species and run MCore.",
+          "paramClass": "PathParam",
+          "pointerClass": "TomogramParticles"
+        },
+        {
+          "name": "mcore.population",
+          "label": "Population file:",
+          "paramClass": "PathParam",
+          "help": "Required. Path to the .population file containing descriptions of data sources and species. May be set by the wrapper from input context."
+        }
+      ]
+    },
+    {
+      "label": "Refinement",
+      "params": [
+        {
+          "name": "mcore.iter",
+          "label": "Sub-iterations",
+          "default": 3,
+          "paramClass": "IntParam",
+          "help": "Number of refinement sub-iterations (--iter). Default: 3."
+        },
+        {
+          "name": "mcore.first_iteration_fraction",
+          "label": "First iteration resolution fraction",
+          "default": 1,
+          "paramClass": "FloatParam",
+          "help": "Use this fraction of available resolution for alignment in first sub-iteration, increase linearly to 1.0 towards last sub-iterations (--first_iteration_fraction). Default: 1."
+        },
+        {
+          "name": "mcore.min_particles",
+          "label": "Min particles per series",
+          "default": 1,
+          "paramClass": "IntParam",
+          "help": "Only use series with at least N particles in the field of view (--min_particles). Default: 1."
+        },
+        {
+          "name": "mcore.weight_threshold",
+          "label": "Weight threshold",
+          "default": 0.05,
+          "paramClass": "FloatParam",
+          "help": "Refine each tilt/frame up to the resolution at which the exposure weighting function (B-factor) reaches this value (--weight_threshold). Default: 0.05."
+        },
+        {
+          "name": "mcore.refine_imagewarp",
+          "label": "Refine image warp (XxY)",
+          "default": "",
+          "paramClass": "StringParam",
+          "help": "Refine image warp with a grid of XxY dimensions (--refine_imagewarp). Examples: leave blank = don't refine, '1x1', '3x3', '6x4'."
+        },
+        {
+          "name": "mcore.refine_particles",
+          "label": "Refine particle poses",
+          "paramClass": "BooleanParam",
+          "default": false,
+          "help": "Refine particle poses (--refine_particles)."
+        },
+        {
+          "name": "mcore.refine_mag",
+          "label": "Refine anisotropic magnification",
+          "paramClass": "BooleanParam",
+          "default": false,
+          "help": "Refine anisotropic magnification (--refine_mag)."
+        },
+        {
+          "name": "mcore.refine_doming",
+          "label": "Refine doming",
+          "paramClass": "BooleanParam",
+          "default": false,
+          "help": "Refine doming; frame series only (--refine_doming)."
+        },
+        {
+          "name": "mcore.refine_stageangles",
+          "label": "Refine stage angles",
+          "paramClass": "BooleanParam",
+          "default": false,
+          "help": "Refine stage angles; tilt series only (--refine_stageangles)."
+        },
+        {
+          "name": "mcore.refine_volumewarp",
+          "label": "Refine volume warp (XxYxZxT)",
+          "default": "",
+          "paramClass": "StringParam",
+          "help": "Refine volume warp with a grid of XxYxZxT dimensions; tilt series only (--refine_volumewarp). Examples: leave blank = don't refine, '1x1x1x20', '4x6x1x41'."
+        },
+        {
+          "name": "mcore.refine_tiltmovies",
+          "label": "Refine tilt movie alignments",
+          "paramClass": "BooleanParam",
+          "default": false,
+          "help": "Refine tilt movie alignments; tilt series only (--refine_tiltmovies)."
+        }
+      ]
+    },
+    {
+      "label": "CTF",
+      "params": [
+        {
+          "name": "mcore.ctf_batch",
+          "label": "CTF batch size",
+          "default": 32,
+          "paramClass": "IntParam",
+          "help": "Batch size for CTF refinements (--ctf_batch). Lower = less memory, higher = faster. Default: 32."
+        },
+        {
+          "name": "mcore.ctf_minresolution",
+          "label": "CTF min resolution (Å)",
+          "default": 8,
+          "paramClass": "FloatParam",
+          "help": "Use only species with at least this resolution in Angstrom for CTF refinement (--ctf_minresolution). Default: 8."
+        },
+        {
+          "name": "mcore.ctf_defocus",
+          "label": "Refine defocus",
+          "paramClass": "BooleanParam",
+          "default": false,
+          "help": "Refine defocus using a local search (--ctf_defocus)."
+        },
+        {
+          "name": "mcore.ctf_defocusexhaustive",
+          "label": "Exhaustive defocus (first sub-iter)",
+          "paramClass": "BooleanParam",
+          "default": false,
+          "help": "Refine defocus using a more exhaustive grid search in the first sub-iteration (--ctf_defocusexhaustive); only with ctf_defocus."
+        },
+        {
+          "name": "mcore.ctf_phase",
+          "label": "Refine phase shift",
+          "paramClass": "BooleanParam",
+          "default": false,
+          "help": "Refine phase shift; phase plate data only (--ctf_phase)."
+        },
+        {
+          "name": "mcore.ctf_cs",
+          "label": "Refine spherical aberration",
+          "paramClass": "BooleanParam",
+          "default": false,
+          "help": "Refine spherical aberration (Cs), also a proxy for pixel size (--ctf_cs)."
+        },
+        {
+          "name": "mcore.ctf_zernike2",
+          "label": "Zernike 2nd order (slow)",
+          "paramClass": "BooleanParam",
+          "default": false,
+          "help": "Refine Zernike polynomials of 2nd order (--ctf_zernike2). Slow."
+        },
+        {
+          "name": "mcore.ctf_zernike3",
+          "label": "Zernike 3rd order (beam tilt, trefoil)",
+          "paramClass": "BooleanParam",
+          "default": false,
+          "help": "Refine Zernike polynomials of 3rd order – beam tilt, trefoil (--ctf_zernike3). Fast."
+        },
+        {
+          "name": "mcore.ctf_zernike4",
+          "label": "Zernike 4th order (slow)",
+          "paramClass": "BooleanParam",
+          "default": false,
+          "help": "Refine Zernike polynomials of 4th order (--ctf_zernike4). Slow."
+        },
+        {
+          "name": "mcore.ctf_zernike5",
+          "label": "Zernike 5th order",
+          "paramClass": "BooleanParam",
+          "default": false,
+          "help": "Refine Zernike polynomials of 5th order (--ctf_zernike5). Fast."
+        }
+      ]
+    },
+    {
+      "label": "Compute",
+      "params": [
+        {
+          "name": "gpus",
+          "label": "GPUs",
+          "default": 1,
+          "help": "If it is a single number (N), total number of GPUs (0..N-1). If multiple values, specific GPU IDs."
+        },
+        {
+          "name": "mcore.perdevice_refine",
+          "label": "Processes per device (refine)",
+          "default": 1,
+          "paramClass": "IntParam",
+          "help": "Number of processes per GPU for refinement (--perdevice_refine). Set >1 if GPUs have enough memory. Default: 1."
+        },
+        {
+          "name": "mcore.perdevice_preprocess",
+          "label": "Processes per device (preprocess)",
+          "default": "",
+          "paramClass": "StringParam",
+          "help": "Processes per GPU for map pre-processing (--perdevice_preprocess). Blank = use perdevice_refine value."
+        },
+        {
+          "name": "mcore.perdevice_postprocess",
+          "label": "Processes per device (postprocess)",
+          "default": "",
+          "paramClass": "StringParam",
+          "help": "Processes per GPU for map post-processing (--perdevice_postprocess). Blank = use perdevice_refine value."
+        },
+        {
+          "name": "mcore.devicelist",
+          "label": "Device list",
+          "default": "",
+          "paramClass": "StringParam",
+          "help": "Space-separated list of GPU IDs (--devicelist). Default: all GPUs."
+        },
+        {
+          "name": "mcore.port",
+          "label": "REST API port",
+          "default": 14300,
+          "paramClass": "IntParam",
+          "help": "Port for REST API calls (--port). Set to -1 to disable. Default: 14300."
+        },
+        {
+          "name": "mcore.cpu_memory",
+          "label": "Use CPU memory for particles",
+          "paramClass": "BooleanParam",
+          "default": false,
+          "help": "Store particle images in CPU memory during refinement instead of GPU (--cpu_memory)."
+        },
+        {
+          "label": "Remote workers",
+          "paramClass": "Group",
+          "collapsed": true,
+          "params": [
+            {
+              "name": "mcore.workers_preprocess",
+              "label": "Workers (preprocess)",
+              "default": "",
+              "paramClass": "StringParam",
+              "help": "Remote workers for map pre-processing (--workers_preprocess). Format: hostname:port, space-separated."
+            },
+            {
+              "name": "mcore.workers_refine",
+              "label": "Workers (refine)",
+              "default": "",
+              "paramClass": "StringParam",
+              "help": "Remote workers for refinement (--workers_refine). Format: hostname:port, space-separated."
+            },
+            {
+              "name": "mcore.workers_postprocess",
+              "label": "Workers (postprocess)",
+              "default": "",
+              "paramClass": "StringParam",
+              "help": "Remote workers for map post-processing (--workers_postprocess). Format: hostname:port, space-separated."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,117 @@
+{
+  "name": "emw-warp-mtools",
+  "help": "Warp/MTools wrapper to create a population, add a data source, and define a species in one step. Runs: create_population, create_source, create_species.\n\n*REFERENCES*:\n[[https://warpem.github.io/warp/reference/mtools/api/mtools/?h=mtools][MTools API]]",
+  "sections": [
+    {
+      "label": "Population / Source",
+      "params": [
+        {
+          "label": "Population",
+          "paramClass": "Group",
+          "params": [
+            {
+              "name": "create_population.name",
+              "label": "Population name:",
+              "paramClass": "StringParam",
+              "help": "Required (-n, --name). Name of the new population. The .population file will be <directory>/<name>.population"
+            }
+          ]
+        },
+        {
+          "label": "Source",
+          "paramClass": "Group",
+          "params": [
+            {
+              "name": "create_source.name",
+              "label": "Source name:",
+              "paramClass": "StringParam",
+              "help": "Required (-n, --name). Name of the new data source. Often the same as the population name or project ID."
+            },
+            {
+              "name": "create_source.nframes",
+              "label": "Max tilts/frames:",
+              "default": 0,
+              "paramClass": "IntParam",
+              "help": "Maximum number of tilts or frames to use in refinements (--nframes). Leave 0 or empty to use the maximum available."
+            },
+            {
+              "name": "create_source.files",
+              "label": "Files (STAR, optional):",
+              "default": "",
+              "paramClass": "PathParam",
+              "help": "Optional (--files). STAR file with a list of files to intersect with the full list of frame or tilt series referenced by the settings."
+            }
+          ]
+        }   
+      ]
+    },
+    {
+      "label": "Species",
+      "params": [
+        {
+          "name": "create_species.name",
+          "label": "Species name:",
+          "paramClass": "StringParam",
+          "help": "Required (-n, --name). Name of the new species."
+        },
+        {
+          "name": "create_species.diameter",
+          "label": "Diameter (Å):",
+          "paramClass": "IntParam",
+          "help": "Required (-d, --diameter). Molecule diameter in Angstrom."
+        },
+        {
+          "name": "create_species.sym",
+          "label": "Symmetry:",
+          "default": "C1",
+          "paramClass": "StringParam",
+          "help": "Point symmetry (-s, --sym). E.g. C1, D7, O. Default: C1."
+        },
+        {
+          "name": "create_species.particles_relion",
+          "label": "Particles (RELION _data.star):",
+          "default": "",
+          "paramClass": "PathParam",
+          "pointerClass": "TomogramParticles",
+          "help": "Path to _data.star-like particle metadata from RELION (--particles_relion)."
+        },
+        {
+          "name": "create_species.mask",
+          "label": "Mask:",
+          "paramClass": "PathParam",
+          "pointerClass": "VolumeMask",
+          "help": "Required (-m, --mask). Path to a tight binary mask file. M will automatically expand and smooth it based on current resolution."
+        },
+        {
+          "name": "create_species.angpix",
+          "label": "Override pixel size (Å/px):",
+          "default": "",
+          "paramClass": "FloatParam",
+          "help": "Override pixel size value found in half-maps (--angpix). Leave empty to use map header."
+        },
+        {
+          "name": "create_species.angpix_resample",
+          "label": "Resample pixel size (Å/px):",
+          "default": "",
+          "paramClass": "FloatParam",
+          "help": "Resample half-maps and masks to this pixel size (--angpix_resample)."
+        },
+        {
+          "name": "create_species.lowpass",
+          "label": "Low-pass filter (Å):",
+          "default": "",
+          "paramClass": "FloatParam",
+          "help": "Optional (--lowpass). Low-pass filter in Angstrom, applied to both half-maps."
+        },
+        {
+          "name": "extra_create_species",
+          "label": "Extra arguments",
+          "default": "",
+          "paramClass": "StringParam",
+          "help": "Extra arguments to pass to create_species"
+        }   
+
+      ]
+    }
+  ]
+}
