@@ -10,10 +10,26 @@
           "paramClass": "Group",
           "params": [
             {
+              "label": "Create new population",
+              "name": "new_population",
+              "paramClass": "BooleanParam", 
+              "default": true,
+              "help": "Create a new population or input an existing population file."
+            },
+            {
               "name": "create_population.name",
               "label": "Population name:",
               "paramClass": "StringParam",
+              "condition": "new_population",
               "help": "Required (-n, --name). Name of the new population. The .population file will be <directory>/<name>.population"
+            },
+            {
+              "name": "input_population",
+              "label": "Input population:",
+              "paramClass": "PathParam",
+              "pointerClass": "WarpPopulation",
+              "condition": "!new_population",
+              "help": "Path to an existing population file."
             }
           ]
         },
@@ -25,7 +41,7 @@
               "name": "create_source.name",
               "label": "Source name:",
               "paramClass": "StringParam",
-              "help": "Required (-n, --name). Name of the new data source. Often the same as the population name or project ID."
+              "help": "Name of the new data source, if empty will be the same as the population name."
             },
             {
               "name": "create_source.nframes",
