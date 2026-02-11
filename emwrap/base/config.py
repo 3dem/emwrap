@@ -20,7 +20,7 @@ import json
 import argparse
 from pprint import pprint
 
-from emtools.utils import FolderManager, Color
+from emtools.utils import Pretty, Color
 
 
 class ProcessingConfig:
@@ -69,6 +69,11 @@ class ProcessingConfig:
             if os.path.exists(jsonFile):
                 with open(jsonFile) as f:
                     return json.load(f)
+            else:
+                Pretty.dprint(Color.red(f"Form file not found: {jsonFile}"))
+        else:
+            Pretty.dprint(Color.red(f"Job type not found: {jobtype}"))
+
         return None
 
     @classmethod

@@ -73,7 +73,7 @@ class RelionTomoRefine(RelionBasePipeline):
         outStar = self.join('output', 'run_data.star')
         with StarFile(outStar) as sf:
             o = sf.getTable('optics')
-            box = o[0].rlnImageSizeX
+            box = o[0].rlnImageSize
             ps = o[0].rlnImagePixelSize
             N = sf.getTableSize('particles')
             
