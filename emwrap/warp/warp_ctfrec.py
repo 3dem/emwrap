@@ -15,11 +15,6 @@
 # **************************************************************************
 
 import os
-import shutil
-import json
-import argparse
-import time
-import sys
 from glob import glob
 from datetime import datetime
 
@@ -43,17 +38,6 @@ class WarpCtfReconstruct(WarpBasePipeline):
         N = len(tsAllTable)
         ps = tsAllTable[0].rlnTomoTiltSeriesPixelSize
         x, y, n = Image.get_dimensions(tsAllTable[0].rlnTiltSeriesAligned)
-        self.inputs = {
-            'TiltSeriesAligned': {
-                'label': 'Tilt Series Aligned',
-                'type': 'TiltSeriesAligned',
-                'info': f"{N} items, {x} x {y} x {n}, {ps:0.3f} Å/px",
-                'files': [
-                    [inputTs, 'TomogramGroupMetadata.star.relion.tomo.aligntiltseries']
-                ]
-            }
-        }
-        self.writeInfo()
 
         if kwargs.get('importInputs', True):
             self._importInputs(inputFolder)

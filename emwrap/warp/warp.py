@@ -35,6 +35,7 @@ class WarpBasePipeline(ProcessingPipeline):
     TS = 'warp_tiltseries'
     TSS = f'{TS}.settings'
     TM = 'warp_tomostar'
+    M = 'm'
     WARP_FOLDERS = [FS, TS, TM]
 
     INPUTS = {
