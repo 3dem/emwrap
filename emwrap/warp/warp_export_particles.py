@@ -72,9 +72,9 @@ class WarpExportParticles(WarpBasePipeline):
         warpPath = self.project.join(firstRow.wrpTomostar)
         warpFolder = os.path.dirname(os.path.dirname(warpPath))
 
-        self._joinStarFiles(inTable)
+        total_pts, total_tomograms = self._joinStarFiles(inTable)
         # Import inputs except tomostar, that might come from a different folder
-        self._importInputs(warpFolder, keys=['fs', 'fss', 'ts', 'tss', 'tm'])
+        self._importInputs(warpFolder, keys=['fs', 'fss', 'ts', 'tss'])
         self.mkdir('Particles')
 
         batch = Batch(id=self.name, path=self.path)
@@ -124,7 +124,7 @@ class WarpExportParticles(WarpBasePipeline):
             'TomogramParticles': {
                 'label': 'Tomogram Particles',
                 'type': 'TomogramParticles',
-                'info': f"{n} items (box size: {box} px, {ps} Å/px)",
+                'info': f"{total_pts} pts ({box} px, {ps} Å/px)",
                 'files': [
                     [outFn, 'TomogramGroupMetadata.star.relion.tomo.particles']
                 ]
@@ -138,6 +138,12 @@ class WarpExportParticles(WarpBasePipeline):
         """
         outStarFile = self.join('all_coordinates.star')
         self.log(f"Writing output star file: {Color.bold(outStarFile)}")
+        particlesMin = int(self._args['filters.particles_min'])
+        particlesMax = int(self._args['filters.particles_max'])
+        total_pts = 0
+        total_tomograms = 0
+        outTM = self.mkdir(self.TM)
+
         with StarFile(outStarFile, 'w') as sfOut:
             newTable = None
             for tomoRow in inTable:
@@ -147,6 +153,10 @@ class WarpExportParticles(WarpBasePipeline):
                     # Update micrographs.star
                     with StarFile(self.project.join(starFn)) as sf:
                         if t := sf.getTable('particles'):
+                            particlesNumber = len(t)
+                            if particlesNumber < particlesMin or particlesNumber > particlesMax:
+                                self.log(f"Skipping tomogram {tomoRow.wrpTomostar} with {particlesNumber} particles")
+                                continue
                             if newTable is None:
                                 # Replace column rlnMicrographName by rlnTomoName
                                 newCols = ['rlnTomoName' if c == 'rlnMicrographName' else c
@@ -154,11 +164,16 @@ class WarpExportParticles(WarpBasePipeline):
                                 newTable = Table(newCols)
                                 sfOut.writeTimeStamp()
                                 sfOut.writeHeader('particles', newTable)
+                            total_pts += particlesNumber
+                            total_tomograms += 1
+                            shutil.copy(tomoRow.wrpTomostar, outTM)
                             for row in t:
                                 rowDict = row._asdict()
                                 del rowDict['rlnMicrographName']
                                 rowDict['rlnTomoName'] = os.path.basename(tomoRow.wrpTomostar)
                                 sfOut.writeRowValues(rowDict)
+
+        return total_pts, total_tomograms
 
     def _fixPaths(self, starFn, tableName, labels):
         """ Add the run folder to the star file paths. """

@@ -30,17 +30,23 @@
                     "paramClass": "Group",
                     "params": [
                         {
-                            "name": "ts_export_particles.output_angpix",
-                            "label": "Output Pixel size",
-                            "paramClass": "FloatParam",
-                            "help": "REQUIRED Pixel size at which to export particles"
-                        },
-                        {
-                            "name": "ts_export_particles.box",
-                            "label": "Output Box size",
-                            "paramClass": "FloatParam",
-                            "help": "REQUIRED Output has this many pixels/voxels on each side"
-                        },
+                            "label": "Output",
+                            "paramClass": "Line",
+                            "params": [
+                                {
+                                    "name": "ts_export_particles.output_angpix",
+                                    "label": "Pixel size",
+                                    "paramClass": "FloatParam",
+                                    "help": "REQUIRED Pixel size at which to export particles"
+                                },
+                                {
+                                    "name": "ts_export_particles.box",
+                                    "label": "Box size",
+                                    "paramClass": "FloatParam",
+                                    "help": "REQUIRED Output has this many pixels/voxels on each side"
+                                }
+                            ]
+                        },                        
                         {
                             "name": "ts_export_type",
                             "label": "Export type: ",
@@ -50,7 +56,7 @@
         
                         }
                     ]
-                },                
+                },                 
                 {
                     "name": "gpus",
                     "label": "GPUs",  
@@ -60,6 +66,31 @@
                     "help": "Always use only one GPU"
                 }                
             ]
+    },
+    {
+        "label": "Filters", 
+        "params": [
+            {
+                "label": "Particles Count",
+                "paramClass": "Line",
+                "help": "Ignore Tomograms with particles count outside the range.",
+                "params": [
+                    {
+                        "name": "filters.particles_min",
+                        "label": "min",
+                        "default": 0,
+                        "paramClass": "IntParam"
+                    },
+                    {
+                        "name": "filters.particles_max",
+                        "label": "max",
+                        "default": 10000,
+                        "paramClass": "IntParam"
+                    }
+                ]
+            }                      
+        ]
     }
-    ]
+    ]    
+                
 }
