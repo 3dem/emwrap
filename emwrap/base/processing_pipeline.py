@@ -146,15 +146,25 @@ class ProcessingPipeline(Pipeline, FolderManager):
             f.flush()
 
     def batch_execute(self, label, batch, args, 
-                      logfile=None, logcmd=True, launcher=None):
-        """ Shortcut to execute a batch using the internal launcher. """
+                      logfile=None, logcmd=True, launcher=None, call=True):
+        """ Shortcut to execute a batch using the internal launcher.
+        Args:
+            label: label to identify the batch
+            batch: batch object
+            args: arguments to pass to the program
+            logfile: logfile to write the logs, by default it will be the batch folder + 'run.out'
+            logcmd: if True, the command will be logged
+            launcher: launcher to use, by default it will use the internal launcher for this Pipeline instance
+            call: if True, the program will be executed, otherwise only logs will be written
+        """
         logfile = logfile or self.join('run.out')
         launcher = launcher or self._get_launcher()
         print(f">>>> Using launcher: {launcher}", flush=True)
         with batch.execute(label):
             if logcmd:
                 self.log_cmd(args)
-            batch.call(launcher, args, logfile=logfile)
+            if call:
+                batch.call(launcher, args, logfile=logfile)
 
     def prerun(self):
         """ This method will be called before the run. """

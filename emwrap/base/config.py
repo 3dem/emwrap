@@ -130,6 +130,68 @@ class ProcessingConfig:
     @classmethod
     def print_config(cls):
         print(json.dumps(cls._get_config(), indent=4))
+    
+    @classmethod
+    def check_config(cls):
+        """ Check if the current configuration is valid. """
+        conf = cls._get_config()
+
+        if not conf:
+            raise Exception("Configuration is not valid.")
+
+        if 'SCRIPTS' in os.environ:
+            print(f"\n{Color.cyan('SCRIPTS')}={Color.bold(os.environ['SCRIPTS'])}")
+            cls.scripts_dir = os.environ['SCRIPTS']
+        else:
+            cls.scripts_dir = 'NO SCRIPTS DIR SET'
+
+        
+        for key in ['jobs', 'programs', 'cluster', 'forms']:
+            if not conf.get(key, None):
+                raise Exception(f"Configuration is not valid: '{key}' is required.")
+
+        cls.check_job_launchers(conf)
+        cls.check_programs(conf)
+
+    @classmethod
+    def _check_launcher(cls, item):
+        if launcher := item.get('launcher', None):
+            parts = launcher.split()
+            prog = parts[0]
+            color = Color.green if os.path.exists(prog) else Color.red
+            if prog.startswith(cls.scripts_dir):
+                prog = prog.replace(cls.scripts_dir, '$SCRIPTS')
+            launcher_line = f"{color(prog)} {' '.join(parts[1:])}"
+            
+        else:
+            launcher_line = Color.red(f"MISSING launcher.")
+
+        return launcher_line
+
+    @classmethod
+    def check_job_launchers(cls, conf):
+        print(f"\n>>> {Color.warn('JOB LAUNCHERS')}")
+
+
+        headers = ["JOB", "LAUNCHER", "FORM"]
+        format_str = u'{:<30}{:<70}{:<40}'
+        print('\n' + format_str.format(*headers))
+
+        for jobName, jobConf in conf.get('jobs', {}).items():
+            launcher_line = cls._check_launcher(jobConf)
+            print(format_str.format(jobName, launcher_line, ''))
+
+    @classmethod
+    def check_programs(cls, conf):
+        print(f"\n>>> {Color.warn('PROGRAMS')}")
+
+        headers = ["PROGRAM", "LAUNCHER"]
+        format_str = u'{:<30}{:<70}'
+        print('\n' + format_str.format(*headers))
+        for programName, programConf in conf.get('programs', {}).items():
+            launcher_line = cls._check_launcher(programConf)    
+            print(format_str.format(programName, launcher_line))
+
 
     @classmethod
     def main(cls):
@@ -143,6 +205,8 @@ class ProcessingConfig:
                        help="Print the existing configuration.")
         g.add_argument('--form', '-f', metavar='JOB_TYPE',
                        help="Print the corresponding form for this job type.")
+        g.add_argument('--check', '-c', action='store_true',
+                       help="Check the current configuration is valid.")
 
         args = p.parse_args()
         n = len(sys.argv)
@@ -158,3 +222,7 @@ class ProcessingConfig:
                 raise Exception(f"Form file: {Color.red(formFile)} does not exists.")
             form = ProcessingConfig.get_job_form(jobtype)
             print(json.dumps(form, indent=4))
+
+        elif args.check:
+            cls.check_config()
+            print(Color.green("Configuration is valid."))
