@@ -24,6 +24,14 @@
               "help": "Required (-n, --name). Name of the new population. The .population file will be <directory>/<name>.population"
             },
             {
+              "name": "warp_folder",
+              "label": "Previous WARP run:",
+              "default": "",
+              "paramClass": "PathParam",
+              "condition": "new_population",
+              "help": "Select the folder of the previous WARP run to use the settings and frame/tilt series from that run. Required only if creating a new population."
+            },
+            {
               "name": "input_population",
               "label": "Input population:",
               "paramClass": "PathParam",
@@ -46,13 +54,14 @@
             {
               "name": "create_source.nframes",
               "label": "Max tilts/frames:",
-              "default": 0,
+              "default": "",
               "paramClass": "IntParam",
               "help": "Maximum number of tilts or frames to use in refinements (--nframes). Leave 0 or empty to use the maximum available."
-            },
+            },            
             {
               "name": "create_source.files",
               "label": "Files (STAR, optional):",
+              "condition": "false",
               "default": "",
               "paramClass": "PathParam",
               "help": "Optional (--files). STAR file with a list of files to intersect with the full list of frame or tilt series referenced by the settings."
@@ -89,7 +98,7 @@
           "default": "",
           "paramClass": "PathParam",
           "pointerClass": "TomogramParticles",
-          "help": "Path to _data.star-like particle metadata from RELION (--particles_relion)."
+          "help": "Path to ${RELION_PREFIX}_data.star particle metadata from RELION (--particles_relion). It is expected to have the same particle names as the half-maps."
         },
         {
           "name": "create_species.mask",
@@ -97,14 +106,7 @@
           "paramClass": "PathParam",
           "pointerClass": "VolumeMask",
           "help": "Required (-m, --mask). Path to a tight binary mask file. M will automatically expand and smooth it based on current resolution."
-        },
-        {
-          "name": "create_species.angpix",
-          "label": "Override pixel size (Å/px):",
-          "default": "",
-          "paramClass": "FloatParam",
-          "help": "Override pixel size value found in half-maps (--angpix). Leave empty to use map header."
-        },
+        },        
         {
           "name": "create_species.angpix_resample",
           "label": "Resample pixel size (Å/px):",
@@ -124,7 +126,7 @@
           "label": "Extra arguments",
           "default": "",
           "paramClass": "StringParam",
-          "help": "Extra arguments to pass to create_species"
+          "help": "Extra arguments to pass to create_species. Example:\n\n*--angpix* Override pixel size value found in half-maps, if empty will use map header."
         }   
 
       ]

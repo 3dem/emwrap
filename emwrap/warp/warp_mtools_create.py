@@ -32,31 +32,33 @@ class WarpMtoolsCreate(WarpBasePipeline):
 
     def runBatch(self, batch, **kwargs):
         new_population = self._args.get('new_population', True)
-        pop_name = self._args.get('create_population.name', 'population')
-        input_population = self._args.get('input_population', '')
-
-        if kwargs.get('importInputs', True):
-            input_run = kwargs.get('input_run')
-            if input_run:
-                self._importInputs(input_run)
+        
+        
 
         batch.mkdir(self.M)
 
         if new_population:
+            pop_name = self._args.get('create_population.name', 'population')
             # MTools create_population --directory m --name <name>
             args = Args({
                 'MTools': 'create_population',
                 '--directory': self.M,
                 '--name': pop_name
             })
-            subargs = self.get_subargs('create_population', '--')
-            args.update(subargs)
-            self.batch_execute('create_population', batch, args)
+            self.batch_execute('create_population', batch, args, call=True)
             pop_path = f"{self.M}/{pop_name}.population"
+            warpFolder = self._args['warp_folder']
         else:
+            raise Exception("Not implemented: to import an existing population.")
+            input_population = self._args.get('input_population', '')
+            warpFolder = None  # FIXME: Get warp folder from input population
+            pop_name = None # FIXME: Get name from input population
             if not input_population:
                 raise Exception("input_population is required when not creating a new population.")
             pop_path = input_population
+
+        self.log(f"Importing import folder from previous WARP run: {warpFolder}")
+        self._importInputs(warpFolder, keys=['fs', 'fss', 'ts', 'tss', 'tm'])
 
         pop_arg = '--population'
 
@@ -71,30 +73,37 @@ class WarpMtoolsCreate(WarpBasePipeline):
         # Filter out empty so --nframes 0 is not passed if that means "use max"
         subargs = {k: v for k, v in subargs.items() if v is not None and str(v).strip() != ''}
         args.update(subargs)
-        self.batch_execute('create_source', batch, args)
+        self.batch_execute('create_source', batch, args, call=True)
+
+        def _validate(key, value):
+            if not value or not os.path.exists(value):
+                raise Exception(f"Expected file '{key}' does not exist: {value}")
+            return True
 
         # MTools create_species ${POPULATION} --name ... --diameter ... etc.
         args = Args({
             'MTools': 'create_species',
             pop_arg: pop_path,
         })
+     
         subargs = self.get_subargs('create_species', '--')
         subargs = {k: v for k, v in subargs.items() if v is not None and str(v).strip() != ''}
-        args.update(subargs)
-        extra = (self._args.get('extra_create_species') or '').strip()
-        if extra:
-            # Append extra arguments (e.g. --half1, --half2, --temporal_samples)
-            current_key = None
-            for part in extra.split():
-                if part.startswith('--'):
-                    if current_key is not None and args.get(current_key) == '':
-                        pass  # previous was a flag with no value
-                    current_key = part
-                    args[current_key] = ''
-                elif current_key is not None:
-                    args[current_key] = part
-                    current_key = None
-        self.batch_execute('create_species', batch, args)
+        
+        if _validate('mask', subargs.get('--mask', '')):
+            subargs['--mask'] = self.link(subargs['--mask'])
+
+        particles_relion = subargs.get('--particles_relion', '')
+        if _validate('particles STAR', particles_relion):
+            subargs['--particles_relion'] = self.link(particles_relion)
+            for i in range(1, 3):
+                half = particles_relion.replace('_data.star', f'_half{i}_class001_unfil.mrc')
+                if _validate(f'half{i} map', half):
+                    subargs[f'--half{i}'] = self.link(half)
+
+        extra = Args.fromString(self._args.get('extra_create_species', ''))
+        args.update(subargs)        
+        args.update(extra)
+        self.batch_execute('create_species', batch, args, call=True)
 
         self.updateBatchInfo(batch)
 

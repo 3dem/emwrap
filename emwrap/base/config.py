@@ -146,7 +146,7 @@ class ProcessingConfig:
             cls.scripts_dir = 'NO SCRIPTS DIR SET'
 
         
-        for key in ['jobs', 'programs', 'cluster', 'forms']:
+        for key in ['jobs', 'programs', 'forms']:
             if not conf.get(key, None):
                 raise Exception(f"Configuration is not valid: '{key}' is required.")
 
