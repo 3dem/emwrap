@@ -31,10 +31,7 @@ class WarpMtoolsCreate(WarpBasePipeline):
     name = 'emw-warp-mtools_create'
 
     def runBatch(self, batch, **kwargs):
-        new_population = self._args.get('new_population', True)
-        
-        
-
+        new_population = self._args.get('new_population', True)        
         batch.mkdir(self.M)
 
         if new_population:
@@ -112,7 +109,6 @@ class WarpMtoolsCreate(WarpBasePipeline):
         self.log("Registering output population and species.")
         new_population = self._args.get('new_population', True)
         pop_name = self._args.get('create_population.name', 'population')
-        species_name = self._args.get('create_species.name', '')
         population_file = (
             batch.join(self.M, f"{pop_name}.population")
             if new_population
@@ -124,23 +120,9 @@ class WarpMtoolsCreate(WarpBasePipeline):
             self.outputs['Population'] = {
                 'label': 'Population',
                 'type': 'WarpPopulation',
-                'info': f"Population: {pop_name}",
-                'files': [[population_file, 'WarpPopulation.population']]
+                'info': f"Name: {pop_name}",
+                'files': [[population_file, 'WarpPopulation']]
             }
-        if species_name and os.path.isdir(species_dir):
-            # Species path is typically m/species/<species_id>/<name>.species
-            for sub in os.listdir(species_dir):
-                subpath = os.path.join(species_dir, sub)
-                if os.path.isdir(subpath):
-                    species_file = os.path.join(subpath, f"{species_name}.species")
-                    if os.path.isfile(species_file):
-                        self.outputs['Species'] = {
-                            'label': 'Species',
-                            'type': 'WarpSpecies',
-                            'info': f"Species: {species_name}",
-                            'files': [[batch.join(species_file), 'WarpSpecies.species']]
-                        }
-                        break
         self.updateBatchInfo(batch)
 
     def prerun(self):

@@ -15,52 +15,55 @@
 # **************************************************************************
 
 import os
-import shutil
-import json
-import argparse
-import time
-import sys
-from glob import glob
-from datetime import datetime
 
-from emtools.utils import Color, FolderManager, Path, Process
 from emtools.jobs import Batch, Args
+from emtools.metadata import WarpPopulation
 
 from .warp import WarpBasePipeline
 
 
-class WarpMcore(WarpBasePipeline):
-    """ Warp wrapper to run MCore refinements. """
-    name = 'emw-warp-mcore'
+class WarpEstimateWeights(WarpBasePipeline):
+    """ Warp wrapper to run EstimateWeights.
+
+    Estimates per-item or per-frame weights for the population.
+    """
+    name = 'emw-warp-estimate_weights'
 
     def _split_population(self, population):
-        """ Split the population into a list of populations. """
+        """ Split the population path into input folder and relative population. """
         return population.split('/m/')
 
     def runBatch(self, batch, **kwargs):
-        new_population = self._args.get('new_population', True)        
-        # Input movies pattern for the frame series
-        subargs = self._args.subset('mcore', '--', filters=['remove_false', 'remove_empty'])
-        extra = Args.fromString(self._args.get('extra_mcore', ''))
+        subargs = self._args.subset('estimate_weights', '--',
+                                    filters=['remove_false', 'remove_empty'])
+        extra = Args.fromString(self._args.get('extra_estimate_weights', ''))
 
         inputWarp, self.population = self._split_population(subargs.pop('--population'))
-        
+        populationFile = os.path.join('m', self.population)
+
         self.log(f"Input Warp folder: {inputWarp}, population: {self.population}")
         self._importInputs(inputWarp, keys=['fs', 'fss', 'ts', 'tss', 'tm', 'm'])
 
-        # Run MCore refinements
         args = Args({
-            'MCore': '',
-            '--population': f"m/{self.population}",
+            'EstimateWeights': '',
+            '--population': populationFile
         })
         args.update(subargs)
         args.update(extra)
-        self.batch_execute('mcore', batch, args, call=True)
+
+        # Get the first source if not explicity passed
+        if '--source' not in args:
+            wp = WarpPopulation(self.join(populationFile))
+            sourceName = wp.Sources[0]['name']
+            self.log(f"Loading first source from Population: {sourceName}")            
+            args['--source'] = sourceName
+
+        self.batch_execute('estimate_weights', batch, args, call=True)
         self.updateBatchInfo(batch)
 
     def _output(self, batch):
         """ Register output population. """
-        self.log("Registering output population and species.")
+        self.log("Registering output population.")
         population_file = self.join(self.M, self.population)
         population_name = self.population.replace('.population', '')
         if os.path.exists(population_file):
@@ -75,7 +78,6 @@ class WarpMcore(WarpBasePipeline):
 
         self.updateBatchInfo(batch)
 
-    
     def prerun(self):
         batch = Batch(id=self.name, path=self.path)
         self.runBatch(batch)
@@ -83,4 +85,4 @@ class WarpMcore(WarpBasePipeline):
 
 
 if __name__ == '__main__':
-    WarpMcore.main()
+    WarpEstimateWeights.main()

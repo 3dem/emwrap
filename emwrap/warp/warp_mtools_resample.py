@@ -15,52 +15,67 @@
 # **************************************************************************
 
 import os
-import shutil
-import json
-import argparse
-import time
-import sys
-from glob import glob
-from datetime import datetime
 
-from emtools.utils import Color, FolderManager, Path, Process
 from emtools.jobs import Batch, Args
+from emtools.metadata import WarpPopulation
 
 from .warp import WarpBasePipeline
 
 
-class WarpMcore(WarpBasePipeline):
-    """ Warp wrapper to run MCore refinements. """
-    name = 'emw-warp-mcore'
+class WarpMtoolsResample(WarpBasePipeline):
+    """ Warp wrapper to run MTools resample_trajectories.
+
+    Resamples temporal trajectories of a species. The number of samples
+    is usually between 1 (small particles) and 3 (very large particles).
+    See sample_scripts/MCore_alliters.txt Iter 7.
+
+    MTools API: https://warpem.github.io/reference/mtools/api/mtools/
+    (resample_trajectories)
+    """
+    name = 'emw-warp-mtools_resample'
 
     def _split_population(self, population):
-        """ Split the population into a list of populations. """
+        """ Split the population path into input folder and relative population. """
         return population.split('/m/')
 
     def runBatch(self, batch, **kwargs):
-        new_population = self._args.get('new_population', True)        
-        # Input movies pattern for the frame series
-        subargs = self._args.subset('mcore', '--', filters=['remove_false', 'remove_empty'])
-        extra = Args.fromString(self._args.get('extra_mcore', ''))
+        subargs = self._args.subset('resample_trajectories', '--',
+                                    filters=['remove_false', 'remove_empty'])
+        extra = Args.fromString(self._args.get('extra_resample', ''))
 
-        inputWarp, self.population = self._split_population(subargs.pop('--population'))
-        
+        pop_arg = subargs.pop('--population', None) or subargs.pop('-p', None)
+        if not pop_arg:
+            raise Exception("--population is required for resample_trajectories.")
+
+        inputWarp, self.population = self._split_population(pop_arg)
+        populationFile = os.path.join('m', self.population)
+
         self.log(f"Input Warp folder: {inputWarp}, population: {self.population}")
         self._importInputs(inputWarp, keys=['fs', 'fss', 'ts', 'tss', 'tm', 'm'])
 
-        # Run MCore refinements
+        species = subargs.pop('--species', '')
+        if not species:
+            wp = WarpPopulation(self.join(populationFile))
+            species = wp.Species[0]['path']
+            self.log(f"Loading first species from Population: {species}")            
+
+        # Species path: use m/ prefix relative to output (after import)
+        if '/m/' in species:
+            _, species = species.split('/m/', 1)
+
         args = Args({
-            'MCore': '',
-            '--population': f"m/{self.population}",
+            'MTools': 'resample_trajectories',
+            '--population': populationFile,
+            '--species': os.path.join('m', species),
         })
         args.update(subargs)
         args.update(extra)
-        self.batch_execute('mcore', batch, args, call=True)
+        self.batch_execute('resample_trajectories', batch, args, call=True)
         self.updateBatchInfo(batch)
 
     def _output(self, batch):
         """ Register output population. """
-        self.log("Registering output population and species.")
+        self.log("Registering output population.")
         population_file = self.join(self.M, self.population)
         population_name = self.population.replace('.population', '')
         if os.path.exists(population_file):
@@ -75,7 +90,6 @@ class WarpMcore(WarpBasePipeline):
 
         self.updateBatchInfo(batch)
 
-    
     def prerun(self):
         batch = Batch(id=self.name, path=self.path)
         self.runBatch(batch)
@@ -83,4 +97,4 @@ class WarpMcore(WarpBasePipeline):
 
 
 if __name__ == '__main__':
-    WarpMcore.main()
+    WarpMtoolsResample.main()

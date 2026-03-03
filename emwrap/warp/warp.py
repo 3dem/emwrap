@@ -16,7 +16,7 @@
 
 import os
 
-from emtools.utils import FolderManager
+from emtools.utils import FolderManager, Path
 from emtools.metadata import StarFile, Table
 from emtools.jobs import Batch, Args
 from emtools.image import Image
@@ -45,7 +45,8 @@ class WarpBasePipeline(ProcessingPipeline):
         'tss': TSS,
         'tm': TM,
         FRAMES: FRAMES,
-        MDOCS: MDOCS
+        MDOCS: MDOCS,
+        M: M
     }
 
     @classmethod
@@ -121,7 +122,8 @@ class WarpBasePipeline(ProcessingPipeline):
             keys: input keys to import, if None, all inputs will be imported
         """
         print(f"{self.name}: Import inputs ", self.gain)
-        keys = self.INPUTS.keys() if keys is None else keys
+        if keys is None:
+            keys = [k for k in self.INPUTS if k != self.M]  # all keys except m
 
         if isinstance(inputRunFolder, FolderManager):
             ifm = inputRunFolder
@@ -147,11 +149,17 @@ class WarpBasePipeline(ProcessingPipeline):
                 else:
                     outputFm.copy(inputPath)
 
+        def _copyMFolder(inputFolder):
+            dst = self.mkdir(self.M)
+            Path.rsync(inputFolder, dst, '--exclude', 'versions')         
+
         for inputPath in inputs:
             if inputPath.endswith('.settings'):
                 self.copy(inputPath)
+            elif inputPath.endswith('/m'):
+                _copyMFolder(inputPath)
             elif inputPath.endswith(self.TS) or inputPath.endswith(self.TM):
-                _copyFolder(inputPath)
+                _copyFolder(inputPath)            
             else:  # warp_frameseries
                 self.link(inputPath)
 

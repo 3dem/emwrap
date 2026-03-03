@@ -1,0 +1,44 @@
+{
+  "name": "emw-warp-estimate_weights",
+  "help": "Warp wrapper to run EstimateWeights. Estimates per-item or per-frame weights for the population. Typically used in refinement workflows: first --resolve_items (per-particle weights), then --resolve_frames (per-frame weights).\n\n*REFERENCES*:\n[[https://warpem.github.io/reference/mtools/api/mtools/?h=mtools][MTools API]]",
+  "sections": [
+    {
+      "label": "EstimateWeights",
+      "params": [
+        {
+          "name": "estimate_weights.population",
+          "label": "Population file:",
+          "paramClass": "PathParam",
+          "pointerClass": "WarpPopulation",
+          "help": "Required. Path to the .population file. May be set by the wrapper from input context."
+        },
+        {
+          "name": "estimate_weights.source",
+          "label": "Source name (optional):",
+          "paramClass": "StringParam",
+          "help": "Name of the data source to estimate weights for (--source). Leave empty to use the first source in the population."
+        },
+        {
+          "name": "estimate_weights.resolve_items",
+          "label": "Resolve per-item weights",
+          "paramClass": "BooleanParam",
+          "default": false,
+          "help": "Resolve per-particle weights (--resolve_items). Use first in refinement (e.g. Iter 5)."
+        },
+        {
+          "name": "estimate_weights.resolve_frames",
+          "label": "Resolve per-frame weights",
+          "paramClass": "BooleanParam",
+          "default": false,
+          "help": "Resolve per-frame weights (--resolve_frames). Use after resolve_items (e.g. Iter 6)."
+        },
+        {
+          "name": "extra_estimate_weights",
+          "label": "Extra arguments",
+          "paramClass": "StringParam",
+          "help": "Extra arguments to pass to EstimateWeights."
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "name": "emw-warp-mtools_resample",
+  "help": "Warp/MTools wrapper to run resample_trajectories. Resamples temporal trajectories of a species. Number of samples is usually between 1 (small particles) and 3 (very large particles).\n\n*REFERENCES*:\n[[https://warpem.github.io/reference/mtools/api/mtools/?h=mtools#resample_trajectories][MTools resample_trajectories]]",
+  "sections": [
+    {
+      "label": "Resample trajectories",
+      "params": [
+        {
+          "name": "resample_trajectories.population",
+          "label": "Population file:",
+          "paramClass": "PathParam",
+          "pointerClass": "WarpPopulation",
+          "help": "Required (-p, --population). Path to the .population file."
+        },
+        {
+          "name": "resample_trajectories.species",
+          "label": "Species file:",
+          "paramClass": "PathParam",
+          "pointerClass": "WarpSpecies",
+          "help": "Required (-s, --species). Path to the .species file or its GUID."
+        },
+        {
+          "name": "resample_trajectories.samples",
+          "label": "Number of samples:",
+          "default": 2,
+          "paramClass": "IntParam",
+          "help": "Required (--samples). New number of temporal samples, usually 1 (small particles) to 3 (very large particles). Default: 2."
+        },
+        {
+          "name": "extra_resample",
+          "label": "Extra arguments",
+          "paramClass": "StringParam",
+          "help": "Extra arguments to pass to MTools resample_trajectories."
+        }
+      ]
+    }
+  ]
+}
