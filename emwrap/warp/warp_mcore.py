@@ -14,72 +14,25 @@
 # *
 # **************************************************************************
 
-import os
-import shutil
-import json
-import argparse
-import time
-import sys
-from glob import glob
-from datetime import datetime
+from emtools.jobs import Args
 
-from emtools.utils import Color, FolderManager, Path, Process
-from emtools.jobs import Batch, Args
-
-from .warp import WarpBasePipeline
+from .warp import WarpBasePopulationPipeline
 
 
-class WarpMcore(WarpBasePipeline):
-    """ Warp wrapper to run MCore refinements. """
+class WarpMcore(WarpBasePopulationPipeline):
+    """Warp wrapper to run MCore refinements."""
     name = 'emw-warp-mcore'
 
-    def _split_population(self, population):
-        """ Split the population into a list of populations. """
-        return population.split('/m/')
-
     def runBatch(self, batch, **kwargs):
-        new_population = self._args.get('new_population', True)        
-        # Input movies pattern for the frame series
-        subargs = self._args.subset('mcore', '--', filters=['remove_false', 'remove_empty'])
-        extra = Args.fromString(self._args.get('extra_mcore', ''))
-
-        inputWarp, self.population = self._split_population(subargs.pop('--population'))
-        
-        self.log(f"Input Warp folder: {inputWarp}, population: {self.population}")
-        self._importInputs(inputWarp, keys=['fs', 'fss', 'ts', 'tss', 'tm', 'm'])
-
-        # Run MCore refinements
-        args = Args({
-            'MCore': '',
-            '--population': f"m/{self.population}",
+        subargs = self._get_subargs('mcore', 'extra_mcore')
+        population_file = self._setup_population_input(subargs)
+        args = Args({ 
+            'MCore': '', 
+            '--population': population_file 
         })
         args.update(subargs)
-        args.update(extra)
         self.batch_execute('mcore', batch, args, call=True)
         self.updateBatchInfo(batch)
-
-    def _output(self, batch):
-        """ Register output population. """
-        self.log("Registering output population and species.")
-        population_file = self.join(self.M, self.population)
-        population_name = self.population.replace('.population', '')
-        if os.path.exists(population_file):
-            self.outputs['Population'] = {
-                'label': 'Population',
-                'type': 'WarpPopulation',
-                'info': f"Name: {population_name}",
-                'files': [[population_file, 'WarpPopulation']]
-            }
-        else:
-            self.log(f"Population file not found: {population_file}")
-
-        self.updateBatchInfo(batch)
-
-    
-    def prerun(self):
-        batch = Batch(id=self.name, path=self.path)
-        self.runBatch(batch)
-        self._output(batch)
 
 
 if __name__ == '__main__':

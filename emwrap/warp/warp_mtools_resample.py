@@ -16,14 +16,14 @@
 
 import os
 
-from emtools.jobs import Batch, Args
+from emtools.jobs import Args
 from emtools.metadata import WarpPopulation
 
-from .warp import WarpBasePipeline
+from .warp import WarpBasePopulationPipeline
 
 
-class WarpMtoolsResample(WarpBasePipeline):
-    """ Warp wrapper to run MTools resample_trajectories.
+class WarpMtoolsResample(WarpBasePopulationPipeline):
+    """Warp wrapper to run MTools resample_trajectories.
 
     Resamples temporal trajectories of a species. The number of samples
     is usually between 1 (small particles) and 3 (very large particles).
@@ -34,66 +34,28 @@ class WarpMtoolsResample(WarpBasePipeline):
     """
     name = 'emw-warp-mtools_resample'
 
-    def _split_population(self, population):
-        """ Split the population path into input folder and relative population. """
-        return population.split('/m/')
-
     def runBatch(self, batch, **kwargs):
-        subargs = self._args.subset('resample_trajectories', '--',
-                                    filters=['remove_false', 'remove_empty'])
-        extra = Args.fromString(self._args.get('extra_resample', ''))
-
-        pop_arg = subargs.pop('--population', None) or subargs.pop('-p', None)
-        if not pop_arg:
-            raise Exception("--population is required for resample_trajectories.")
-
-        inputWarp, self.population = self._split_population(pop_arg)
-        populationFile = os.path.join('m', self.population)
-
-        self.log(f"Input Warp folder: {inputWarp}, population: {self.population}")
-        self._importInputs(inputWarp, keys=['fs', 'fss', 'ts', 'tss', 'tm', 'm'])
+        subargs = self._get_subargs('resample_trajectories', 'extra_resample')
+        population_file = self._setup_population_input(subargs)
 
         species = subargs.pop('--species', '')
         if not species:
-            wp = WarpPopulation(self.join(populationFile))
+            wp = WarpPopulation(self.join(population_file))
             species = wp.Species[0]['path']
-            self.log(f"Loading first species from Population: {species}")            
+            self.log(f"Loading first species from Population: {species}")
 
-        # Species path: use m/ prefix relative to output (after import)
         if '/m/' in species:
             _, species = species.split('/m/', 1)
 
         args = Args({
             'MTools': 'resample_trajectories',
-            '--population': populationFile,
+            '--population': population_file,
             '--species': os.path.join('m', species),
         })
         args.update(subargs)
         args.update(extra)
         self.batch_execute('resample_trajectories', batch, args, call=True)
         self.updateBatchInfo(batch)
-
-    def _output(self, batch):
-        """ Register output population. """
-        self.log("Registering output population.")
-        population_file = self.join(self.M, self.population)
-        population_name = self.population.replace('.population', '')
-        if os.path.exists(population_file):
-            self.outputs['Population'] = {
-                'label': 'Population',
-                'type': 'WarpPopulation',
-                'info': f"Name: {population_name}",
-                'files': [[population_file, 'WarpPopulation']]
-            }
-        else:
-            self.log(f"Population file not found: {population_file}")
-
-        self.updateBatchInfo(batch)
-
-    def prerun(self):
-        batch = Batch(id=self.name, path=self.path)
-        self.runBatch(batch)
-        self._output(batch)
 
 
 if __name__ == '__main__':

@@ -193,6 +193,59 @@ class WarpBasePipeline(ProcessingPipeline):
         return self.get_launcher_arg('launcher_warp', 'WARP')
 
 
+class WarpBasePopulationPipeline(WarpBasePipeline):
+    """Base for Warp pipelines that take a single population path and produce
+    an output population (e.g. MCore, EstimateWeights, MTools resample).
+    """
+
+    def _split_population(self, population):
+        """Split the population path into input folder and relative population."""
+        return population.split('/m/')
+
+    def _setup_population_input(self, subargs, population_key='--population', alt_key=None):
+        """Parse population from subargs, set self.population, import inputs.
+        Returns the population file path (e.g. 'm/name.population').
+        """
+        pop_arg = subargs.pop(population_key, None)
+        if alt_key is not None:
+            pop_arg = pop_arg or subargs.pop(alt_key, None)
+        if not pop_arg:
+            raise ValueError("--population is required.")
+        input_warp, self.population = self._split_population(pop_arg)
+        population_file = os.path.join('m', self.population)
+        self.log(f"Input Warp folder: {input_warp}, population: {self.population}")
+        self._importInputs(input_warp, keys=['fs', 'fss', 'ts', 'tss', 'tm', 'm'])
+        return population_file
+
+    def _get_subargs(self, key, extra_name=None):
+        subargs = self._args.subset(key, '--', filters=['remove_false', 'remove_empty'])
+        if extra_name:
+            extra = Args.fromString(self._args.get(extra_name, ''))
+            subargs.update(extra)
+        return subargs
+
+    def _output(self, batch):
+        """Register output population."""
+        self.log("Registering output population.")
+        population_file = self.join(self.M, self.population)
+        population_name = self.population.replace('.population', '')
+        if os.path.exists(population_file):
+            self.outputs['Population'] = {
+                'label': 'Population',
+                'type': 'WarpPopulation',
+                'info': f"Name: {population_name}",
+                'files': [[population_file, 'WarpPopulation']]
+            }
+        else:
+            self.log(f"Population file not found: {population_file}")
+        self.updateBatchInfo(batch)
+
+    def prerun(self):
+        batch = Batch(id=self.name, path=self.path)
+        self.runBatch(batch)
+        self._output(batch)
+
+
 class WarpBaseTsAlign(WarpBasePipeline):
     """ Base class for all Warp TS alignment wrappers:
         ts_aretomo, ts_aretomo3
