@@ -17,9 +17,11 @@
 import os
 import shutil
 import json
-import argparse
 import time
 import sys
+import subprocess
+import re
+import shlex
 
 from emtools.utils import Color, FolderManager, Path
 from emtools.metadata import Table, Column, StarFile, RelionStar, Acquisition
@@ -34,23 +36,67 @@ class McPipelineTomo(ProcessingPipeline):
     """ Pipeline specific to Motioncor tilt-series processing. """
     name = 'emw-mc-tomo'
 
-    def __init__(self, input_args):
-        ProcessingPipeline.__init__(self, input_args)
+    def __init__(self, input_args, output):
+        super().__init__(input_args, output)
         args = self._args
-        self.gpuList = args['gpu'].split()
+        self.get_gpu_list(args['gpu_ids'])
         self.outputMicDir = self.join('Micrographs')
         self.inputLen = 0
+        self.micsPerTs = 0
+        self.movieDims = ()
         self.acq = self.loadAcquisition()
         self.inputGain = self.acq.get('gain', None)
         self.outputTsDir = 'TS'
         self._DEBUG_only_output = 'DEBUG_only_output' in args
-        extra = self._args['motioncor']['extra_args']
-        self.bin = float(extra.get('-FtBin', 1.0))
+        self.get_extras()
+        ###print(f"\n{os.path.basename(__file__)}:50: self._args='{self._args}'")
+
+    def get_gpu_list(self, gpu_field):
+        """
+        If GPU list not provided, then uses all.
+        If GPU list provided, then parses into list.
+        """
+
+        # Trap for double double quotes
+        if gpu_field.startswith('"') and gpu_field.endswith('"'):
+            gpu_field = gpu_field[1:-1]
+
+        gpu_field = gpu_field.strip()
+
+        # Use all GPUs
+        if not gpu_field:
+            gpuResult = subprocess.run(
+                ["nvidia-smi", "--query-gpu=index", "--format=csv,noheader"],
+                capture_output=True, text=True, check=True)
+            self.gpuList = [int(line.strip()) for line in gpuResult.stdout.splitlines()]
+
+        else:
+            parts = re.split(r"[,\s]+", gpu_field)
+            self.gpuList = [int(p) for p in parts if p]
+
+    def get_extras(self):
+        """
+        Split other_motioncor2_args.
+        Get FtBin.
+        """
+
+        extra = self._args.get('other_motioncor2_args', '')
+
+        # Turn other_motioncor2_args into a dictionary
+        if extra:
+            tokens = shlex.split(extra)
+            extra_dict = dict(zip(tokens[::2], tokens[1::2]))
+        else:
+            extra_dict = {}
+
+        self.bin = float(extra_dict.get('-FtBin', 1.0))
+        self._args['extra_args'] = extra_dict
+        del self._args['other_motioncor2_args']
 
     def get_motioncor_proc(self, gpu):
         def _motioncor(batch):
-            # In this pipeline, batch are not created until now, when we are
-            # processing each one.
+            # In this pipeline, batches are not created until now,
+            # when we are processing each one.
             # We also need to create the links to movie files
             items = batch['items']
             batch.create()
@@ -71,7 +117,7 @@ class McPipelineTomo(ProcessingPipeline):
             if self.inputGain:
                 acq['gain'] = batch.link(self.inputGain)
 
-            mc = Motioncor(acq, **self._args['motioncor'])
+            mc = Motioncor(acq, **self._args)
             mc.process_batch(batch, gpu=gpu)
             return batch
 
@@ -120,8 +166,9 @@ class McPipelineTomo(ProcessingPipeline):
                         name = f'{baseName}{suffix}.mrc'
                         src = batch.join('output', f'micrograph-{name}')
                         dst = batchFolder.join(name)
-                        #self.log(f"Moving {src} -> {dst}")
-                        shutil.move(src, dst)
+                        if os.path.exists(src):
+                            #self.log(f"Moving {src} -> {dst}")
+                            shutil.move(src, dst)
                         files[suffix] = dst
 
                     micFile = files['']
@@ -151,7 +198,6 @@ class McPipelineTomo(ProcessingPipeline):
                             sfOut2.writeTable('global_shift', sf.getTable('global_shift'))
 
                     sfOut.writeRowValues(values)
-
             self._writeCorrectedTS()
 
         batch.info['tsName'] = batch['tsName']  # Store tsName in the info.json
@@ -165,12 +211,31 @@ class McPipelineTomo(ProcessingPipeline):
         return batch
 
     def _getInputTsTable(self):
-        """ Read input star file and return the 'global' table. """
-        inputStar = self._args['input_tiltseries']
+        """
+        Read input star file and return the 'global' table.
+        Also stores:
+            inputLen : number of tilt series
+            micsPerTs : number of micrographs per tilt series
+            movieDims : movie dimensions (x, y, num_frames)
+
+        Adapted from warp.WarpBaseTsAlign._getInfo()
+        """
+
+        inputStar = self._args['input_star_mics']
         with StarFile(inputStar) as sf:
-            t = sf.getTable('global')
-            self.inputLen = len(t)  # Let's update the inputLen property
-            return t
+            tsAllTable = sf.getTable('global')
+            ###sf.printTable(tsAllTable)
+            self.inputLen = len(tsAllTable)  # Let's update the inputLen property
+
+            # Get number of frame from first movie in first tilt series
+            first = tsAllTable[0]
+            tsTable = StarFile.getTableFromFile(first.rlnTomoName, first.rlnTomoTiltSeriesStarFile)
+            self.micsPerTs = len(tsTable)
+            movieFn = tsTable[0].rlnMicrographMovieName
+            self._args['movieDims'] = self.movieDims = Image.get_dimensions(movieFn)
+            # (What happens if it isn't a movie? (only 2 dimensions will be returned))
+
+            return tsAllTable
         return None
 
     def _getOutputTsFolder(self, tsName):
@@ -181,8 +246,9 @@ class McPipelineTomo(ProcessingPipeline):
         cols = inputTs.getColumnNames()
         outTs = Table(cols + ['rlnTomoTiltSeriesPixelSize'])
         newPixelSize = self.acq.pixel_size * self.bin
+        newTsStarFile = self.join('corrected_tilt_series.star')
 
-        with StarFile(self.join('corrected_tilt_series.star'), 'w') as sfOut:
+        with StarFile(newTsStarFile, 'w') as sfOut:
             sfOut.writeTimeStamp()
             sfOut.writeHeader('global', outTs)
             for row in inputTs:
@@ -194,6 +260,17 @@ class McPipelineTomo(ProcessingPipeline):
                     values.update(rlnTomoTiltSeriesStarFile=tsStarName,
                                   rlnTomoTiltSeriesPixelSize=newPixelSize)
                     sfOut.writeRowValues(values)
+
+        self.outputs = {
+            'TiltSeries': {
+                'label': 'Tilt Series',
+                'type': 'TiltSeries',
+                'info': f"{len(inputTs)} items, {self.movieDims[0]} x {self.movieDims[1]} x {self.micsPerTs}, {newPixelSize:0.3f} Å/px",
+                'files': [
+                    [newTsStarFile, 'TomogramGroupMetadata.star.relion.tomo.import']
+                ]
+            }
+        }
 
     def prerun(self):
         if self._DEBUG_only_output:
@@ -215,7 +292,6 @@ class McPipelineTomo(ProcessingPipeline):
             outputQueue = p.outputQueue
 
         self.addProcessor(outputQueue, self._output)
-
 
 if __name__ == '__main__':
     McPipelineTomo.main()
