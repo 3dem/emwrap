@@ -51,7 +51,7 @@
                     "name": "dose_per_frame",
                     "label": "Dose per frame (e/A2):",
                     "paramClass": "FloatParam",
-                    "help": "Dose per movie frame (in electrons per squared Angstrom). Required if performing dose-weighting."
+                    "help": "Dose per movie frame (in electrons per squared Angstrom). Required if performing dose-weighting or if using EER movies."
                 },
                 {
                     "name": "gpu_ids",
