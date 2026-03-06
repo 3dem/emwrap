@@ -76,11 +76,11 @@ class McPipelineTomo(ProcessingPipeline):
 
     def get_extras(self):
         """
-        Split other_motioncor2_args.
+        Split other_motioncor_args
         Get FtBin.
         """
 
-        extra = self._args.get('other_motioncor2_args', '')
+        extra = self._args.get('other_motioncor_args', '')
 
         # Turn other_motioncor2_args into a dictionary
         if extra:
@@ -91,7 +91,7 @@ class McPipelineTomo(ProcessingPipeline):
 
         self.bin = float(extra_dict.get('-FtBin', 1.0))
         self._args['extra_args'] = extra_dict
-        del self._args['other_motioncor2_args']
+        del self._args['other_motioncor_args']
 
     def get_motioncor_proc(self, gpu):
         def _motioncor(batch):
