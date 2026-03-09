@@ -15,17 +15,12 @@
 # **************************************************************************
 
 import os
-import shutil
-import json
-import argparse
-import time
-import sys
 from glob import glob
 from datetime import datetime
 from collections import defaultdict
 
-from emtools.utils import Color, FolderManager, Path, Process
-from emtools.jobs import Batch, Args
+from emtools.utils import FolderManager, Path
+from emtools.jobs import Args
 from emtools.metadata import StarFile, Table, WarpXml
 from emtools.image import Image
 
@@ -122,7 +117,8 @@ class WarpMotionCtf(WarpBasePipeline):
             '--angpix': ps,
             '--exposure': self.acq['total_dose']
         })
-        tPs = self.get_float(ps, 0)
+        tPs = self.targetPs(ps)
+
         if tPs > ps:
             args['--bin_angpix'] = tPs
 
