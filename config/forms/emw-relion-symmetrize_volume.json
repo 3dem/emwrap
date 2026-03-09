@@ -1,0 +1,25 @@
+{
+    "name": "emw-relion-symmetrize_volume",
+    "help": "Apply point-group symmetry to a volume using relion_image_handler --symmetrize. Input: a Volume. Output: symmetrized Volume.",
+    "sections": [
+        {
+            "label": "General",
+            "params": [
+                {
+                    "name": "relion_image_handler.i",
+                    "label": "Input volume:",
+                    "paramClass": "PathParam",
+                    "pointerClass": "Volume",
+                    "help": "Input volume (MRC/MRCs) to symmetrize. This will be passed as --i to relion_image_handler."
+                },
+                {
+                    "name": "relion_image_handler.sym",
+                    "label": "Symmetry:",
+                    "paramClass": "StringParam",
+                    "default": "C1",
+                    "help": "Symmetry group to apply (e.g. C1, C2, C3, D2, I1, I2, I3, I4). Passed as --sym to relion_image_handler. For asymmetric volumes use C1."
+                }
+            ]
+        }
+    ]
+}
