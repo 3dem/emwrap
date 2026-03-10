@@ -24,39 +24,40 @@ from .relion_base import RelionBasePipeline
 
 
 class RelionSymmetrizeVolume(RelionBasePipeline):
-    """ Wrapper around relion_image_handler --symmetrize for volume symmetrization. """
+    """ Wrapper around relion_align_symmetry to align a volume for a given symmetry. """
     name = 'emw-relion-symmetrize_volume'
 
     def prerun(self):
-        inVol = self._args['relion_image_handler.i']
+        inVol = self._args['relion_align_symmetry.i']
         if not os.path.exists(inVol):
             raise Exception(f"Input volume '{inVol}' does not exist.")
 
-        sym = self._args.get('relion_image_handler.sym', 'C1')
+        sym = self._args.get('relion_align_symmetry.sym', 'C1')
         if not sym:
             sym = 'C1'
 
-        batch = Batch(id=self.name, path=self.workingDir)
-        outVol = self.join('symmetrized_volume.mrc')
-
+        batch = Batch(id=self.name, path=self.outputDir)
+        inVolLocal = batch.link(inVol)
+        outVolLocal = 'aligned_volume.mrc'
         self.log(f"Input volume: {Color.bold(inVol)}")
         self.log(f"Symmetry: {Color.green(sym)}")
-        self.log(f"Output volume: {Color.bold(outVol)}")
+        self.log(f"Output volume: {Color.bold(outVolLocal)}")
 
-        # relion_image_handler is single-process (no MPI)
+        # relion_align_symmetry is single-process (no MPI)
         args = Args({
-            '--i': inVol,
-            '--o': outVol,
-            '--symmetrize': '',
+            'relion_align_symmetry': 1,  # No MPI
+            '--i': inVolLocal,
+            '--o': outVolLocal,
             '--sym': sym,
         })
-        self.log_cmd(Args({'relion_image_handler': args.toLine()}))
 
-        with batch.execute('relion_image_handler'):
-            batch.call('relion_image_handler', args, logfile=self.join('run.out'))
+        self.batch_execute('relion_align_symmetry', batch, args)
+
+        # Make the path relative to the project folder
+        outVol = batch.join(outVolLocal)
 
         if not os.path.exists(outVol):
-            raise Exception(f"relion_image_handler did not produce output. Check {self.join('run.out')}.")
+            raise Exception(f"relion_align_symmetry did not produce output. Check {self.join('run.out')}.")
 
         # Get volume dimensions for output info
         try:
@@ -66,13 +67,13 @@ class RelionSymmetrizeVolume(RelionBasePipeline):
             elif isinstance(dims, (list, tuple)) and len(dims) > 0:
                 info = f"box size: {dims[0]} px"
             else:
-                info = "symmetrized volume"
+                info = "Aligned volume"
         except Exception:
-            info = "symmetrized volume"
+            info = "Aligned volume"
 
         self.outputs = {
             'Volume': {
-                'label': 'Symmetrized Volume',
+                'label': 'Aligned Volume',
                 'type': 'Volume',
                 'info': info,
                 'files': [

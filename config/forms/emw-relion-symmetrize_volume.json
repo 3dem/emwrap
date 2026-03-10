@@ -6,14 +6,14 @@
             "label": "General",
             "params": [
                 {
-                    "name": "relion_image_handler.i",
+                    "name": "relion_align_symmetry.i",
                     "label": "Input volume:",
                     "paramClass": "PathParam",
                     "pointerClass": "Volume",
-                    "help": "Input volume (MRC/MRCs) to symmetrize. This will be passed as --i to relion_image_handler."
+                    "help": "Input volume (MRC) to symmetrize. This will be passed as --i to relion_align_symmetry."
                 },
                 {
-                    "name": "relion_image_handler.sym",
+                    "name": "relion_align_symmetry.sym",
                     "label": "Symmetry:",
                     "paramClass": "StringParam",
                     "default": "C1",

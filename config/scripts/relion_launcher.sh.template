@@ -6,11 +6,13 @@ export PROGRAM=$1
 shift
 export MPI=$1
 shift
-# FIXME: Check if MPI > 0 to add the _mpi suffix
 
-export CMD="mpirun -np ${MPI} ${PROGRAM}_mpi $@"
+if [ "$MPI" -eq 1 ]; then
+    export CMD="${PROGRAM} $@"
+else    
+    export CMD="mpirun -np ${MPI} ${PROGRAM}_mpi $@"
+fi
+
 echo Running command: ${CMD}
 
 $CMD
-
-
