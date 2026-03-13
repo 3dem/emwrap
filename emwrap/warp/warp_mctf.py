@@ -44,9 +44,10 @@ class WarpMotionCtf(WarpBasePipeline):
         v = self._args.get('create_settings.bin_angpix', '') or 0
         return float(v) or inputPs
 
-    def runBatch(self, batch, **kwargs):
-        """ This method can be run for only the Mctf pipeline
-         or for the preprocessing one, where import inputs is not needed.
+    def _create_settings(self, batch, kwargs):
+        """ This method should only be called the first time the pipeline is run. 
+        It will make the import from previous WARP run and create the settings file.
+        If it is a continue mode (frameseries.settings exists), it is not needed to run this method.
         """
         framesFm = FolderManager(batch.join('frames'))
         framesFm.create()
@@ -116,7 +117,7 @@ class WarpMotionCtf(WarpBasePipeline):
             '--output': self.FSS,
             '--angpix': ps,
             '--exposure': self.acq['total_dose']
-        })
+        })  
         tPs = self.targetPs(ps)
 
         if tPs > ps:
@@ -131,6 +132,20 @@ class WarpMotionCtf(WarpBasePipeline):
         # TODO: Allow for some extra args
 
         self.batch_execute('create_settings', batch, args)
+        return ngroups
+
+    def runBatch(self, batch, **kwargs):
+        """ This method can be run for only the Mctf pipeline
+         or for the preprocessing one, where import inputs is not needed.
+        """
+        if not self.exists(self.FSS):
+            self.log("There are no settings, importing files from previous run and creating settings file...")
+            ngroups = self._create_settings(batch, kwargs)
+        else:
+            self.log("There are settings, reading from file...")
+            warpXml = WarpXml(self.join(self.FSS))
+            d = warpXml.getDict('Settings', 'Import', 'Param')
+            ngroups = -1 * int(d['EERGroupFrames'])
 
         # Run fs_motion_and_ctf
         args = Args({
@@ -143,16 +158,12 @@ class WarpMotionCtf(WarpBasePipeline):
             '--c_amplitude': self.acq.amplitude_contrast,
             '--out_averages': "",  # We always generate averages, if not the job will fail
         })
-        subargs = self.get_subargs('fs_motion_and_ctf')
         if self.gpuList:
             args['--device_list'] = self.gpuList
-        if pd := subargs['perdevice']:
-            args['--perdevice'] = int(pd)
+        # if pd := subargs['perdevice']:
+        #     args['--perdevice'] = int(pd)
 
-        ###args["--out_averages"] = ""
-        for a in ['c_use_sum', 'out_average_halves']:
-            if subargs[a]:
-                args[f"--{a}"] = ""
+        args.update(self.get_subargs('fs_motion_and_ctf'))
 
         self.batch_execute('fs_motion_and_ctf', batch, args)
         self.updateBatchInfo(batch)
@@ -168,27 +179,50 @@ class WarpMotionCtf(WarpBasePipeline):
         tsAllTable = StarFile.getTableFromFile('global', self.inputTs)
 
         newTsStarFile = batch.join('tilt_series_ctf.star')
+        failedStarFile = batch.join('tilt_series_failed.star')
         newPs = None
         n = None
         dims = None
 
         newPsLabel = 'rlnTomoTiltSeriesPixelSize'
         newTsAllTable = Table(tsAllTable.getColumnNames() + [newPsLabel])
+        failedTable = Table(newTsAllTable.getColumnNames())
+
         for tsRow in tsAllTable:
             tsName = tsRow.rlnTomoName
             tsStarFile = self.join('tilt_series', tsName + '.star')
             ps = tsRow.rlnMicrographOriginalPixelSize
             if newPs is None:
                 newPs = self.targetPs(ps)
+
+            tsTable = StarFile.getTableFromFile(tsName, tsRow.rlnTomoTiltSeriesStarFile)
+            n = len(tsTable)
+
+            # Each input movie must have xml + average mrc (same idea as WarpAreTomo
+            # requiring aligned stack per TS). Collect missing before building output.
+            missing = []
+            for frameRow in tsTable:
+                moviePrefix = Path.removeBaseExt(frameRow.rlnMicrographMovieName)
+                movieMrc = moviePrefix + '.mrc'
+                movieXml = batch.join(self.FS, moviePrefix + '.xml')
+                movieAvgMrc = batch.join(self.FS, 'average', movieMrc)
+                if not os.path.exists(movieXml):
+                    missing.append((moviePrefix, 'xml', movieXml))
+                if not os.path.exists(movieAvgMrc):
+                    missing.append((moviePrefix, 'average mrc', movieAvgMrc))
+
             tsDict = tsRow._asdict()
             tsDict.update({
                 newPsLabel: newPs,
                 'rlnTomoTiltSeriesStarFile': tsStarFile
             })
-            newTsAllTable.addRowValues(**tsDict)
 
-            tsTable = StarFile.getTableFromFile(tsName, tsRow.rlnTomoTiltSeriesStarFile)
-            n = len(tsTable)
+            if missing:
+                for moviePrefix, reason, path in missing:
+                    self.log(f"ERROR: Missing {reason} for movie {moviePrefix}: {path}")
+                tsDict['rlnTomoTiltSeriesStarFile'] = "None"
+                failedTable.addRowValues(**tsDict)
+                continue
             # FIXME: Do not add even/odd when this option is not selected
             extra_cols = [
                 'rlnCtfPowerSpectrum', 'rlnMicrographName', 'rlnMicrographMetadata',
@@ -214,21 +248,19 @@ class WarpMotionCtf(WarpBasePipeline):
                     frameDict[k] = batch.join(self.FS, v, movieMrc)
                 frameDict['rlnMicrographMetadata'] = "None"
 
-                if dims is None:  # Compute image dims once
-                    dims = Image.get_dimensions(frameDict['rlnMicrographName'])
+                avgMrcPath = frameDict['rlnMicrographName']
+                if dims is None and os.path.exists(avgMrcPath):
+                    dims = Image.get_dimensions(avgMrcPath)
 
                 movieXml = batch.join(self.FS, moviePrefix + '.xml')
                 defocusDict = defaultdict(lambda: 0)
 
-                if os.path.exists(movieXml):
-                    # self.log(f"Reading {movieXml}")
-                    ctf = WarpXml(movieXml).getDict('Movie', 'CTF', 'Param')
-                    defocusDict['rlnDefocusU'] = _float(ctf['Defocus'])
-                    defocusDict['rlnCtfAstigmatism'] = _float(ctf['DefocusDelta'])
-                    defocusDict['rlnDefocusV'] = _float(defocusDict['rlnDefocusU'] + defocusDict['rlnCtfAstigmatism'])
-                    defocusDict['rlnDefocusAngle'] = _float(ctf['DefocusAngle'])
-                else:
-                    pass  # FIXME Do something when xml is missing
+                # xml and average mrc already validated for whole TS above
+                ctf = WarpXml(movieXml).getDict('Movie', 'CTF', 'Param')
+                defocusDict['rlnDefocusU'] = _float(ctf['Defocus'])
+                defocusDict['rlnCtfAstigmatism'] = _float(ctf['DefocusDelta'])
+                defocusDict['rlnDefocusV'] = _float(defocusDict['rlnDefocusU'] + defocusDict['rlnCtfAstigmatism'])
+                defocusDict['rlnDefocusAngle'] = _float(ctf['DefocusAngle'])
 
                 for k in extra_cols:
                     if k.startswith('rlnAccumMotion'):
@@ -240,10 +272,14 @@ class WarpMotionCtf(WarpBasePipeline):
                 newTsTable.addRowValues(**frameDict)
             # Write the new ts.star file
             self.write_ts_table(tsName, newTsTable, tsStarFile)
+            newTsAllTable.addRowValues(**tsDict)
 
         # Write the corrected_tilt_series.star
         self.write_ts_table('global', newTsAllTable, newTsStarFile)
-        x, y = dims
+        if dims is None:
+            x, y = 0, 0
+        else:
+            x, y = dims[0], dims[1]
         self.outputs = {
             'TiltSeries': {
                 'label': 'Tilt Series',
@@ -254,6 +290,16 @@ class WarpMotionCtf(WarpBasePipeline):
                 ]
             }
         }
+        if len(failedTable) > 0:
+            self.write_ts_table('global', failedTable, failedStarFile)
+            self.outputs['TiltSeriesFailed'] = {
+                'label': 'Tilt Series Failed',
+                'type': 'TiltSeriesFailed',
+                'info': f"{len(failedTable)} items",
+                'files': [
+                    [failedStarFile, 'TomogramGroupMetadata.star.relion.tomo.failed']
+                ]
+            }
 
         self.updateBatchInfo(batch)
 

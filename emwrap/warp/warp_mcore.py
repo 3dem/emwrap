@@ -24,7 +24,7 @@ class WarpMcore(WarpBasePopulationPipeline):
     name = 'emw-warp-mcore'
 
     def runBatch(self, batch, **kwargs):
-        subargs = self._get_subargs('mcore', 'extra_mcore')
+        subargs = self.get_subargs('mcore', 'extra_mcore')
         population_file = self._setup_population_input(subargs)
         args = Args({ 
             'MCore': '', 

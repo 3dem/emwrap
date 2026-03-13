@@ -217,7 +217,7 @@ class WarpBasePopulationPipeline(WarpBasePipeline):
         self._importInputs(input_warp, keys=['fs', 'fss', 'ts', 'tss', 'tm', 'm'])
         return population_file
 
-    def _get_subargs(self, key, extra_name=None):
+    def get_subargs(self, key, extra_name=None):
         subargs = self._args.subset(key, '--', filters=['remove_false', 'remove_empty'])
         if extra_name:
             extra = Args.fromString(self._args.get(extra_name, ''))
@@ -342,8 +342,11 @@ class WarpBaseTsAlign(WarpBasePipeline):
         tsAllTable = StarFile.getTableFromFile('global', self.inputTs)
 
         newTsStarFile = batch.join('tilt_series_aln.star')
+        failedStarFile = batch.join('tilt_series_failed.star')
 
         newTsAllTable = Table(tsAllTable.getColumnNames() + ['rlnTiltSeriesAligned'])
+        failedTable = Table(newTsAllTable.getColumnNames())
+
         dims = 0, 0, 0
         for tsRow in tsAllTable:
             tsName = tsRow.rlnTomoName
@@ -353,18 +356,21 @@ class WarpBaseTsAlign(WarpBasePipeline):
             if not os.path.exists(tsAligned):
                 self.log(f"ERROR: Missing expected aligned TS: {tsAligned}")
                 tsAligned = "None"  # FIXME Handle missing aligned TS
+                table = failedTable
             else:
                 newDims = Image.get_dimensions(tsAligned)
                 if newDims[2] > dims[2]:
                     dims = newDims
+                table = newTsAllTable
             tsDict = tsRow._asdict()
             tsDict.update({
                 'rlnTomoTiltSeriesStarFile': tsStarFile,
                 'rlnTiltSeriesAligned': tsAligned
             })
-            newTsAllTable.addRowValues(**tsDict)
+            table.addRowValues(**tsDict)
 
         self.write_ts_table('global', newTsAllTable, newTsStarFile)
+        
         N = len(newTsAllTable)
         # ps = newTsAllTable[0].rlnTomoTiltSeriesPixelSize
         newPs = float(self._args[self.output_angpix])
@@ -379,6 +385,16 @@ class WarpBaseTsAlign(WarpBasePipeline):
                 ]
             }
         }
+        if len(failedTable) > 0:
+            self.write_ts_table('global', failedTable, failedStarFile)
+            self.outputs['TiltSeriesFailed'] = {
+                'label': 'Tilt Series Failed',
+                'type': 'TiltSeriesFailed',
+                'info': f"{len(failedTable)} items",
+                'files': [
+                    [failedStarFile, 'TomogramGroupMetadata.star.relion.tomo.failed']
+                ]
+            }
         self.updateBatchInfo(batch)
 
     def prerun(self):

@@ -35,7 +35,7 @@ class WarpMtoolsResample(WarpBasePopulationPipeline):
     name = 'emw-warp-mtools_resample'
 
     def runBatch(self, batch, **kwargs):
-        subargs = self._get_subargs('resample_trajectories', 'extra_resample')
+        subargs = self.get_subargs('resample_trajectories', 'extra_resample')
         population_file = self._setup_population_input(subargs)
 
         species = subargs.pop('--species', '')
@@ -53,7 +53,6 @@ class WarpMtoolsResample(WarpBasePopulationPipeline):
             '--species': os.path.join('m', species),
         })
         args.update(subargs)
-        args.update(extra)
         self.batch_execute('resample_trajectories', batch, args, call=True)
         self.updateBatchInfo(batch)
 
