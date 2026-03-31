@@ -1,0 +1,125 @@
+{
+    "name": "emw-relion-mask_create",
+    "help": "Create a 3D mask using relion_mask_create. Two modes: (1) From volume — binarize an input map with a threshold; (2) De novo — create a spherical/circular mask from box size and radii.",
+    "sections": [
+        {
+            "label": "Mask creation",
+            "params": [
+                {
+                    "name": "relion_mask_create.denovo",
+                    "label": "De novo creation:",
+                    "paramClass": "BooleanParam",
+                    "default": false,
+                    "help": "If true, create mask from box size and radii (no input volume). If false, create mask by thresholding an input volume."
+                },
+                {
+                    "label": "From volume",
+                    "paramClass": "Group",
+                    "condition": "!relion_mask_create.denovo",
+                    "params": [
+                        {
+                            "name": "relion_mask_create.volume.i",
+                            "label": "Input volume:",
+                            "paramClass": "PathParam",
+                            "pointerClass": "Volume",
+                            "help": "Input map (MRC) to threshold for generating the binary mask. Passed as --i to relion_mask_create."
+                        },
+                        {
+                            "name": "relion_mask_create.volume.ini_threshold",
+                            "label": "Initial threshold:",
+                            "paramClass": "FloatParam",
+                            "default": 0.01,
+                            "help": "Threshold for binarization (--ini_threshold). Pixels above this value become 1 in the initial mask."
+                        },
+                        {
+                            "name": "relion_mask_create.volume.extend_inimask",
+                            "label": "Extend mask (px):",
+                            "paramClass": "IntParam",
+                            "default": 0,
+                            "help": "Extend the initial binary mask by this number of pixels (--extend_inimask)."
+                        },
+                        {
+                            "name": "relion_mask_create.volume.width_soft_edge",
+                            "label": "Soft edge width (px):",
+                            "paramClass": "IntParam",
+                            "default": 0,
+                            "help": "Width in pixels of the soft edge on the binary mask (--width_soft_edge)."
+                        },
+                        {
+                            "name": "relion_mask_create.volume.invert",
+                            "label": "Invert mask:",
+                            "paramClass": "BooleanParam",
+                            "default": false,
+                            "help": "Invert the final mask (--invert)."
+                        },
+                        {
+                            "name": "relion_mask_create.volume.lowpass",
+                            "label": "Lowpass (Å):",
+                            "paramClass": "FloatParam",
+                            "default": -1,
+                            "help": "Lowpass filter in Angstroms applied to the input map before binarization (--lowpass). Use -1 or leave empty for none."
+                        },
+                        {
+                            "name": "relion_mask_create.volume.angpix",
+                            "label": "Pixel size (Å):",
+                            "paramClass": "FloatParam",
+                            "default": -1,
+                            "help": "Pixel size in Angstroms for the lowpass filter (--angpix). Use -1 to read from map header."
+                        }
+                    ]
+                },
+                {
+                    "label": "De novo",
+                    "paramClass": "Group",
+                    "condition": "relion_mask_create.denovo",
+                    "params": [
+                        {
+                            "name": "relion_mask_create.denovo.box_size",
+                            "label": "Box size (px):",
+                            "paramClass": "IntParam",
+                            "help": "Box size of the mask in pixels (--box_size). Required for de novo creation."
+                        },
+                        {
+                            "name": "relion_mask_create.denovo.inner_radius",
+                            "label": "Inner radius (px):",
+                            "paramClass": "FloatParam",
+                            "default": 0,
+                            "help": "Inner radius of the masked region in pixels (--inner_radius)."
+                        },
+                        {
+                            "name": "relion_mask_create.denovo.outer_radius",
+                            "label": "Outer radius (px):",
+                            "paramClass": "FloatParam",
+                            "default": 99999,
+                            "help": "Outer radius of the mask region in pixels (--outer_radius)."
+                        },
+                        {
+                            "label": "Center (pixels)",
+                            "paramClass": "Line",
+                            "params": [
+                                {
+                                    "name": "relion_mask_create.denovo.center_x",
+                                    "label": "X:",
+                                    "paramClass": "FloatParam",
+                                    "default": 0
+                                },
+                                {
+                                    "name": "relion_mask_create.denovo.center_y",
+                                    "label": "Y:",
+                                    "paramClass": "FloatParam",
+                                    "default": 0
+                                },
+                                {
+                                    "name": "relion_mask_create.denovo.center_z",
+                                    "label": "Z:",
+                                    "paramClass": "FloatParam",
+                                    "default": 0
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}

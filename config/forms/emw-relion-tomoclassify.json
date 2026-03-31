@@ -1,0 +1,231 @@
+{
+    "name": "emw-relion-tomoclassify",
+    "help": "RELION 3D classification (Class3D) for subtomogram averaging. Classifies particles into multiple 3D classes; use to remove bad particles or separate structural states. See RELION STA tutorial (Class3D) and TomoGuide.",
+    "sections": [
+        {
+            "label": "Input",
+            "params": [
+                {
+                    "label": "Input / Reference",
+                    "paramClass": "LabelParam"
+                },
+                {
+                    "name": "relion_classify3d.ios",
+                    "label": "Input particles STAR file:",
+                    "paramClass": "PathParam",
+                    "pointerClass": "TomogramParticles",
+                    "help": "Optimization set or particles STAR file (--ios). Use output from Extract subtomos or a previous refinement/classification."
+                },
+                {
+                    "name": "relion_classify3d.ref",
+                    "label": "Reference map:",
+                    "paramClass": "PathParam",
+                    "pointerClass": "Volume",
+                    "help": "Low-resolution reference map (--ref). Typically from Reconstruct particle or a previous refinement. Low-pass filter to avoid biasing classes."
+                },
+                {
+                    "name": "relion_classify3d.solvent_mask",
+                    "label": "Reference mask (Optional):",
+                    "paramClass": "PathParam",
+                    "pointerClass": "Volume",
+                    "help": "Optional solvent mask (--solvent_mask). Same dimensions as reference; values 0–1. If empty, a soft spherical mask from mask diameter is used."
+                },
+                {
+                    "name": "relion_classify3d.firstiter_cc",
+                    "label": "Ref. map is on absolute greyscale?",
+                    "paramClass": "BooleanParam",
+                    "default": false,
+                    "help": "Set Yes if reference was reconstructed in RELION/XMIPP; otherwise No (uses cross-correlation in first iteration)."
+                },
+                {
+                    "name": "relion_classify3d.trust_ref_size",
+                    "label": "Resize reference if needed?",
+                    "paramClass": "BooleanParam",
+                    "default": true,
+                    "help": "If true, reference (and mask) are re-scaled/re-boxed to match expected pixel and box size."
+                },
+                {
+                    "name": "relion_classify3d.ini_high",
+                    "label": "Initial low-pass filter (Å)",
+                    "default": 60,
+                    "paramClass": "FloatParam",
+                    "help": "Low-pass filter for initial reference (--ini_high). Use ~60 Å or slightly above current resolution to avoid overfitting."
+                },
+                {
+                    "name": "relion_classify3d.sym",
+                    "label": "Symmetry",
+                    "default": "C1",
+                    "paramClass": "StringParam",
+                    "help": "Point group (--sym). Use C1 for classification to separate good/bad particles; symmetry can be applied later in refinement."
+                }
+            ]
+        },
+        {
+            "label": "Classification",
+            "params": [
+                {
+                    "name": "relion_classify3d.K",
+                    "label": "Number of classes:",
+                    "paramClass": "IntParam",
+                    "default": 6,
+                    "help": "Number of 3D classes (--K). Try 6–9; computational cost scales linearly with K."
+                },
+                {
+                    "name": "relion_classify3d.iter",
+                    "label": "Number of iterations:",
+                    "paramClass": "IntParam",
+                    "default": 25,
+                    "help": "Maximum iterations (--iter). Job may converge earlier."
+                },
+                {
+                    "name": "relion_classify3d.skip_align",
+                    "label": "Classification without alignment:",
+                    "paramClass": "BooleanParam",
+                    "default": false,
+                    "help": "If Yes, particles are not re-aligned (--skip_align). Use when particles are already well aligned (e.g. after 3D class with 1 class). Saves time and uses CPU only. If No, perform alignment (use GPU)."
+                },
+                {
+                    "name": "relion_classify3d.tau2_fudge",
+                    "label": "Tau² fudge factor:",
+                    "paramClass": "FloatParam",
+                    "default": 3,
+                    "help": "Regularisation (--tau2_fudge). Try 0.5, 1, 2, 4; often run several jobs with different T values."
+                }
+            ]
+        },
+        {
+            "label": "CTF / Optimization",
+            "params": [
+                {
+                    "label": "CTF",
+                    "paramClass": "LabelParam"
+                },
+                {
+                    "name": "relion_classify3d.ctf",
+                    "label": "Do CTF-correction?",
+                    "paramClass": "BooleanParam",
+                    "default": true,
+                    "help": "Apply CTFs to projections (--ctf). Requires CTF info in input STAR."
+                },
+                {
+                    "name": "relion_classify3d.ctf_intact_first_peak",
+                    "label": "Ignore CTFs until first peak?",
+                    "paramClass": "BooleanParam",
+                    "default": false,
+                    "help": "Useful for initial alignment/classification; acts like a low-pass filter."
+                },
+                {
+                    "label": "Optimization",
+                    "paramClass": "LabelParam"
+                },
+                {
+                    "name": "relion_classify3d.particle_diameter",
+                    "label": "Mask diameter (Å):",
+                    "paramClass": "FloatParam",
+                    "help": "Particle diameter for spherical mask (--particle_diameter). ~90% of box at current binning. E.g. box 84 px, 1.91 Å/px, bin 4 → ~570 Å."
+                },
+                {
+                    "name": "relion_classify3d.zero_mask",
+                    "label": "Mask individual particles with zeros?",
+                    "paramClass": "BooleanParam",
+                    "default": true,
+                    "help": "Yes: zero outside particle radius (recommended for classification). No: fill with random noise."
+                },
+                {
+                    "name": "relion_classify3d.solvent_correct_fsc",
+                    "label": "Use solvent-flattened FSCs?",
+                    "paramClass": "BooleanParam",
+                    "default": false,
+                    "help": "Use masked half-maps for FSC; requires reference mask. Often useful in STA."
+                }
+            ]
+        },
+        {
+            "label": "Sampling",
+            "params": [
+                {
+                    "name": "relion_classify3d.healpix_order",
+                    "label": "Initial angular sampling:",
+                    "paramClass": "EnumParam",
+                    "default": "4",
+                    "choices": {
+                        "0": "30 degrees",
+                        "1": "15 degrees",
+                        "2": "7.5 degrees",
+                        "3": "3.7 degrees",
+                        "4": "1.8 degrees",
+                        "5": "0.9 degrees",
+                        "6": "0.5 degrees",
+                        "7": "0.2 degrees",
+                        "8": "0.1 degrees"
+                    },
+                    "help": "Angular sampling (HealPix). 1.8° is typical for local searches."
+                },
+                {
+                    "name": "relion_classify3d.offset_range",
+                    "label": "Initial offset range (px):",
+                    "paramClass": "FloatParam",
+                    "default": 5,
+                    "help": "Translation search radius in pixels (--offset_range). Use small values (e.g. 2) when particles are already centred."
+                },
+                {
+                    "name": "relion_classify3d.offset_step",
+                    "label": "Initial offset step (px):",
+                    "paramClass": "FloatParam",
+                    "default": 1,
+                    "help": "Translation step size in pixels (--offset_step)."
+                },
+                {
+                    "name": "relion_classify3d.auto_local_healpix_order",
+                    "label": "Local search from auto-sampling:",
+                    "paramClass": "EnumParam",
+                    "default": "4",
+                    "choices": {
+                        "0": "30 degrees",
+                        "1": "15 degrees",
+                        "2": "7.5 degrees",
+                        "3": "3.7 degrees",
+                        "4": "1.8 degrees",
+                        "5": "0.9 degrees",
+                        "6": "0.5 degrees",
+                        "7": "0.2 degrees",
+                        "8": "0.1 degrees"
+                    },
+                    "help": "Local angular search range. Set equal to initial sampling for local-only searches."
+                }
+            ]
+        },
+        {
+            "label": "Compute",
+            "paramClass": "Group",
+            "params": [
+                {
+                    "name": "gpus",
+                    "label": "GPUs:",
+                    "default": 1,
+                    "paramClass": "IntParam",
+                    "help": "Number of GPUs (or list of GPU IDs). Use GPU when performing alignment; can use CPU only when skip_align is Yes."
+                },
+                {
+                    "name": "cpus",
+                    "label": "CPUs:",
+                    "default": "",
+                    "paramClass": "StringParam",
+                    "help": "Number of CPUs to use for the job. Leave empty for default (10 * GPUs). If only a single number is provided, it will be the total number of CPUs. In that case, MPI processes will be 5 and the division of CPUs/5 the number of threads. You can specifiy MPIxThreads, e.g. 5x12, 9x10, etc."
+                },
+                {
+                    "name": "relion_classify3d.scratch_dir",
+                    "label": "Scratch directory:",
+                    "paramClass": "PathParam",
+                    "help": "Scratch directory for temporary files (--scratch_dir). Use a shared directory for best performance."
+                },
+                {
+                    "name": "extra_args",
+                    "label": "Extra arguments:",
+                    "paramClass": "StringParam",
+                    "help": "Extra arguments to pass to the relion_refine command."
+                }
+            ]
+        }
+    ]
+}
