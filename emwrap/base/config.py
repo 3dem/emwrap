@@ -42,17 +42,29 @@ class ProcessingConfig:
     def get_programs(cls):
         return cls._get_config('programs')
 
-    @classmethod
-    def get_cluster(cls):
-        return cls._get_config('cluster')
+    # @classmethod
+    # def get_cluster(cls):
+    #     return cls._get_config('cluster')
+
+    # @classmethod
+    # def get_cluster_template(cls):
+    #     return cls.get_cluster().get('template', None)
+
+    # @classmethod
+    # def get_cluster_submit(cls):
+    #     cls.get_cluster().get('submit', None)
 
     @classmethod
-    def get_cluster_template(cls):
-        return cls.get_cluster().get('template', None)
+    def get_queues(cls):
+        return cls._get_config('queues')
 
     @classmethod
-    def get_cluster_submit(cls):
-        cls.get_cluster().get('submit', None)
+    def get_queues_dict(cls):
+        return {q['name']: q for q in cls.get_queues()}
+
+    @classmethod
+    def get_queue(cls, queue_name):
+        return cls.get_queues_dict().get(queue_name, None)
 
     @classmethod
     def get_job_conf(cls, jobtype):

@@ -23,7 +23,7 @@ import argparse
 import shutil
 from datetime import datetime
 
-from emtools.utils import FolderManager, Process, Color, Path, Timer
+from emtools.utils import FolderManager, Process, Color, Path, Timer, Pretty
 from emtools.jobs import BatchManager, Workflow
 from emtools.metadata import Table, StarFile, RelionStar
 
@@ -336,7 +336,7 @@ class ProjectManager(FolderManager):
 
         if self._hasJob(jobTypeOrId):
             job = self._getJob(jobTypeOrId)
-            jobStar = self.join(job.id, 'job.star')
+            jobStar = os.path.join(job.id, 'job.star')
             jobType = job['jobtype']
 
             if self._isActiveJob(job):
@@ -360,7 +360,7 @@ class ProjectManager(FolderManager):
             if jobDef:
                 job = self._createJob(jobType, job_params)
                 self._updateJobInputs(job, job_params)
-                jobStar = self.join(job.id, 'job.star')
+                jobStar = os.path.join(job.id, 'job.star')
 
         if job is None:
             raise Exception(f"{jobTypeOrId} is not an existing jobId or job type.")
@@ -436,43 +436,85 @@ class ProjectManager(FolderManager):
         with open(self.join(jobId, 'command.txt')) as f:
             return f.readline().strip()
 
+    def __fixMapping(self, cluster, path):
+        for k, v in cluster.get('mappings', {}).items():
+            if path.startswith(k):
+                return path.replace(k, v)
+        return path
+
     def _runCmd(self, cmd, jobId, wait=False, job_params=None):
+        def _log(msg, jobFile=None, flush=False):
+            """ Log also to a job file. """
+            self.log(msg)
+            if jobFile:
+                with open(jobFile, 'a') as f:
+                    f.write(f"\n{Pretty.now()}: {msg}\n")
+                    if flush:
+                        f.flush()
+
         self._saveCmd(cmd, jobId)
-        if cluster := ProcessingConfig.get_cluster():
-            # Create the template script from cluster template
-            templateFile = ProcessingConfig.get_cluster_template()
-            self.log(f"Reading template file: {templateFile}")
-            with open(templateFile) as f:
-                template = f.read()
-
+        qname = job_params.get('queue.param.name', 'NO-QUEUE')
+        if queue := ProcessingConfig.get_queue(qname):
+            qprefix = f'queue.param.{qname}.' # prefix to remove from the job_params keys  
+            qparams = {k.replace(qprefix, ''): v for k, v in job_params.items() if k.startswith(qprefix)}
+            
             scriptFile = self.join(jobId, 'job.script')
-            self.log(f"Writing script file: {scriptFile}")
-            with open(scriptFile, 'w') as f:
-                gpus = int(job_params.get('gpus', 1))   # FIXME Get gpu list and take the length
-                cpus = max(int(job_params.get('cpus', 1)), gpus * 10)
-                if gpus:
-                    # FIXME: Use emgoat for a more general interaction with HPC
-                    gpu_line = f'#BSUB -gpu "num={gpus}/host:mode=shared"'
-                else:
-                    gpu_line = ''
+            scriptLog = self.join(jobId, 'job.log')
+            gpus = int(job_params.get('gpus', 0))   # FIXME Get gpu list and take the length
 
-                f.write(template.format(jobId=jobId, command=cmd,
-                                        gpus=gpus, cpus=cpus, gpu_line=gpu_line,
-                                        workingDir=self.path))
+            if gpus > 0:
+                if cpus := job_params.get('cpus', ''):
+                    if 'x' in cpus:
+                        mpi, threads = cpus.split('x')
+                        cpus = int(mpi) * int(threads)
+                    else:
+                        cpus = int(cpus)
+                else:
+                    cpus = gpus * 10
+            elif 'cpus' not in job_params:
+                cpus = 1
+
+            if cpus == 0:
+                raise Exception("Neither CPUs nor GPUs are set. Please set at least one of them.")
+
+            if gpus:
+                # FIXME: Use emgoat for a more general interaction with HPC
+                gpu_line = f'#BSUB -gpu "num={gpus}/host:mode=shared"'
+                gpu_type = qparams.get('gpu_type', 'any')
+                if gpu_type != 'any':
+                    gpu_line += f'\n#BSUB -R {gpu_type.lower()}'
+            else:
+                gpu_line = ''
+
+            qparams.update({
+                'jobId': jobId,
+                'command': cmd,
+                'gpu_line': gpu_line,
+                'cpus': cpus,
+                'working_dir': self.path
+            })
+
+            with open(queue['template'], 'r') as f:
+                template = f.read()
+                                    
+            _log(f"Writing CLUSTER submission script: {scriptFile}", jobFile=scriptLog, flush=True)
+            with open(scriptFile, 'w') as f:
+                f.write(template.format(**qparams))
 
             # FIXME Implement the wait option when submitting to a cluster
-            submit = ProcessingConfig.get_cluster()['submit']
+            submit = queue['submit']
+            scriptFile = self.__fixMapping(queue, scriptFile)
             submitCmd = submit.format(job_script=scriptFile)
-            self.log(f"Executing: {Color.green(submitCmd)}")
+            _log(f"Executing CLUSTER submit command: {Color.green(submitCmd)}", jobFile=scriptLog, flush=True)
             ###os.system(submitCmd)
             try:
                 subprocess.run(shlex.split(submitCmd), check=True,
                                capture_output=True, text=True)
             except subprocess.CalledProcessError as e:
-                self.log("Submission to cluster failed")
-                self.log(f"  Error: '{e.stderr.rstrip()}'")
-                self.log(f"  Cluster configured in config: {ProcessingConfig._fm.join('config.json')}")
-                self.log( "  Maybe try to run locally?\n")
+                _log("ERROR: Submission to cluster failed", jobFile=scriptLog)
+                _log(f"  Error: '{e.stderr.rstrip()}'", jobFile=scriptLog)
+                #self.log(f"  Cluster configured in config: {ProcessingConfig._fm.join('config.json')}")
+                _log( "  Maybe try to run locally?\n", jobFile=scriptLog, flush=True)
         else:
             args = shlex.split(cmd)
             stdout = open(self.join(jobId, 'run.out'), 'a')
@@ -573,6 +615,90 @@ class ProjectManager(FolderManager):
             filesDict = {o['files'][0][0]: o for o in jobInfo['outputs'].values()}
         return filesDict
 
+    def register_output(self, file, type, info):
+        """
+        Register a FILE as an output of the job containing the file.
+        Paths are relative to project.
+        """
+        if not os.path.exists(file):
+            raise FileNotFoundError(f"File {file} not found.")
+
+        job_id = Path.rmslash(os.path.dirname(file))
+        if not self._hasJob(job_id):
+            raise Exception(f"Job folder {job_id} not found in project.")
+
+        job = self._getJob(job_id)
+        job.registerOutput(file, type=type, info=info)
+        self._update_pipeline_star()
+
+    def register_subset(self, original_set, subset):
+        """
+        Register a subset star file as an output of the job that contains original_set.
+        Assumes execution from project directory; original_set and subset are
+        relative paths. Both are expected to live in the same run (job) folder.
+        If info.json exists there, the output entry matching original_set is
+        copied and a new entry is added for the subset (same label/type/info,
+        only the path changed).
+        """
+        orig_path = self.join(original_set)
+        subset_path = self.join(subset)
+        job_folder = os.path.dirname(orig_path)
+        orig_basename = os.path.basename(orig_path)
+
+        info_path = os.path.join(job_folder, 'info.json')
+        if not os.path.isfile(info_path):
+            raise FileNotFoundError(
+                f"No info.json in job folder {job_folder}. "
+                "Subset registration requires an existing job with info.json."
+            )
+
+        with open(info_path) as f:
+            info = json.load(f)
+        outputs = info.get('outputs') or {}
+
+        # Find output whose file matches original_set (by basename; paths in info are relative to job folder)
+        orig_key = None
+        orig_entry = None
+        for k, o in outputs.items():
+            files = o.get('files') or []
+            if not files:
+                continue
+            if os.path.basename(files[0][0]) == orig_basename:
+                orig_key = k
+                orig_entry = o
+                break
+
+        if orig_key is None or orig_entry is None:
+            raise ValueError(
+                f"Original set '{original_set}' does not match any output in {info_path}. "
+                "Check the path (e.g. job_folder/tilt_series_ctf.star)."
+            )
+
+        # Subset path relative to job folder (both sets in same run folder)
+        subset_stored = os.path.relpath(subset_path, job_folder)
+        datatype = orig_entry['files'][0][1]
+
+        # New entry: same structure, new key, subset path
+        subset_entry = dict(orig_entry)
+        subset_entry['files'] = [[subset_stored, datatype]]
+        subset_key = orig_key + 'Subset'
+        if subset_key in outputs:
+            # Allow overwriting existing subset entry
+            pass
+        outputs[subset_key] = subset_entry
+        info['outputs'] = outputs
+
+        with open(info_path, 'w') as f:
+            json.dump(info, f, indent=4)
+        self.log(f"Registered subset: {subset_key} -> {subset_stored} in {info_path}")
+
+        # Register the subset in the job's outputs (workflow) and update pipeline star
+        job_id = Path.rmslash(os.path.relpath(job_folder, self.path).replace(os.sep, '/'))
+        job = self._getJob(job_id)
+        if not job.hasOutput(subset_stored):
+            job.registerOutput(subset_stored, datatype=datatype)
+        self._update_pipeline_star()
+
     @staticmethod
     def main():
         p = argparse.ArgumentParser(
@@ -588,14 +714,11 @@ class ProjectManager(FolderManager):
         g.add_argument('--update', '-u', action='store_true',
                        help="Update job status and pipeline star file.")
 
-        g.add_argument('--list', '-l', action='store_true',
-                       help="List jobs in the current project.")
-
-        g.add_argument('--outputs', '-o', action='store_true',
-                       help="List outputs from each job.")
-
-        g.add_argument('--inputs', '-i', action='store_true',
-                       help="List inputs from each job.")
+        # list is None unless -l/--list appears; bare -l uses const 'jobs'.
+        g.add_argument('--list', '-l', nargs='?', const='jobs', default=None,
+                       choices=('jobs', 'inputs', 'outputs'), metavar='WHAT',
+                       help="List WHAT: jobs (default when -l is used without a "
+                            "value), inputs, or outputs. Omit -l to perform no listing.")
 
         g.add_argument('--run', '-r', nargs='+',
                        metavar=('JOB_TYPE_OR_ID', 'PARAMS'),
@@ -620,6 +743,16 @@ class ProjectManager(FolderManager):
         g.add_argument('-k', '--check', action='count', default=0,
                        help='Check and/or kill processes related to this project.'
                             'Pass more than one -k to kill processes.')
+
+        g.add_argument('--subset', nargs=2,
+                       metavar=('ORIGINAL_SET', 'SUBSET'),
+                       help='Register SUBSET as an output of the job containing ORIGINAL_SET. '
+                            'Paths are relative to project; both files should be in the same run folder.')
+        g.add_argument('--output', '-o', nargs=3,
+                       metavar=('FILE', 'TYPE', 'INFO'),
+                       help='Register a FILE as an output of the job containing the file. '
+                            'Paths are relative to project.')
+
 
         p.add_argument('--wait', '-w', action='store_true',
                        help="Works with --run and make the project waits for "
@@ -653,14 +786,13 @@ class ProjectManager(FolderManager):
         if args.update:
             pm.update()
 
-        elif args.list:
-            pm.listJobs()
-
-        elif args.outputs:
-            pm.listOutputs()
-
-        elif args.inputs:
-            pm.listInputs()
+        elif args.list is not None:  # only when -l / --list is on the command line
+            if args.list == 'jobs':
+                pm.listJobs()
+            elif args.list == 'inputs':
+                pm.listInputs()
+            elif args.list == 'outputs':
+                pm.listOutputs()
 
         elif args.run:
             jobTypeOrId = args.run[0]
@@ -687,3 +819,16 @@ class ProjectManager(FolderManager):
             kill = args.check > 1
             folderPath = os.path.abspath(pm.path)
             Process.checkChilds('emw', folderPath, kill=kill, verbose=True)
+
+        elif args.subset:
+            try:
+                pm.register_subset(args.subset[0], args.subset[1])
+            except (FileNotFoundError, ValueError) as e:
+                print(f"emw --subset: {e}", file=sys.stderr)
+                sys.exit(1)
+        elif args.output:
+            try:
+                pm.register_output(args.output[0], args.output[1], args.output[2])
+            except (FileNotFoundError, ValueError) as e:
+                print(f"emw --output: {e}", file=sys.stderr)
+                sys.exit(1)
