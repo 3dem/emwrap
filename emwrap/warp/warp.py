@@ -106,6 +106,10 @@ class WarpBasePipeline(ProcessingPipeline):
     def __init__(self, args, output):
         ProcessingPipeline.__init__(self, args, output)
         gpus = self._args.get('gpus', '')
+        if gpus is not None and gpus != '':
+            gpus = str(gpus).strip()
+        else:
+            gpus = ''
         self.gpuList = self.get_gpu_list(gpus) if gpus else []
         self.acq = self.loadAcquisition()
         if gainFile := self.acq.get('gain', None):
@@ -191,6 +195,13 @@ class WarpBasePipeline(ProcessingPipeline):
 
     def _get_launcher(self):
         return self.get_launcher_arg('launcher_warp', 'WARP')
+    
+    def get_subargs(self, key, extra_name=None):
+        subargs = self._args.subset(key, '--', filters=['remove_false', 'remove_empty'])
+        if extra_name:
+            extra = Args.fromString(self._args.get(extra_name, ''))
+            subargs.update(extra)
+        return subargs
 
 
 class WarpBasePopulationPipeline(WarpBasePipeline):
@@ -216,13 +227,6 @@ class WarpBasePopulationPipeline(WarpBasePipeline):
         self.log(f"Input Warp folder: {input_warp}, population: {self.population}")
         self._importInputs(input_warp, keys=['fs', 'fss', 'ts', 'tss', 'tm', 'm'])
         return population_file
-
-    def get_subargs(self, key, extra_name=None):
-        subargs = self._args.subset(key, '--', filters=['remove_false', 'remove_empty'])
-        if extra_name:
-            extra = Args.fromString(self._args.get(extra_name, ''))
-            subargs.update(extra)
-        return subargs
 
     def _output(self, batch):
         """Register output population."""

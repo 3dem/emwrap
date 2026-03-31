@@ -80,18 +80,17 @@ class WarpExportParticles(WarpBasePipeline):
         batch = Batch(id=self.name, path=self.path)
         subargs = self.get_subargs("ts_export_particles")
 
-        # Run ts_ctf
-        box = subargs['box']
-        ps = subargs['output_angpix']
+        box = subargs['--box']
+        ps = subargs['--output_angpix']
         outStar = "warp_particles.star"
         args = Args({
             'WarpTools': "ts_export_particles",
             "--settings": self.TSS,
+        })
+        args.update(subargs)
+        args.update({
             "--input_star": "all_coordinates.star",
-            "--box": box,
-            "--diameter": subargs['diameter'],
             "--coords_angpix": firstRow.rlnTomogramPixelSize,
-            "--output_angpix": ps,
             "--output_star": outStar,
             "--output_processing": "Particles",
             f"--{self._args['ts_export_type']}": ""  # 2d or 3d
