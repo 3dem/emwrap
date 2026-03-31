@@ -127,7 +127,15 @@
           "default": "",
           "paramClass": "StringParam",
           "help": "Extra arguments to pass to create_species. Example:\n\n*--angpix* Override pixel size value found in half-maps, if empty will use map header."
-        }   
+        },
+        {
+          "name": "gpus",
+          "label": "Fixed one GPU",
+          "default": "1",
+          "paramClass": "StringParam",
+          "help": "Hidden parameter to force the use of a single GPU.",
+          "condition": "false"
+        }  
 
       ]
     }

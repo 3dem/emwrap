@@ -4,9 +4,9 @@
     "sections": [
         {
             "label": "General",
-            "params": [       
+            "params": [
                 {
-                    "label": "Input", 
+                    "label": "Input",
                     "paramClass": "Group",
                     "params": [
                         {
@@ -26,7 +26,7 @@
                     ]
                 },
                 {
-                    "label": "Output", 
+                    "label": "Output",
                     "paramClass": "Group",
                     "params": [
                         {
@@ -46,51 +46,72 @@
                                     "help": "REQUIRED Output has this many pixels/voxels on each side"
                                 }
                             ]
-                        },                        
+                        },
                         {
                             "name": "ts_export_type",
                             "label": "Export type: ",
                             "paramClass": "EnumParam",
                             "choices": ["2d", "3d"],
                             "display": "combo"
-        
                         }
                     ]
-                },                 
+                }
+            ]
+        },
+        {
+            "label": "Filters",
+            "params": [
+                {
+                    "label": "Particles Count",
+                    "paramClass": "Line",
+                    "help": "Ignore Tomograms with particles count outside the range.",
+                    "params": [
+                        {
+                            "name": "filters.particles_min",
+                            "label": "min",
+                            "default": 0,
+                            "paramClass": "IntParam"
+                        },
+                        {
+                            "name": "filters.particles_max",
+                            "label": "max",
+                            "default": 10000,
+                            "paramClass": "IntParam"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "label": "Compute",
+            "params": [
                 {
                     "name": "gpus",
-                    "label": "GPUs",  
+                    "label": "GPUs",
+                    "help": "If it is a single number (N), it will represent the total number of GPUs (0..N-1). If there are multiple values, it will be the specific GPUs ID."
+                },
+                {
+                    "name": "ts_export_particles.perdevice",
+                    "label": "Processes per device",
                     "default": 1,
                     "paramClass": "IntParam",
-                    "condition": "false",                  
-                    "help": "Always use only one GPU"
-                }                
+                    "help": "(--perdevice in ts_export_particles)"
+                },
+                {
+                    "label": "Launchers",
+                    "paramClass": "Group",
+                    "help": "Launchers to use for the different programs",
+                    "collapsed": true,
+                    "params": [
+                        {
+                            "name": "launcher_warp",
+                            "label": "WARP",
+                            "paramClass": "StringParam",
+                            "help": "Launcher to use for Warp"
+                        }
+                    ]
+                }
             ]
-    },
-    {
-        "label": "Filters", 
-        "params": [
-            {
-                "label": "Particles Count",
-                "paramClass": "Line",
-                "help": "Ignore Tomograms with particles count outside the range.",
-                "params": [
-                    {
-                        "name": "filters.particles_min",
-                        "label": "min",
-                        "default": 0,
-                        "paramClass": "IntParam"
-                    },
-                    {
-                        "name": "filters.particles_max",
-                        "label": "max",
-                        "default": 10000,
-                        "paramClass": "IntParam"
-                    }
-                ]
-            }                      
-        ]
-    }
-    ]    
-                
+        }
+    ]
 }
