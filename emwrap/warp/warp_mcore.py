@@ -28,7 +28,8 @@ class WarpMcore(WarpBasePopulationPipeline):
         population_file = self._setup_population_input(subargs)
         args = Args({ 
             'MCore': '', 
-            '--population': population_file 
+            '--population': population_file, 
+            '--port': -1
         })
         args.update(subargs)
         self.batch_execute('mcore', batch, args, call=True)
