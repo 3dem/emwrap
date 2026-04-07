@@ -1,0 +1,113 @@
+{
+    "name": "emw-mc-tomo",
+    "help": "Wrapper to run MotionCor motion correction.",
+    "sections": [
+        {
+            "label": "Motion",
+            "params": [
+                {
+                    "name": "input_star_mics",
+                    "label": "Input movies STAR file:",
+                    "pattern": "STAR Files (*.star)",
+                    "help": "A STAR file with all micrographs to run MotionCor on",
+                    "paramClass": "PathParam",
+                    "pointerClass": "FrameSeries"
+                },
+                {
+                    "paramClass": "Line",
+                    "label": "Patches:",
+                    "params": [
+                        {
+                            "name": "patch_x",
+                            "label": "x",
+                            "default": 5,
+                            "paramClass": "IntParam",
+                            "help": "Number of patches in x"
+                        },
+                        {
+                            "name": "patch_y",
+                            "label": "y",
+                            "default": 5,
+                            "paramClass": "IntParam",
+                            "help": "Number of patches in y"
+                        }
+                    ]
+                },
+                {
+                    "name": "do_split_sum",
+                    "label": "Split into odd+even frames?",
+                    "default": false,
+                    "paramClass": "BooleanParam",
+                    "help": "If set to True, frames will be split into even & odd half sets (useful for CryoCARE, etc.)."
+                },
+                {
+                    "name": "do_dose_weighting",
+                    "label": "Perform dose-weighting?",
+                    "default": false,
+                    "paramClass": "BooleanParam",
+                    "help": "If set to True, the averaged micrographs will be dose-weighted. Dose per frame required if selected."
+                },
+                {
+                    "name": "dose_per_frame",
+                    "label": "Dose per frame (e/A2):",
+                    "paramClass": "FloatParam",
+                    "help": "Dose per movie frame (in electrons per squared Angstrom). Required if performing dose-weighting or if using EER movies."
+                },
+                {
+                    "name": "gpu_ids",
+                    "label": "Which GPUs to use:",
+                    "help": "Provide a list of which GPUs (0,1,2,3, etc) to use.\nNote that multiple MotionCor processes should not share a GPU; otherwise, it can lead to crash or broken outputs (e.g. blank images) ."
+                },
+                {
+                    "name": "other_motioncor_args",
+                    "label": "Other MOTIONCOR arguments:",
+                    "help": "Additional arguments that need to be passed to MotionCor."
+                }
+            ]
+        },
+        {
+            "label": "Advanced",
+            "params": [
+                {
+                    "name": "min_fraction_dose",
+                    "label": "Minimum dose per fraction (e/A2):",
+                    "default": 0.15,
+                    "paramClass": "FloatParam",
+                    "help": "Hardware frames are grouped into one 'fraction' such that the dose per fraction is at least this value. Too little dose per fraction, and there will be not enough signal for accurate motion correction. Too much dose dose per fraction, and motion will be sampled more poorly. See https://www3.mrc-lmb.cam.ac.uk/relion/index.php/Image_compression#Falcon4_EER for detailed guidance on EER processing."
+                },
+                {
+                    "name": "err_tolerance",
+                    "label": "Error tolerance:",
+                    "default": 0.10,
+                    "paramClass": "FloatParam",
+                    "help": "Iterative alignment once alignment error is less than this number of pixels. "
+                },
+                {
+                    "name": "reference_frame",
+                    "label": "Reference frame:",
+                    "default": -1,
+                    "paramClass": "IntParam",
+                    "help": "Frame to use for relative shifts (default: middle frame). "
+                },
+                {
+                    "name": "gain_rot",
+                    "label": "Gain rotation:",
+                    "default": 0,
+                    "help": "Rotate the gain reference by this number times 90 degrees clockwise in relion_display. This is the same as -RotGain in MotionCor2. Note that MotionCor2 uses a different convention for rotation so it says 'counter-clockwise'. Valid values are 0, 1, 2 and 3."
+                },
+                {
+                    "name": "gain_flip",
+                    "label": "Gain flip:",
+                    "default": 0,
+                    "help": "Flip the gain reference after rotation. This is the same as -FlipGain in MotionCor2. 0 means do nothing, 1 means flip Y (upside down) and 2 means flip X (left to right)."
+                },
+                {
+                    "name": "fn_defect",
+                    "label": "Defect file:",
+                    "paramClass": "PathParam",
+                    "help": "Location of a UCSF MotionCor2-style defect text file or a defect map that describe the defect pixels on the detector. Each line of a defect text file should contain four numbers specifying x, y, width and height of a defect region. A defect map is an image (MRC or TIFF), where 0 means good and 1 means bad pixels. The coordinate system is the same as the input movie before application of binning, rotation and/or flipping.\nNote that the format of the defect text is DIFFERENT from the defect text produced by SerialEM! One can convert a SerialEM-style defect file into a defect map using IMOD utilities e.g. \"clip defect -D defect.txt -f tif movie.mrc defect_map.tif\". See explanations in the SerialEM manual.\n\nLeave empty if you don't have any defects, or don't want to correct for defects on your detector."
+                }
+            ]
+        }
+    ]
+}
