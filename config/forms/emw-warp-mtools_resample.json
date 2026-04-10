@@ -31,7 +31,15 @@
           "label": "Extra arguments",
           "paramClass": "StringParam",
           "help": "Extra arguments to pass to MTools resample_trajectories."
-        }
+        },
+        {
+          "name": "gpus",
+          "label": "Fixed one GPU",
+          "default": "1",
+          "paramClass": "StringParam",
+          "help": "Hidden parameter to force the use of a single GPU.",
+          "condition": "false"
+        }  
       ]
     }
   ]

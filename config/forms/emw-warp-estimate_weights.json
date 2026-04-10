@@ -37,7 +37,15 @@
           "label": "Extra arguments",
           "paramClass": "StringParam",
           "help": "Extra arguments to pass to EstimateWeights."
-        }
+        },
+        {
+          "name": "gpus",
+          "label": "Fixed one GPU",
+          "default": "1",
+          "paramClass": "StringParam",
+          "help": "Hidden parameter to force the use of a single GPU.",
+          "condition": "false"
+        }  
       ]
     }
   ]
