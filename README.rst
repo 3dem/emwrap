@@ -68,7 +68,7 @@ Installation
    conda activate emstack
 
    # Download and run the install script
-   wget -qO- https://raw.githubusercontent.com/3dem/emconfig/refs/heads/main/scripts/install.sh | bash
+   wget -qO- https://raw.githubusercontent.com/3dem/emwrap/refs/heads/main/install.sh | bash
 
    # Run the server
    ./run.sh

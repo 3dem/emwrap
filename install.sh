@@ -130,8 +130,8 @@ EOF
 
 link_scripts() {
   CURRENT_STEP="linking scripts"
-  run_cmd ln -s ${DIR}/emconfig/scripts/update.sh update.sh
-  run_cmd ln -s ${DIR}/emconfig/scripts/run.sh run.sh
+  run_cmd cp ${DIR}/emwrap/config/scripts/update.sh.template update.sh
+  run_cmd cp ${DIR}/emwrap/config/scripts/run.sh.template run.sh
   run_cmd chmod +x update.sh run.sh
   echo -e "    To update the environment later, run: ${BOLD}./update.sh${NORMAL}"
   echo -e "    To run the server, run: ${BOLD}./run.sh${NORMAL}"
