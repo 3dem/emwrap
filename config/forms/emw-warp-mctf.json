@@ -57,6 +57,12 @@
                     "default": "5x5",
                     "paramClass": "StringParam",
                     "help": "(--m_grid) Default: 5x5xN. Resolution of the motion model grid in X, Y, and temporal dimensions, separated by 'x': e.g. 5x5x40; empty = auto"
+                },
+                {
+                    "name": "extra_create_settings",
+                    "label": "create_settings extra arguments",
+                    "paramClass": "StringParam",
+                    "help": "Extra arguments to pass to create_settings"
                 }
             ]
         },

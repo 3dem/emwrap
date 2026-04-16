@@ -161,4 +161,6 @@ CURRENT_STEP="copying processing extras"
 run_cmd cp -r ${DIR}/emhub/extras/processing instance/extra 
 echo -e "\n${GREEN}${BOLD}Installation complete!${NORMAL}"
 
+# TO install conda
+# mkdir miniconda3 && wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh && bash ./miniconda.sh -b -u -p ./miniconda3
 

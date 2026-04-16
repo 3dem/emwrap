@@ -129,7 +129,8 @@ class WarpMotionCtf(WarpBasePipeline):
         if eer:
             args['--eer_ngroups'] = ngroups
 
-        # TODO: Allow for some extra args
+        if extra_create_settings := self._args.get('extra_create_settings', None):
+            args.update(Args.fromString(extra_create_settings))
 
         self.batch_execute('create_settings', batch, args)
         return ngroups
@@ -151,8 +152,8 @@ class WarpMotionCtf(WarpBasePipeline):
         args = Args({
             'WarpTools': 'fs_motion_and_ctf',
             '--settings': self.FSS,
-            '--m_grid': f'1x1x{ngroups}',  # FIXME: Read m_grid from params
-            '--c_grid': '2x2x1',  # FIXME: Read c_grid option
+            #'--m_grid': f'1x1x{ngroups}',  # FIXME: Read m_grid from params
+            #'--c_grid': '2x2x1',  # FIXME: Read c_grid option
             '--c_voltage': int(self.acq.voltage),
             '--c_cs': self.acq.cs,
             '--c_amplitude': self.acq.amplitude_contrast,
@@ -160,10 +161,20 @@ class WarpMotionCtf(WarpBasePipeline):
         })
         if self.gpuList:
             args['--device_list'] = self.gpuList
-        # if pd := subargs['perdevice']:
-        #     args['--perdevice'] = int(pd)
 
-        args.update(self.get_subargs('fs_motion_and_ctf'))
+        subargs = self.get_subargs('fs_motion_and_ctf')
+        def _expand_x(param, extra_value):
+            value = subargs[param]
+            n = value.count('x')
+            if n == 1:
+                subargs[param] = f'{value}x{extra_value}'
+            elif n != 2:  # If 2 x, leave the original value
+                raise ValueError(f"Invalid number of 'x' in {param}: {value}")
+
+        args['--m_grid'] = _expand_x('--m_grid', ngroups)
+        args['--c_grid'] = _expand_x('--c_grid', '1')       
+
+        args.update(subargs)
 
         self.batch_execute('fs_motion_and_ctf', batch, args)
         self.updateBatchInfo(batch)
