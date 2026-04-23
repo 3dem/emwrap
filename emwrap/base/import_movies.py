@@ -33,8 +33,8 @@ class ImportMoviesPipeline(ProcessingPipeline):
     name = 'emw-import-movies'
     input_name = 'in_movies'
 
-    def __init__(self, input_args):
-        ProcessingPipeline.__init__(self, input_args)
+    def __init__(self, input_args, output):
+        ProcessingPipeline.__init__(self, input_args, output)
         self.acq = self.loadAcquisition()
         args = self._args
 
@@ -158,8 +158,7 @@ class ImportMoviesPipeline(ProcessingPipeline):
 
 
 def main():
-    ImportMoviesPipeline.runFromArgs()
-
+    ImportMoviesPipeline.main()
 
 if __name__ == '__main__':
     main()

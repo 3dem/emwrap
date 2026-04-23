@@ -298,6 +298,18 @@ class ProjectManager(FolderManager):
 
         return self._instanciateJobs({jobId: _jobInfo(jobId) for jobId in jobIds})
 
+    def exportJobs(self, jobIds):
+        """" Export a subworkflow with the given job ids. """
+        workflow_json = {"jobs": []}
+        for jobId in jobIds:
+            job = self._getJob(jobId)
+            workflow_json['jobs'].append({
+                'jobid': job.id,
+                'jobtype': job['jobtype'],
+                'params': self._readJobParams(job),
+            })
+        pass
+
     def loadWorkflow(self, **kwargs):
         """ Load a workflow with jobs templates. """
         if 'workflow_id' in kwargs:
@@ -471,8 +483,8 @@ class ProjectManager(FolderManager):
                         cpus = int(cpus)
                 else:
                     cpus = gpus * 10
-            elif 'cpus' not in job_params:
-                cpus = 1
+            else: 
+                cpus = int(job_params.get('cpus', 1))
 
             if cpus == 0:
                 raise Exception("Neither CPUs nor GPUs are set. Please set at least one of them.")
