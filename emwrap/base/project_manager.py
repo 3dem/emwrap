@@ -298,7 +298,7 @@ class ProjectManager(FolderManager):
 
         return self._instanciateJobs({jobId: _jobInfo(jobId) for jobId in jobIds})
 
-    def exportJobs(self, jobIds):
+    def exportWorkflow(self, jobIds, output_path):
         """" Export a subworkflow with the given job ids. """
         workflow_json = {"jobs": []}
         for jobId in jobIds:
@@ -308,7 +308,11 @@ class ProjectManager(FolderManager):
                 'jobtype': job['jobtype'],
                 'params': self._readJobParams(job),
             })
-        pass
+
+        # FIXME: For now, let's write all outputs to the project directory
+        output_name = os.path.basename(output_path)  
+        with open(self.join(output_name), 'w') as f:
+            json.dump(workflow_json, f, indent=4)
 
     def loadWorkflow(self, **kwargs):
         """ Load a workflow with jobs templates. """
