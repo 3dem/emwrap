@@ -34,10 +34,9 @@ from .preprocessing import Preprocessing
 class PreprocessingPipeline(ProcessingPipeline):
     """ Pipeline to run Preprocessing in batches. """
     name = 'emw-preprocessing'
-    input_name = 'in_movies'
 
-    def __init__(self, input_args):
-        ProcessingPipeline.__init__(self, input_args)
+    def __init__(self, input_args, output):
+        ProcessingPipeline.__init__(self, input_args, output)
         args = self._args
         self.gpuList = args['gpu'].split()
         self.outputDirs = {}
@@ -247,7 +246,7 @@ class PreprocessingPipeline(ProcessingPipeline):
 
 
 def main():
-    PreprocessingPipeline.runFromArgs()
+    PreprocessingPipeline.main()
 
 
 if __name__ == '__main__':

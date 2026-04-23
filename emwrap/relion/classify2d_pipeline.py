@@ -149,10 +149,9 @@ class StarBatchManager(FolderManager):
 class Relion2DPipeline(ProcessingPipeline):
     """ Pipeline specific to AreTomo processing. """
     name = 'emw-rln2d'
-    input_name = 'in_particles'
 
-    def __init__(self, input_args):
-        ProcessingPipeline.__init__(self, input_args)
+    def __init__(self, input_args, output):
+        ProcessingPipeline.__init__(self, input_args, output)
         self.gpuList = self._args['gpu'].split()
 
     def get_rln2d_proc(self, gpu):
@@ -253,7 +252,7 @@ class Relion2DPipeline(ProcessingPipeline):
 
 
 def main():
-    Relion2DPipeline.runFromArgs()
+    Relion2DPipeline.main()
 
 
 def create_subset():
