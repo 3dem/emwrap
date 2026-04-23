@@ -226,9 +226,6 @@ class CryoloPipeline(ProcessingPipeline):
                 self._output(batch)
 
 
-def main():
-    PreprocessingPipeline.runFromArgs()
-
 
 if __name__ == '__main__':
-    main()
+    CryoloPipeline.main()

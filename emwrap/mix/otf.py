@@ -35,9 +35,9 @@ class OTF(FolderManager):
     def __init__(self, path, **kwargs):
         FolderManager.__init__(self, path)
         self.cmds = [
-            'emw-relion -r "emw-import-movies --json args.json"',
-            'emw-relion -r "emw-preprocessing --json args.json -i External/job001/movies.star"',
-            'emw-relion -r "emw-rln2d --json args.json -i External/job002/particles.star"'
+            'emw-relion -r "emw-import-movies -i args01_import.json"',
+            'emw-relion -r "emw-preprocessing -i args02_preprocessing.json"',
+            'emw-relion -r "emw-rln2d -i args03_2d.json"'
         ]
 
     def _dumpJson(self, fn, obj):
@@ -49,10 +49,10 @@ class OTF(FolderManager):
 
     def create(self, session, sconfig, resources):
         cwd = os.getcwd()
-        project = ProjectManager(self.path)
+        project = ProjectManager(self.path, create=True)
         project.clean()
         os.chdir(self.path)
-        Process.system('mkdir .slurm')
+        FolderManager('.slurm').create()
 
         raw = session['extra']['raw']
 
@@ -90,7 +90,7 @@ class OTF(FolderManager):
             "in_movies": input_movies,
             "timeout": 28800,  # 8 hours
             "sleep": 300,
-        }
+        }        
 
         args_pp = {
             "output": "output",
@@ -117,7 +117,7 @@ class OTF(FolderManager):
                     "--scale": 100
                 }
             }
-        }
+        }        
 
         args_2d = {
             "output": "FIXME",
@@ -131,6 +131,7 @@ class OTF(FolderManager):
                 "--K": 50
             }
         }
+        
 
         args = {
             "acquisition": acq,
@@ -138,6 +139,7 @@ class OTF(FolderManager):
             "emw-preprocessing": args_pp,
             "emw-rln2d": args_2d
         }
+
 
         # For the Krios02, we don't need to flip gain in Y
         # and the patches are 5x5, since it produces square images
@@ -158,7 +160,12 @@ class OTF(FolderManager):
         elif microscope == 'Arctica01':
             args_2d['batch_size'] = 100000
 
-        self._dumpJson('args.json', args)
+
+        self._dumpJson('acquisition.json', acq)
+        self._dumpJson('args01_import.json', args_import)
+        self._dumpJson('args02_preprocessing.json', args_pp)
+        self._dumpJson('args03_2d.json', args_2d)
+        #self._dumpJson('args.json', args)
 
         session_conf = {
             "movies": "External/job001/movies.star",
