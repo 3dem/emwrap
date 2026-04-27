@@ -95,7 +95,7 @@ class CryoCareTrain(CryoCarePipeline):
 
 
 def main():
-    CryoCareTrain.runFromArgs()
+    CryoCareTrain.main()
 
 
 if __name__ == '__main__':

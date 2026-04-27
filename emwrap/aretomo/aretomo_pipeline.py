@@ -150,7 +150,7 @@ class AreTomoPipeline(ProcessingPipeline):
 
 
 def main():
-    AreTomoPipeline.runFromArgs()
+    AreTomoPipeline.main()
 
 
 if __name__ == '__main__':

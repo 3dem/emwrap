@@ -71,6 +71,11 @@ class RelionTomoRefine(RelionBasePipeline):
 
         # Register output Volume and Particle STAR file
         outStar = self.join('output', 'run_data.star')
+        
+        if not os.path.exists(outStar):
+            raise Exception(f"ERROR: Output STAR file '{outStar}' was not produced.")
+
+
         with StarFile(outStar) as sf:
             o = sf.getTable('optics')
             box = o[0].rlnImageSize

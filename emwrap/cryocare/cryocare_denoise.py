@@ -109,7 +109,7 @@ class CryoCareDenoise(CryoCarePipeline):
 
 
 def main():
-    CryoCareDenoise.runFromArgs()
+    CryoCareDenoise.main()
 
 
 if __name__ == '__main__':

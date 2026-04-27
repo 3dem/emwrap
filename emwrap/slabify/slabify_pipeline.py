@@ -133,7 +133,7 @@ class SlabifyPipeline(ProcessingPipeline):
 
 
 def main():
-    SlabifyPipeline.runFromArgs()
+    SlabifyPipeline.main()
 
 
 if __name__ == '__main__':

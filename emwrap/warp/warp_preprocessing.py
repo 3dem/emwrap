@@ -133,7 +133,7 @@ class WarpPreprocessing(WarpBasePipeline):
 
 
 def main():
-    WarpPreprocessing.runFromArgs()
+    WarpPreprocessing.main()
 
 
 if __name__ == '__main__':
