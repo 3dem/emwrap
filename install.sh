@@ -146,13 +146,13 @@ link_scripts() {
   echo -e "    To run the server, run: ${BOLD}./run.sh${NORMAL}"
 }
 
-if [ -d "$DIR" ]; then
-    echo -e "${RED}Installation folder ${DIR} exists, delete it and run the installer again.${NORMAL}"
+if [ -d "$SOURCE" ]; then
+    echo -e "${RED}Installation folder ${SOURCE} exists, delete it and run the installer again.${NORMAL}"
     exit 1
 fi
 
 CURRENT_STEP="creating source directory"
-run_cmd mkdir ${DIR}
+run_cmd mkdir ${SOURCE}
 clone emtools devel
 clone emhub devel
 clone emwrap main
@@ -173,7 +173,7 @@ CURRENT_STEP="creating minimal instance"
 emh-data --create_minimal instance
 
 CURRENT_STEP="copying processing extras"
-run_cmd cp -r ${DIR}/emhub/extras/processing instance/extra 
+run_cmd cp -r ${SOURCE}/emhub/extras/processing instance/extra 
 echo -e "\n${GREEN}${BOLD}Installation complete!${NORMAL}"
 
 # TO install conda
