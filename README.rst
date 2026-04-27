@@ -60,12 +60,10 @@ Installation
 .. code-block:: bash
 
    # Create a folder for the installation
-   mkdir emstack
-   cd emstack
+   mkdir emstack && cd emstack
 
    # Create a conda environment and activate it
-   conda create -y --name=emstack python=3.8
-   conda activate emstack
+   conda create -y --name=emstack python=3.8 && conda activate emstack
 
    # Download and run the install script
    wget -qO- https://raw.githubusercontent.com/3dem/emwrap/refs/heads/main/install.sh | bash

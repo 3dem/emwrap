@@ -11,7 +11,7 @@ GREEN='\033[92m'
 BOLD='\033[1m'
 NORMAL='\033[0m' # Resets the color to default
 
-DIR="source"
+SOURCE="source"
 CURRENT_STEP=""
 
 # Error handler function
@@ -128,8 +128,9 @@ EOF
   echo -e "    To reload environment later, run: ${BOLD}source ${SOURCE_FILE}${NORMAL}"
 }
 
-copy_templates(source_dir, target_dir) {
-  
+copy_templates() {
+  local source_dir=$1
+  local target_dir=$2
   echo -e ">>> Copying templates from ${source_dir} to ${target_dir}..."
   for script in ${source_dir}/*.template; do
     run_cmd cp ${script} ${target_dir}/$(basename ${script} .template)
@@ -140,7 +141,7 @@ link_scripts() {
   CURRENT_STEP="linking scripts"
   run_cmd cp ${SOURCE}/emwrap/config/scripts/update.sh.template update.sh
   run_cmd cp ${SOURCE}/emwrap/config/scripts/run.sh.template run.sh
-  run_cmd chmod +x update.sh run.sh
+  
   echo -e "    To update the environment later, run: ${BOLD}./update.sh${NORMAL}"
   echo -e "    To run the server, run: ${BOLD}./run.sh${NORMAL}"
 }
@@ -150,23 +151,23 @@ if [ -d "$DIR" ]; then
     exit 1
 fi
 
-CURRENT_STEP="copying templates scripts"
-copy_templates ${SOURCE}/emwrap/config/ ./
-run_cmd mkdir scripts
-copy_templates ${SOURCE}/emwrap/config/scripts scripts
-run_cmd mkdir workflows
-copy_templates ${SOURCE}/emwrap/config/workflows workflows
-
 CURRENT_STEP="creating source directory"
 run_cmd mkdir ${DIR}
 clone emtools devel
 clone emhub devel
 clone emwrap main
 
+CURRENT_STEP="copying templates scripts"
+copy_templates ${SOURCE}/emwrap/config/ ./
+run_cmd chmod +x update.sh run.sh
+run_cmd mkdir scripts
+copy_templates ${SOURCE}/emwrap/config/scripts scripts
+run_cmd mkdir workflows
+copy_templates ${SOURCE}/emwrap/config/workflows workflows
+
 # Detect conda installation
 detect_conda || true
 generate_activate_script
-link_scripts
 
 CURRENT_STEP="creating minimal instance"
 emh-data --create_minimal instance
