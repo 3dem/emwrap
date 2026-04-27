@@ -506,8 +506,11 @@ class ProjectManager(FolderManager):
                 'jobId': jobId,
                 'command': cmd,
                 'gpu_line': gpu_line,
+                'gpus': gpus,
                 'cpus': cpus,
-                'working_dir': self.path
+                'working_dir': self.path,
+                'job_out': scriptFile.replace('.script', '.out'),
+                'job_err': scriptFile.replace('.script', '.err')
             })
 
             with open(queue['template'], 'r') as f:
@@ -520,6 +523,7 @@ class ProjectManager(FolderManager):
             # FIXME Implement the wait option when submitting to a cluster
             submit = queue['submit']
             scriptFile = self.__fixMapping(queue, scriptFile)
+
             submitCmd = submit.format(job_script=scriptFile)
             _log(f"Executing CLUSTER submit command: {Color.green(submitCmd)}", jobFile=scriptLog, flush=True)
             ###os.system(submitCmd)
