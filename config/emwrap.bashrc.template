@@ -27,10 +27,6 @@ export EMWRAP_CONFIG=$(cat <<EOF
         "emw-warp-estimate_weights": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_estimate_weights"},
         "emw-warp-mtools_resample": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_mtools_resample"}
     },
-    "cluster": {
-        "template": "$SCRIPTS/lsf_template.sh",
-        "submit": "$SCRIPTS/lsf_submit.sh {job_script}"
-    },
     "queues": [
         {
             "name": "cryo",
@@ -52,7 +48,7 @@ export EMWRAP_CONFIG=$(cat <<EOF
         }
     ],
     "forms": "$ROOT/source/emwrap/config/forms",
-    "workflows": "$ROOT/source/emwrap/config/workflows",
+    "workflows": "$ROOT/workflows",
     "programs": {
         "WARP": {"launcher": "$SCRIPTS/warp_launcher.sh"},
         "PYTOM": {"launcher": "$SCRIPTS/pytom_launcher.sh"},

@@ -37,10 +37,10 @@ run_cmd() {
 clone() {
   CURRENT_STEP="cloning ${1}"
   echo -e ">>> Installing ${GREEN} ${1} ${NORMAL}..."
-  run_cmd git clone --branch ${2} https://github.com/3dem/${1}.git ${DIR}/${1}
+  run_cmd git clone --branch ${2} https://github.com/3dem/${1}.git ${SOURCE}/${1}
   if [ "$#" -lt 3 ]; then
     CURRENT_STEP="pip install ${1}"
-    run_cmd pip install -e ${DIR}/${1}
+    run_cmd pip install -e ${SOURCE}/${1}
   fi
 }
 
@@ -77,7 +77,7 @@ detect_conda() {
 # Generate activation script for later use
 generate_activate_script() {
   CURRENT_STEP="generating activation script"
-  local SOURCE_FILE="${DIR}/bashrc"
+  local SOURCE_FILE="$./bashrc"
   # Create empty placeholder file
   touch "$SOURCE_FILE"
 
@@ -99,7 +99,7 @@ generate_activate_script() {
 # Conda configuration
 CONDA_BASE="${CONDA_BASE}"
 ENV_NAME="${CONDA_ENV}"
-EMSTACK_DIR="$(pwd)/${DIR}"
+EMSTACK_DIR="$(pwd)/${SOURCE}"
 
 # Initialize conda
 if [ -f "\$CONDA_BASE/etc/profile.d/conda.sh" ]; then
@@ -128,10 +128,18 @@ EOF
   echo -e "    To reload environment later, run: ${BOLD}source ${SOURCE_FILE}${NORMAL}"
 }
 
+copy_templates(source_dir, target_dir) {
+  
+  echo -e ">>> Copying templates from ${source_dir} to ${target_dir}..."
+  for script in ${source_dir}/*.template; do
+    run_cmd cp ${script} ${target_dir}/$(basename ${script} .template)
+  done
+}
+
 link_scripts() {
   CURRENT_STEP="linking scripts"
-  run_cmd cp ${DIR}/emwrap/config/scripts/update.sh.template update.sh
-  run_cmd cp ${DIR}/emwrap/config/scripts/run.sh.template run.sh
+  run_cmd cp ${SOURCE}/emwrap/config/scripts/update.sh.template update.sh
+  run_cmd cp ${SOURCE}/emwrap/config/scripts/run.sh.template run.sh
   run_cmd chmod +x update.sh run.sh
   echo -e "    To update the environment later, run: ${BOLD}./update.sh${NORMAL}"
   echo -e "    To run the server, run: ${BOLD}./run.sh${NORMAL}"
@@ -142,6 +150,12 @@ if [ -d "$DIR" ]; then
     exit 1
 fi
 
+CURRENT_STEP="copying templates scripts"
+copy_templates ${SOURCE}/emwrap/config/ ./
+run_cmd mkdir scripts
+copy_templates ${SOURCE}/emwrap/config/scripts scripts
+run_cmd mkdir workflows
+copy_templates ${SOURCE}/emwrap/config/workflows workflows
 
 CURRENT_STEP="creating source directory"
 run_cmd mkdir ${DIR}
