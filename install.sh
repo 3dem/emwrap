@@ -77,7 +77,7 @@ detect_conda() {
 # Generate activation script for later use
 generate_activate_script() {
   CURRENT_STEP="generating activation script"
-  local SOURCE_FILE="$./bashrc"
+  local SOURCE_FILE="bashrc"
   # Create empty placeholder file
   touch "$SOURCE_FILE"
 
