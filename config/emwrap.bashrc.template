@@ -29,14 +29,22 @@ export EMWRAP_CONFIG=$(cat <<EOF
     },
     "queues": [
         {
-            "name": "cryo",
+            "name": "cryoem",
             "template": "$SCRIPTS/lsf_template.sh",
             "submit": "$SCRIPTS/lsf_submit.sh {job_script}",
             "params": [
                 {
                     "name": "queue_name",
-                    "default": "cryo",
-                    "condition": "False"
+                    "default": "cryoem",
+                    "condition": "false"
+                },
+                {
+                    "name": "gpu_type",
+                    "label": "GPU type",
+                    "help": "Select the GPU type if you need an specific one for this job.",
+                    "default": "any",
+                    "paramClass": "EnumParam",
+                    "choices": ["any", "V100", "A100"]
                 }
             ]
         },
@@ -44,7 +52,25 @@ export EMWRAP_CONFIG=$(cat <<EOF
             "name": "cryo_core",
             "template": "$SCRIPTS/lsf_template.sh",
             "submit": "$SCRIPTS/lsf_submit.sh {job_script}",
-            "params": []
+            "params": [
+                {
+                    "name": "queue_name",
+                    "default": "cryo_core",
+                    "condition": "false"
+                }
+            ]
+        },
+        {
+            "name": "rtx5000",
+            "template": "$SCRIPTS/slurm_rtx5000_template.sh",
+            "submit": "ssh cryo-em-wkst04.stjude.org 'sbatch {job_script}'",
+            "params": [
+                {
+                    "name": "queue_name",
+                    "default": "rtx5000",
+                    "condition": "false"
+                }
+            ]
         }
     ],
     "forms": "$ROOT/source/emwrap/config/forms",

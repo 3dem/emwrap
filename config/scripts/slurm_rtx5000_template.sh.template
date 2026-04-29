@@ -1,0 +1,20 @@
+#!/bin/bash
+
+#SBATCH --partition={queue_name}
+#SBATCH --nodes=1
+#SBATCH --tasks=1
+#SBATCH --cpus-per-task={cpus}
+#SBATCH --gres=gpu:{gpus}
+#SBATCH --mem=200G
+#SBATCH --output={job_out}
+#SBATCH --error={job_err}
+
+cd {working_dir}
+
+hostname -f
+
+# For debugging, avoid cleanning temporary batch folders
+export EMWRAP_CLEAN=0
+
+{command}
+

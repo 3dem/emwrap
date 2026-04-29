@@ -3,6 +3,6 @@
 set -e
 
 . instance/bashrc
-. source/emconfig/emwrap.bashrc
+. emwrap.bashrc
 
 flask run --debug --port 5000
