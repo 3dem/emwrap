@@ -6,29 +6,23 @@ export ROOT="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd 
 # Load the required Python environment, either a conda or virtualenv
 # The insall.sh script will try to detect the conda environment and activate it
 # the bashrc file, but you might need to modify it to fit your needs.
-. bashrc
+. $ROOT/bashrc
 
 export SCRIPTS=$ROOT/scripts
 
 export EMWRAP_CONFIG=$(cat <<EOF
 {
-    "jobs": {
-        "emw-import-ts": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.base.import_ts"},
-        "emw-warp-mctf": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_mctf"},
-        "emw-warp-aretomo": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_aretomo"},
-        "emw-warp-etomo_patches": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_etomo_patches"},
-        "emw-warp-ctfrec": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_ctfrec"},
-        "emw-pytom-create_template": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.pytom.pytom_create_template"},
-        "emw-pytom": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.pytom.pytom_pipeline"},
-        "emw-pytme": {"launcher": "$SCRIPTS/emw-pytme.sh"},
-        "emw-warp-export_particles": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_export_particles"},
-        "emw-relion-tomorecons": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.relion.tomorecons"},
-        "emw-relion-tomorefine": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.relion.tomorefine"},
-        "emw-relion-symmetrize_volume": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.relion.symmetrize_volume"},
-        "emw-warp-mtools_create": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_mtools_create"},
-        "emw-warp-mcore": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_mcore"},
-        "emw-warp-estimate_weights": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_estimate_weights"},
-        "emw-warp-mtools_resample": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_mtools_resample"}
+    "programs": {
+        "WARP": {"launcher": "$SCRIPTS/warp_launcher.sh"},
+        "PYTOM": {"launcher": "$SCRIPTS/pytom_launcher.sh"},
+        "RELION": {"launcher": "$SCRIPTS/relion_launcher.sh"},
+        "IMOD": {"launcher": "$SCRIPTS/imod_launcher.sh"},
+        "MOTIONCOR2": {"launcher": "$SCRIPTS/motioncor2.sh"},
+        "MOTIONCOR3": {"launcher": "$SCRIPTS/motioncor3.sh"},
+        "ARETOMO2": {"launcher": "$SCRIPTS/aretomo2.sh"},
+        "ARETOMO3": {"launcher": "$SCRIPTS/aretomo3.sh"},
+        "CTFFIND": {"launcher": "$SCRIPTS/ctffind5.sh", "version": 5},
+        "CRYOCARE": {"launcher": "$SCRIPTS/cryocare_launcher.sh"}
     },
     "queues": [
         {
@@ -66,7 +60,7 @@ export EMWRAP_CONFIG=$(cat <<EOF
         {
             "name": "rtx5000",
             "template": "$SCRIPTS/slurm_rtx5000_template.sh",
-            "submit": "ssh cryo-em-wkst04.stjude.org 'sbatch {job_script}'",
+            "submit": "sbatch {job_script}",
             "params": [
                 {
                     "name": "queue_name",
@@ -76,20 +70,26 @@ export EMWRAP_CONFIG=$(cat <<EOF
             ]
         }
     ],
+    "jobs": {
+        "emw-import-ts": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.base.import_ts"},
+        "emw-warp-mctf": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_mctf"},
+        "emw-warp-aretomo": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_aretomo"},
+        "emw-warp-etomo_patches": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_etomo_patches"},
+        "emw-warp-ctfrec": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_ctfrec"},
+        "emw-pytom-create_template": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.pytom.pytom_create_template"},
+        "emw-pytom": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.pytom.pytom_pipeline"},
+        "emw-pytme": {"launcher": "$SCRIPTS/emw-pytme.sh"},
+        "emw-warp-export_particles": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_export_particles"},
+        "emw-relion-tomorecons": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.relion.tomorecons"},
+        "emw-relion-tomorefine": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.relion.tomorefine"},
+        "emw-relion-symmetrize_volume": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.relion.symmetrize_volume"},
+        "emw-warp-mtools_create": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_mtools_create"},
+        "emw-warp-mcore": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_mcore"},
+        "emw-warp-estimate_weights": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_estimate_weights"},
+        "emw-warp-mtools_resample": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_mtools_resample"}
+    },
     "forms": "$ROOT/source/emwrap/config/forms",
-    "workflows": "$ROOT/workflows",
-    "programs": {
-        "WARP": {"launcher": "$SCRIPTS/warp_launcher.sh"},
-        "PYTOM": {"launcher": "$SCRIPTS/pytom_launcher.sh"},
-        "RELION": {"launcher": "$SCRIPTS/relion_launcher.sh"},
-        "IMOD": {"launcher": "$SCRIPTS/imod_launcher.sh"},
-        "MOTIONCOR2": {"launcher": "$SCRIPTS/motioncor2.sh"},
-        "MOTIONCOR3": {"launcher": "$SCRIPTS/motioncor3.sh"},
-        "ARETOMO2": {"launcher": "$SCRIPTS/aretomo2.sh"},
-        "ARETOMO3": {"launcher": "$SCRIPTS/aretomo3.sh"},
-        "CTFFIND": {"launcher": "$SCRIPTS/ctffind5.sh", "version": 5},
-        "CRYOCARE": {"launcher": "$SCRIPTS/cryocare_launcher.sh"}
-    }
+    "workflows": "$ROOT/workflows" 
 }
 EOF
 )
