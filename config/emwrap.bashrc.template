@@ -4,6 +4,9 @@
 export ROOT="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
 # Load the required Python environment, either a conda or virtualenv
+# The insall.sh script will try to detect the conda environment and activate it
+# the bashrc file, but you might need to modify it to fit your needs.
+. bashrc
 
 export SCRIPTS=$ROOT/scripts
 
