@@ -121,7 +121,15 @@
                     "name": "gpus",
                     "label": "GPUs",                    
                     "help": "If it is a single number (N), it will represent the total number of GPUs (0..N-1). It there are multiple values, it will be the specific GPUs ID."
-                }
+                },
+                {
+                  "name": "gpus",
+                  "label": "Fixed one GPU",
+                  "default": "1",
+                  "paramClass": "StringParam",
+                  "help": "Hidden parameter to force the use of a single GPU.",
+                  "condition": "false"
+                }  
             ]
         }
     ]

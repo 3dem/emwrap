@@ -83,6 +83,7 @@ export EMWRAP_CONFIG=$(cat <<EOF
         "emw-relion-tomorecons": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.relion.tomorecons"},
         "emw-relion-tomorefine": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.relion.tomorefine"},
         "emw-relion-symmetrize_volume": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.relion.symmetrize_volume"},
+        "emw-relion-mask_create": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.relion.mask_create"},
         "emw-warp-mtools_create": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_mtools_create"},
         "emw-warp-mcore": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_mcore"},
         "emw-warp-estimate_weights": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_estimate_weights"},
