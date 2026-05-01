@@ -36,7 +36,6 @@ update() {
   echo -e ">>> Updating ${GREEN} ${1} ${NORMAL}..."
   run_cmd cd "${DIR}/${1}"
   run_cmd git pull --prune
-  run_cmd pip install -e "${DIR}/${1}" # Always reinstall the package
 }
 
 # Update the each repository
