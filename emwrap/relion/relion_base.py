@@ -23,8 +23,11 @@ class RelionBasePipeline(ProcessingPipeline):
     """
     PROGRAM = 'RELION'
 
-    def get_subargs(self, prefix, new_prefix='--'):
-        return self._args.subset(prefix, new_prefix=new_prefix, filters=['remove_empty', 'remove_false'])
+    def get_subargs(self, prefix, new_prefix='--', inverted_booleans=[], possitive=[]):
+        return self._args.subset(prefix, new_prefix=new_prefix, 
+                                 filters=['remove_empty', 'remove_false'], 
+                                 inverted_booleans=inverted_booleans,
+                                 possitive=possitive)
 
     def _get_launcher(self):
         return ProcessingPipeline.get_launcher('RELION')
