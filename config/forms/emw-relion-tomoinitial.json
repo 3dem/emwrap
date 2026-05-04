@@ -1,0 +1,150 @@
+{
+    "name": "emw-relion-tomoinitial",
+    "help": "RELION STA 3D initial reference (tomography): VDAM via relion_refine --grad --denovo_3dref with --ios, matching RelionJob::getCommandsInimodelJob (tomo, new run). Sampling (--oversampling 1 --healpix_order 1 --offset_range 6 --offset_step 2 --auto_sampling), --zero_mask, and --pad 1 are fixed as in the RELION GUI. Optional relion_align_symmetry writes initial_model.mrc. See STA InitialModel tutorial.",
+    "sections": [
+        {
+            "label": "Input",
+            "params": [
+                {
+                    "label": "Input",
+                    "paramClass": "LabelParam"
+                },
+                {
+                    "name": "relion_refine.ios",
+                    "label": "Input optimisation set:",
+                    "paramClass": "PathParam",
+                    "pointerClass": "TomogramParticles",
+                    "help": "Input optimisation set. This will be passed with a --ios argument to relion_refine (tomography inimodel path). If any individual components of the optimisation set are specified in direct-entry mode in RELION, they override the optimisation set; here only the optimisation set STAR is used."
+                },
+                {
+                    "label": "CTF",
+                    "paramClass": "Group",
+                    "params": [
+                        {
+                            "name": "relion_refine.ctf",
+                            "label": "Do CTF-correction?",
+                            "paramClass": "BooleanParam",
+                            "default": true,
+                            "help": "If set to Yes, CTFs will be corrected inside the MAP refinement. The resulting algorithm intrinsically implements the optimal linear, or Wiener filter. Note that CTF parameters for all images need to be given in the input STAR file. Passed as --ctf when Yes."
+                        },
+                        {
+                            "name": "relion_refine.ctf_intact_first_peak",
+                            "label": "Ignore CTFs until first peak?",
+                            "paramClass": "BooleanParam",
+                            "default": false,
+                            "help": "If set to Yes, then CTF-amplitude correction will only be performed from the first peak of each CTF onward. This can be useful if the CTF model is inadequate at the lowest resolution. Still, in general using higher amplitude contrast on the CTFs (e.g. 10-20%) often yields better results. Therefore, this option is not generally recommended: try increasing amplitude contrast (in your input STAR file) first! Passed as --ctf_intact_first_peak when Yes (with --ctf)."
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "label": "Optimisation",
+            "params": [
+                {
+                    "name": "relion_refine.iter",
+                    "label": "Number of VDAM mini-batches:",
+                    "paramClass": "IntParam",
+                    "default": 200,
+                    "help": "How many iterations (i.e. mini-batches) to perform with the VDAM algorithm? Passed as --iter."
+                },
+                {
+                    "name": "relion_refine.tau2_fudge",
+                    "label": "Regularisation parameter T:",
+                    "paramClass": "FloatParam",
+                    "default": 4,
+                    "help": "Bayes law strictly determines the relative weight between the contribution of the experimental data and the prior. However, in practice one may need to adjust this weight to put slightly more weight on the experimental data to allow optimal results. Values greater than 1 for this regularisation parameter (T in the JMB2011 paper) put more weight on the experimental data. Values around 2-4 have been observed to be useful for 3D initial model calculations. Passed as --tau2_fudge."
+                },
+                {
+                    "name": "relion_refine.K",
+                    "label": "Number of classes:",
+                    "paramClass": "IntParam",
+                    "default": 1,
+                    "help": "The number of classes (K) for a multi-reference ab initio SGD refinement. These classes will be made in an unsupervised manner, starting from a single reference in the initial iterations of the SGD, and the references will become increasingly dissimilar during the inbetween iterations. Passed as --K."
+                },
+                {
+                    "name": "relion_refine.particle_diameter",
+                    "label": "Mask diameter (A):",
+                    "paramClass": "FloatParam",
+                    "default": 200,
+                    "help": "The experimental images will be masked with a soft circular mask with this diameter. Make sure this radius is not set too small because that may mask away part of the signal! If set to a value larger than the image size no masking will be performed. The same diameter will also be used for a spherical mask of the reference structures if no user-provided mask is specified. Passed as --particle_diameter."
+                },
+                {
+                    "name": "relion_refine.flatten_solvent",
+                    "label": "Flatten and enforce non-negative solvent?",
+                    "paramClass": "BooleanParam",
+                    "default": true,
+                    "help": "If set to Yes, the job will apply a spherical mask and enforce all values in the reference to be non-negative. Passed as --flatten_solvent when Yes."
+                },
+
+                {
+                    "name": "relion_refine.sym",
+                    "label": "Symmetry:",
+                    "paramClass": "StringParam",
+                    "default": "C1",
+                    "help": "The initial model is always generated in C1 and then aligned to and symmetrized with the specified point group. If the automatic alignment fails, please manually rotate run_itNNN_class001.mrc (NNN is the number of iterations) so that it conforms the symmetry convention. Passed as --sym when \"Run in C1 and apply symmetry later\" is No; otherwise relion_refine uses --sym C1 and relion_align_symmetry uses this symmetry when applicable."
+                },
+                {
+                    "name": "run_in_c1",
+                    "label": "Run in C1 and apply symmetry later?",
+                    "paramClass": "BooleanParam",
+                    "default": true,
+                    "help": "If set to Yes, the gradient-driven optimisation is run in C1 and the symmetry orientation is searched and applied later. If set to No, the entire optimisation is run in the symmetry point group indicated above. Not a relion_refine flag; controls --sym passed to relion_refine."
+                },
+                {
+                    "name": "relion_refine.sigma_tilt",
+                    "label": "Prior width on tilt angle (deg):",
+                    "paramClass": "FloatParam",
+                    "help": "The width of the prior on the tilt angle: angular searches will be +/-3 times this value. Tilt priors will be defined when particles have been picked as filaments, on spheres or on manifolds. Setting this width to a negative value will lead to no prior being used on the tilt angle. Passed as --sigma_tilt only when the value is strictly positive."
+                }
+                    
+            ]
+        },
+        {
+            "label": "Compute",
+            "params": [
+                {
+                    "name": "relion_refine.no_parallel_disc_io",
+                    "label": "Use parallel disc I/O?",
+                    "paramClass": "BooleanParam",
+                    "default": true,
+                    "help": "If set to Yes, all MPI followers will read their own images from disc. Otherwise, only the leader will read images and send them through the network to the followers. When No, --no_parallel_disc_io is passed (inverted vs RELION do_parallel_discio)."
+                },
+                {
+                    "name": "relion_refine.pool",
+                    "label": "Number of pooled particles:",
+                    "paramClass": "IntParam",
+                    "default": 30,
+                    "help": "Particles are processed in individual batches by MPI followers. Passed as --pool."
+                },
+                
+                {
+                    "name": "relion_refine.dont_combine_weights_via_disc",
+                    "label": "Combine iterations through disc?",
+                    "paramClass": "BooleanParam",
+                    "default": false,
+                    "help": "If set to Yes, at the end of every iteration all MPI followers will write out a large file with their accumulated results. If No (default in RELION inimodel), --dont_combine_weights_via_disc is passed (inverted boolean mapping)."
+                },
+                {
+                    "name": "gpus",
+                    "label": "GPUs",
+                    "default": 1,
+                    "help": "If empty, no GPU will be used, if allowed by the underlying program. If it is a single number (N), it will represent the total number of GPUs (0..N-1). It there are multiple values, it will be the specific GPUs ID."
+                }, 
+                {
+                    "name": "cpus",
+                    "label": "CPUs",
+                    "default": "",
+                    "help": "If empty, the program will use the number of GPUs * 10 CPUs."
+                },                        
+                {
+                    "name": "extra_args",
+                    "label": "Additional relion_refine arguments",
+                    "paramClass": "StringParam",
+                    "default": "",
+                    "help": "Optional extra tokens appended to relion_refine (e.g. expert flags)."
+                }
+            ]
+        }
+    ]
+}
