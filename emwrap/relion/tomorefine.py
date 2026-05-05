@@ -19,7 +19,6 @@ import os
 from emtools.image import Image
 from emtools.jobs import Batch, Args
 from emtools.metadata import StarFile
-
 from .relion_base import RelionBasePipeline
 
 
@@ -89,7 +88,7 @@ class RelionTomoRefine(RelionBasePipeline):
 
         batch = Batch(id=self.name, path=self.workingDir)
         self.mkdir('output')
-        self.batch_execute('relion_refine', batch, args, call=False)
+        self.batch_execute('relion_refine', batch, args)
 
         # Register output Volume and Particle STAR file
         outStar = self.join('output', 'run_data.star')

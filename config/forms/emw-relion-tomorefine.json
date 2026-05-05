@@ -213,7 +213,7 @@
 	
             },
             {
-                "name": "relion_refine.nr_pool",
+                "name": "relion_refine.pool",
                 "label": "Pooled particles per thread",
                 "paramClass": "IntParam",
                 "default": 30,
