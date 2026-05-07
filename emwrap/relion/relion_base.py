@@ -14,6 +14,7 @@
 # *
 # **************************************************************************
 
+import os
 from emwrap.base import ProcessingPipeline
 
 
@@ -31,3 +32,11 @@ class RelionBasePipeline(ProcessingPipeline):
 
     def _get_launcher(self):
         return ProcessingPipeline.get_launcher('RELION')
+
+    def _check_input(self, key, name, allow_empty=False):
+        fn = self._args.get(key, '')
+        if fn:
+            if not os.path.exists(fn):
+                raise Exception(f"{name} '{fn}' does not exist.")
+        elif not allow_empty:
+            raise Exception(f"{name} is required.")
