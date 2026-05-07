@@ -101,6 +101,7 @@ class RelionTomoinitial(RelionBasePipeline):
                 "--auto_sampling": "",
                 "--zero_mask": "",
                 "--j": mpis,
+                "--gpu": "",
             }
         )
         args.update(_REFINE_FIXED_TOMO)

@@ -27,17 +27,9 @@ class RelionTomoRefine(RelionBasePipeline):
     name = 'emw-relion-tomorefine'
 
     def prerun(self):
-        def _check_input(key, name, allow_empty=False):
-            fn = self._args.get(key, '')
-            if fn:
-                if not os.path.exists(fn):
-                    raise Exception(f"{name} '{fn}' does not exist.")
-            elif not allow_empty:
-                raise Exception(f"{name} is required.")
-
-        _check_input('relion_refine.ios', 'Optimization set')
-        _check_input('relion_refine.ref', 'Reference volume')
-        _check_input('relion_refine.solvent_mask', 'Solvent mask', allow_empty=True)
+        self._check_input('relion_refine.ios', 'Optimization set')
+        self._check_input('relion_refine.ref', 'Reference volume')
+        self._check_input('relion_refine.solvent_mask', 'Solvent mask', allow_empty=True)
 
         # FIXME: Get the number of mpis/threads from GUI
         gpus = int(self._args['gpus'])
