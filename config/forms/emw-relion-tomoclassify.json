@@ -1,153 +1,179 @@
 {
     "name": "emw-relion-tomoclassify",
-    "help": "RELION 3D classification (Class3D) for subtomogram averaging. Classifies particles into multiple 3D classes; use to remove bad particles or separate structural states. See RELION STA tutorial (Class3D) and TomoGuide.",
+    "help": "RELION 3D classification (Class3D) for subtomogram averaging. Classifies particles into multiple 3D classes; use to remove bad particles or separate structural states. Parameters follow the RELION Class3D (tomography) job. See RELION STA tutorial (Class3D) and TomoGuide.",
     "sections": [
         {
-            "label": "Input",
+            "label": "Input / Reference",
             "params": [
                 {
-                    "label": "Input / Reference",
-                    "paramClass": "LabelParam"
+                    "label": "Input",
+                    "paramClass": "Group",
+                    "params": [
+                        {
+                            "name": "relion_refine.ios",
+                            "label": "Tomo Particles (optimisation set):",
+                            "paramClass": "PathParam",
+                            "pointerClass": "TomogramParticles",
+                            "help": "Passed as --ios (optimisation set or particles STAR from RELION tomography input options)."
+                        }
+                    ]
                 },
                 {
-                    "name": "relion_classify3d.ios",
-                    "label": "Input particles STAR file:",
-                    "paramClass": "PathParam",
-                    "pointerClass": "TomogramParticles",
-                    "help": "Optimization set or particles STAR file (--ios). Use output from Extract subtomos or a previous refinement/classification."
-                },
-                {
-                    "name": "relion_classify3d.ref",
-                    "label": "Reference map:",
-                    "paramClass": "PathParam",
-                    "pointerClass": "Volume",
-                    "help": "Low-resolution reference map (--ref). Typically from Reconstruct particle or a previous refinement. Low-pass filter to avoid biasing classes."
-                },
-                {
-                    "name": "relion_classify3d.solvent_mask",
-                    "label": "Reference mask (Optional):",
-                    "paramClass": "PathParam",
-                    "pointerClass": "Volume",
-                    "help": "Optional solvent mask (--solvent_mask). Same dimensions as reference; values 0–1. If empty, a soft spherical mask from mask diameter is used."
-                },
-                {
-                    "name": "relion_classify3d.firstiter_cc",
-                    "label": "Ref. map is on absolute greyscale?",
-                    "paramClass": "BooleanParam",
-                    "default": false,
-                    "help": "Set Yes if reference was reconstructed in RELION/XMIPP; otherwise No (uses cross-correlation in first iteration)."
-                },
-                {
-                    "name": "relion_classify3d.trust_ref_size",
-                    "label": "Resize reference if needed?",
-                    "paramClass": "BooleanParam",
-                    "default": true,
-                    "help": "If true, reference (and mask) are re-scaled/re-boxed to match expected pixel and box size."
-                },
-                {
-                    "name": "relion_classify3d.ini_high",
-                    "label": "Initial low-pass filter (Å)",
-                    "default": 60,
-                    "paramClass": "FloatParam",
-                    "help": "Low-pass filter for initial reference (--ini_high). Use ~60 Å or slightly above current resolution to avoid overfitting."
-                },
-                {
-                    "name": "relion_classify3d.sym",
-                    "label": "Symmetry",
-                    "default": "C1",
-                    "paramClass": "StringParam",
-                    "help": "Point group (--sym). Use C1 for classification to separate good/bad particles; symmetry can be applied later in refinement."
+                    "label": "Reference",
+                    "paramClass": "Group",
+                    "params": [
+                        {
+                            "name": "relion_refine.ref",
+                            "label": "Reference map:",
+                            "paramClass": "PathParam",
+                            "pointerClass": "Volume",
+                            "help": "A 3D map in MRC/Spider format. Make sure this map has the same dimensions and the same pixel size as your input images, or specify that one can resize the reference if needed."
+                        },
+                        {
+                            "name": "relion_refine.solvent_mask",
+                            "label": "Reference mask (optional):",
+                            "paramClass": "PathParam",
+                            "pointerClass": "VolumeMask",
+                            "help": "If no mask is provided, a soft spherical mask based on the particle diameter will be used.\n\nOtherwise, provide a Spider/mrc map containing a (soft) mask with the same dimensions as the reference(s), and values between 0 and 1, with 1 being 100% protein and 0 being 100% solvent. The reconstructed reference map will be multiplied by this mask.\n\nIn some cases, for example for non-empty icosahedral viruses, it is also useful to use a second mask. For all white (value 1) pixels in this second mask the corresponding pixels in the reconstructed map are set to the average value of these pixels. Thereby, for example, the higher density inside the virion may be set to a constant. Note that this second mask should have one-values inside the virion and zero-values in the capsid and the solvent areas. To use a second mask, use the additional option --solvent_mask2, which may given in the Additional arguments line."
+                        },
+                        {
+                            "name": "relion_refine.firstiter_cc",
+                            "label": "Ref. map is on absolute greyscale?",
+                            "paramClass": "BooleanParam",
+                            "default": false,
+                            "help": "Probabilities are calculated based on a Gaussian noise model, which contains a squared difference term between the reference and the experimental image. This has a consequence that the reference needs to be on the same absolute intensity grey-scale as the experimental images. RELION and XMIPP reconstruct maps at their absolute intensity grey-scale. Other packages may perform internal normalisations of the reference density, which will result in incorrect grey-scales. Therefore: if the map was reconstructed in RELION or in XMIPP, set this option to Yes, otherwise set it to No. If set to No, RELION will use a (grey-scale invariant) cross-correlation criterion in the first iteration, and prior to the second iteration the map will be filtered again using the initial low-pass filter. This procedure is relatively quick and typically does not negatively affect the outcome of the subsequent MAP refinement. Therefore, if in doubt it is recommended to set this option to No."
+                        },
+                        {
+                            "name": "relion_refine.trust_ref_size",
+                            "label": "Resize reference if needed?",
+                            "paramClass": "BooleanParam",
+                            "default": true,
+                            "help": "If true, and if the input reference map (and mask) do not have the same pixel size and/or box size, then they will be re-scaled and re-boxed accordingly. If this option is set to false, then the program will die with an error if the reference does not have the correct pixel and/or box size."
+                        },
+                        {
+                            "name": "relion_refine.ini_high",
+                            "label": "Initial low-pass filter (A)",
+                            "default": 60,
+                            "paramClass": "FloatParam",
+                            "help": "It is recommended to strongly low-pass filter your initial reference map. If it has not yet been low-pass filtered, it may be done internally using this option. If set to 0, no low-pass filter will be applied to the initial reference(s)."
+                        },
+                        {
+                            "name": "relion_refine.sym",
+                            "label": "Symmetry",
+                            "default": "C1",
+                            "paramClass": "StringParam",
+                            "help": "If the molecule is asymmetric, set Symmetry group to C1. Note their are multiple possibilities for icosahedral symmetry: \n * I1: No-Crowther 222 (standard in Heymann, Chagoyen & Belnap, JSB, 151 (2005) 196–207) \n * I2: Crowther 222 \n * I3: 52-setting (as used in SPIDER?)\n * I4: A different 52 setting \n The command 'relion_refine --sym D2 --print_symmetry_ops' prints a list of all symmetry operators for symmetry group D2. RELION uses XMIPP's libraries for symmetry operations. Therefore, look at the XMIPP Wiki for more details:  http://xmipp.cnb.csic.es/twiki/bin/view/Xmipp/WebHome?topic=Symmetry"
+                        }
+                    ]
                 }
             ]
         },
         {
-            "label": "Classification",
-            "params": [
+            "label": "CTF",
+            "params": [                
                 {
-                    "name": "relion_classify3d.K",
-                    "label": "Number of classes:",
-                    "paramClass": "IntParam",
-                    "default": 6,
-                    "help": "Number of 3D classes (--K). Try 6–9; computational cost scales linearly with K."
-                },
-                {
-                    "name": "relion_classify3d.iter",
-                    "label": "Number of iterations:",
-                    "paramClass": "IntParam",
-                    "default": 25,
-                    "help": "Maximum iterations (--iter). Job may converge earlier."
-                },
-                {
-                    "name": "relion_classify3d.skip_align",
-                    "label": "Classification without alignment:",
-                    "paramClass": "BooleanParam",
-                    "default": false,
-                    "help": "If Yes, particles are not re-aligned (--skip_align). Use when particles are already well aligned (e.g. after 3D class with 1 class). Saves time and uses CPU only. If No, perform alignment (use GPU)."
-                },
-                {
-                    "name": "relion_classify3d.tau2_fudge",
-                    "label": "Tau² fudge factor:",
-                    "paramClass": "FloatParam",
-                    "default": 3,
-                    "help": "Regularisation (--tau2_fudge). Try 0.5, 1, 2, 4; often run several jobs with different T values."
-                }
-            ]
-        },
-        {
-            "label": "CTF / Optimization",
-            "params": [
-                {
-                    "label": "CTF",
-                    "paramClass": "LabelParam"
-                },
-                {
-                    "name": "relion_classify3d.ctf",
+                    "name": "relion_refine.ctf",
                     "label": "Do CTF-correction?",
                     "paramClass": "BooleanParam",
                     "default": true,
-                    "help": "Apply CTFs to projections (--ctf). Requires CTF info in input STAR."
+                    "help": "If set to Yes, CTFs will be corrected inside the MAP refinement. The resulting algorithm intrinsically implements the optimal linear, or Wiener filter. Note that CTF parameters for all images need to be given in the input STAR file. The command 'relion_refine --print_metadata_labels' will print a list of all possible metadata labels for that STAR file. See the RELION Wiki for more details. Also make sure that the correct pixel size (in Angstrom) is given above!"
                 },
                 {
-                    "name": "relion_classify3d.ctf_intact_first_peak",
+                    "name": "relion_refine.ctf_intact_first_peak",
                     "label": "Ignore CTFs until first peak?",
                     "paramClass": "BooleanParam",
                     "default": false,
-                    "help": "Useful for initial alignment/classification; acts like a low-pass filter."
+                    "help": "If set to Yes, then CTF-amplitude correction will only be performed from the first peak of each CTF onward. This can be useful if the CTF model is inadequate at the lowest resolution. Still, in general using higher amplitude contrast on the CTFs (e.g. 10-20%) often yields better results. Therefore, this option is not generally recommended: try increasing amplitude contrast (in your input STAR file) first!"
+                }
+            ]
+        },
+        {
+            "label": "Optimization",
+            "params": [                
+                {
+                    "name": "relion_refine.K",
+                    "label": "Number of classes:",
+                    "paramClass": "IntParam",
+                    "default": 6,
+                    "help": "The number of classes (K) for a multi-reference refinement. These classes will be made in an unsupervised manner from a single reference by division of the data into random subsets during the first iteration. (RELION GUI default is 1; a larger K is typical for subtomogram classification.)"
                 },
                 {
-                    "label": "Optimization",
-                    "paramClass": "LabelParam"
-                },
-                {
-                    "name": "relion_classify3d.particle_diameter",
-                    "label": "Mask diameter (Å):",
+                    "name": "relion_refine.tau2_fudge",
+                    "label": "Regularisation parameter T:",
                     "paramClass": "FloatParam",
-                    "help": "Particle diameter for spherical mask (--particle_diameter). ~90% of box at current binning. E.g. box 84 px, 1.91 Å/px, bin 4 → ~570 Å."
+                    "default": 1,
+                    "help": "Bayes law strictly determines the relative weight between the contribution of the experimental data and the prior. However, in practice one may need to adjust this weight to put slightly more weight on the experimental data to allow optimal results. Values greater than 1 for this regularisation parameter (T in the JMB2011 paper) put more weight on the experimental data. Values around 2-4 have been observed to be useful for 3D refinements, values of 1-2 for 2D refinements. Too small values yield too-low resolution structures; too high values result in over-estimated resolutions, mostly notable by the apparition of high-frequency noise in the references. The RELION tomography Class3D default is 1."
                 },
                 {
-                    "name": "relion_classify3d.zero_mask",
+                    "name": "relion_refine.iter",
+                    "label": "Number of iterations:",
+                    "paramClass": "IntParam",
+                    "default": 25,
+                    "help": "Number of iterations to be performed. Note that the current implementation of 2D class averaging and 3D classification does NOT comprise a convergence criterium. Therefore, the calculations will need to be stopped by the user if further iterations do not yield improvements in resolution or classes."
+                },
+                {
+                    "name": "relion_refine.do_fast_subsets",
+                    "label": "Use fast subsets (for large data sets)?",
+                    "paramClass": "BooleanParam",
+                    "default": false,
+                    "help": "If set to Yes, the first 5 iterations will be done with random subsets of only K*1500 particles (K being the number of classes); the next 5 with K*4500 particles, the next 5 with 30% of the data set; and the final ones with all data. This was inspired by a cisTEM implementation by Niko Grigorieff et al."
+                }, 
+                {
+                    "name": "relion_refine.particle_diameter",
+                    "label": "Mask diameter (A)",
+                    "paramClass": "FloatParam",
+                    "default": 200,
+                    "help": "The experimental images will be masked with a soft circular mask with this diameter. Make sure this radius is not set too small because that may mask away part of the signal! If set to a value larger than the image size no masking will be performed. The same diameter will also be used for a spherical mask of the reference structures if no user-provided mask is specified."
+                },
+                {
+                    "name": "relion_refine.zero_mask",
                     "label": "Mask individual particles with zeros?",
                     "paramClass": "BooleanParam",
                     "default": true,
-                    "help": "Yes: zero outside particle radius (recommended for classification). No: fill with random noise."
+                    "help": "If set to Yes, then in the individual particles, the area outside a circle with the radius of the particle will be set to zeros prior to taking the Fourier transform. This will remove noise and therefore increase sensitivity in the alignment and classification. However, it will also introduce correlations between the Fourier components that are not modelled. When set to No, then the solvent area is filled with random noise, which prevents introducing correlations. High-resolution refinements (e.g. ribosomes or other large complexes in 3D auto-refine) tend to work better when filling the solvent area with random noise (i.e. setting this option to No), refinements of smaller complexes and most classifications go better when using zeros (i.e. setting this option to Yes)."
                 },
                 {
-                    "name": "relion_classify3d.solvent_correct_fsc",
-                    "label": "Use solvent-flattened FSCs?",
+                    "name": "relion_refine.highres_limit",
+                    "label": "Limit resolution E-step to (A)",
+                    "paramClass": "FloatParam",
+                    "default": -1,
+                    "help": "If set to a positive number, then the expectation step (i.e. the alignment) will be done only including the Fourier components up to this resolution (in Angstroms). This is useful to prevent overfitting, as the classification runs in RELION are not to be guaranteed to be 100% overfitting-free (unlike the 3D auto-refine with its gold-standard FSC). In particular for very difficult data sets, e.g. of very small or featureless particles, this has been shown to give much better class averages. In such cases, values in the range of 7-12 Angstroms have proven useful. If set to -1 or below, this limit is not applied."
+                },
+                {
+                    "name": "relion_refine.blush",
+                    "label": "Use Blush regularisation?",
                     "paramClass": "BooleanParam",
                     "default": false,
-                    "help": "Use masked half-maps for FSC; requires reference mask. Often useful in STA."
+                    "help": "If set to Yes, relion_refine will use a neural network to perform regularisation by denoising at every iteration, instead of the standard smoothness regularisation."
+                },
+                {
+                    "name": "relion_refine.blush_version",
+                    "label": "Blush network version",
+                    "paramClass": "EnumParam",
+                    "default": "v1.0",
+                    "choices": {
+                        "v1.0": "v1.0",
+                        "amy-v1.0": "amy-v1.0"
+                    },
+                    "help": "Which version of the Blush network to use. v1.0 is the original version published in Kiamnius et al (2024) Nature Methods; amy-v1.0 is a newer version that was trained specifically for use with amyloid filaments."
                 }
             ]
         },
         {
             "label": "Sampling",
-            "params": [
+            "params": [                       
                 {
-                    "name": "relion_classify3d.healpix_order",
-                    "label": "Initial angular sampling:",
+                    "name": "perform_image_alignment",
+                    "label": "Perform image alignment?",
+                    "paramClass": "BooleanParam",
+                    "default": true,
+                    "help": "If set to No, then rather than performing both alignment and classification, only classification will be performed. This allows the use of very focused masks. This requires that the optimal orientations of all particles are already stored in the input STAR file. GPUs cannot be used when skipping alignment."
+                },
+                {
+                    "name": "relion_refine.healpix_order",
+                    "label": "Angular sampling interval",
                     "paramClass": "EnumParam",
-                    "default": "4",
+                    "default": "2",
                     "choices": {
                         "0": "30 degrees",
                         "1": "15 degrees",
@@ -159,39 +185,64 @@
                         "7": "0.2 degrees",
                         "8": "0.1 degrees"
                     },
-                    "help": "Angular sampling (HealPix). 1.8° is typical for local searches."
+                    "help": "There are only a few discrete angular samplings possible because we use the HealPix library to generate the sampling of the first two Euler angles on the sphere. The samplings are approximate numbers and vary slightly over the sphere. If auto-sampling is used, this will be the value for the first iteration(s) only, and the sampling rate will be increased automatically after that. Only used when alignment is performed."
                 },
                 {
-                    "name": "relion_classify3d.offset_range",
-                    "label": "Initial offset range (px):",
+                    "label": "Offset search (pix)",
+                    "paramClass": "Line",
+                    "params": [
+                        {
+                            "name": "relion_refine.offset_range",
+                            "label": "range",
+                            "paramClass": "FloatParam",
+                            "default": 5,
+                            "help": "Probabilities will be calculated only for translations in a circle with this radius (in pixels). The center of this circle changes at every iteration and is placed at the optimal translation for each image in the previous iteration. If auto-sampling is used, this will be the value for the first iteration(s) only, and the sampling rate will be increased automatically after that. Only used when alignment is performed."
+                        },
+                        {
+                            "name": "relion_refine.offset_step",
+                            "label": "step",
+                            "paramClass": "FloatParam",
+                            "default": 1,
+                            "help": "Translations will be sampled with this step-size (in pixels). Translational sampling is also done using the adaptive approach. Therefore, if adaptive=1, the translations will first be evaluated on a 2x coarser grid. The value passed to relion_refine is twice this GUI value (oversampling 1), matching the RELION Class3D job. Only used when alignment is performed."
+                        }
+                    ]
+                },
+                {
+                    "name": "do_local_ang_searches",
+                    "label": "Perform local angular searches?",
+                    "paramClass": "BooleanParam",
+                    "default": false,
+                    "help": "If set to Yes, then rather than performing exhaustive angular searches, local searches within the range given below will be performed. A prior Gaussian distribution centered at the optimal orientation in the previous iteration and with a stddev of 1/3 of the range given below will be enforced. Only used when alignment is performed."
+                },
+                {
+                    "name": "relion_refine.sigma_ang",
+                    "label": "Local angular search range (deg)",
                     "paramClass": "FloatParam",
                     "default": 5,
-                    "help": "Translation search radius in pixels (--offset_range). Use small values (e.g. 2) when particles are already centred."
+                    "condition": "do_local_ang_searches == True",
+                    "help": "Local angular searches will be performed within +/- the given amount (in degrees) from the optimal orientation in the previous iteration. A Gaussian prior (also see previous option) will be applied, so that orientations closer to the optimal orientation in the previous iteration will get higher weights than those further away. RELION passes one third of this value as --sigma_ang. Only used when alignment and local angular searches are enabled."
                 },
                 {
-                    "name": "relion_classify3d.offset_step",
-                    "label": "Initial offset step (px):",
+                    "name": "relion_refine.relax_sym",
+                    "label": "Relax symmetry",
+                    "paramClass": "StringParam",
+                    "default": "",
+                    "condition": "do_local_ang_searches == True",
+                    "help": "With this option, poses related to the standard local angular search range by the given point group will also be explored. For example, if you have a pseudo-symmetric dimer A-A', refinement or classification in C1 with symmetry relaxation by C2 might be able to improve distinction between A and A'. Note that the reference must be more-or-less aligned to the convention of (pseudo-)symmetry operators. For details, see Ilca et al 2019 and Abrishami et al 2020 cited in the About dialog. Only used when local angular searches are enabled; leave empty to disable."
+                },
+                {
+                    "name": "relion_refine.allow_coarser",
+                    "label": "Allow coarser sampling?",
+                    "paramClass": "BooleanParam",
+                    "default": false,
+                    "help": "If set to Yes, the program will use coarser angular and translational samplings if the estimated accuracies of the assignments is still low in the earlier iterations. This may speed up the calculations. Only used when alignment is performed."
+                },
+                {
+                    "name": "relion_refine.sigma_tilt",
+                    "label": "Prior width on tilt angle (deg)",
                     "paramClass": "FloatParam",
-                    "default": 1,
-                    "help": "Translation step size in pixels (--offset_step)."
-                },
-                {
-                    "name": "relion_classify3d.auto_local_healpix_order",
-                    "label": "Local search from auto-sampling:",
-                    "paramClass": "EnumParam",
-                    "default": "4",
-                    "choices": {
-                        "0": "30 degrees",
-                        "1": "15 degrees",
-                        "2": "7.5 degrees",
-                        "3": "3.7 degrees",
-                        "4": "1.8 degrees",
-                        "5": "0.9 degrees",
-                        "6": "0.5 degrees",
-                        "7": "0.2 degrees",
-                        "8": "0.1 degrees"
-                    },
-                    "help": "Local angular search range. Set equal to initial sampling for local-only searches."
+                    "default": -1,
+                    "help": "The width of the prior on the tilt angle: angular searches will be +/-3 times this value. Tilt priors will be defined when particles have been picked as filaments, on spheres or on manifolds. Setting this width to a negative value will lead to no prior being used on the tilt angle. Only positive values are passed as --sigma_tilt (tomography Class3D)."
                 }
             ]
         },
@@ -200,30 +251,57 @@
             "paramClass": "Group",
             "params": [
                 {
+                    "name": "relion_refine.no_parallel_disc_io",
+                    "label": "Use parallel disc I/O?",
+                    "paramClass": "BooleanParam",
+                    "default": true,
+                    "help": "If set to Yes, all MPI followers will read their own images from disc. Otherwise, only the leader will read images and send them through the network to the followers. Parallel file systems like gluster of fhgfs are good at parallel disc I/O. NFS may break with many followers reading in parallel. If your datasets contain particles with different box sizes, you have to say Yes."
+                },
+                {
+                    "name": "relion_refine.pool",
+                    "label": "Number of pooled particles",
+                    "paramClass": "IntParam",
+                    "default": 3,
+                    "help": "Particles are processed in individual batches by MPI followers. During each batch, a stack of particle images is only opened and closed once to improve disk access times. All particle images of a single batch are read into memory together. The size of these batches is at least one particle per thread used. The nr_pooled_particles parameter controls how many particles are read together for each thread. If it is set to 3 and one uses 8 threads, batches of 3x8=24 particles will be read together. This may improve performance on systems where disk access, and particularly metadata handling of disk access, is a problem. It has a modest cost of increased RAM usage."
+                },
+                {
+                    "name": "relion_refine.pad",
+                    "label": "Skip padding?",
+                    "paramClass": "EnumParam",
+                    "choices": {
+                        "1": "Yes",
+                        "2": "No"
+                    },
+                    "default": "2",
+                    "help": "If set to Yes, the calculations will not use padding in Fourier space for better interpolation in the references. Otherwise, references are padded 2x before Fourier transforms are calculated. Skipping padding (i.e. use --pad 1) gives nearly as good results as using --pad 2, but some artifacts may appear in the corners from signal that is folded back."
+                },
+                {
+                    "name": "relion_refine.dont_combine_weights_via_disc",
+                    "label": "Combine iterations through disc?",
+                    "paramClass": "BooleanParam",
+                    "default": false,
+                    "help": "If set to Yes, at the end of every iteration all MPI followers will write out a large file with their accumulated results. The MPI leader will read in all these files, combine them all, and write out a new file with the combined results. All MPI salves will then read in the combined results. This reduces heavy load on the network, but increases load on the disc I/O. This will affect the time it takes between the progress-bar in the expectation step reaching its end (the mouse gets to the cheese) and the start of the ensuing maximisation step. It will depend on your system setup which is most efficient."
+                },
+                {
                     "name": "gpus",
-                    "label": "GPUs:",
+                    "label": "GPUs",
                     "default": 1,
                     "paramClass": "IntParam",
-                    "help": "Number of GPUs (or list of GPU IDs). Use GPU when performing alignment; can use CPU only when skip_align is Yes."
+                    "help": "Number of GPUs used for launcher process layout. --gpu is only added when alignment is performed; RELION does not use GPUs with --skip_align. Use 0 when running classification without alignment."
                 },
                 {
                     "name": "cpus",
-                    "label": "CPUs:",
+                    "label": "CPUs",
                     "default": "",
                     "paramClass": "StringParam",
-                    "help": "Number of CPUs to use for the job. Leave empty for default (10 * GPUs). If only a single number is provided, it will be the total number of CPUs. In that case, MPI processes will be 5 and the division of CPUs/5 the number of threads. You can specifiy MPIxThreads, e.g. 5x12, 9x10, etc."
-                },
-                {
-                    "name": "relion_classify3d.scratch_dir",
-                    "label": "Scratch directory:",
-                    "paramClass": "PathParam",
-                    "help": "Scratch directory for temporary files (--scratch_dir). Use a shared directory for best performance."
+                    "help": "Reserved for future launcher tuning; thread count for relion_refine follows the same pattern as other RELION STA wrappers in emwrap."
                 },
                 {
                     "name": "extra_args",
-                    "label": "Extra arguments:",
+                    "label": "Additional relion_refine arguments",
                     "paramClass": "StringParam",
-                    "help": "Extra arguments to pass to the relion_refine command."
+                    "default": "",
+                    "help": "Optional extra tokens appended to relion_refine (e.g. expert flags)."
                 }
             ]
         }

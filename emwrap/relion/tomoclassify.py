@@ -17,22 +17,18 @@
 """
 RELION 3D classification (Class3D) for subtomogram averaging.
 
-Uses relion_refine (same as 3D auto-refine) but without --auto_refine, with --K
-for number of classes, and optionally --skip_align for classification without
-alignment. See RELION STA tutorial:
-https://relion.readthedocs.io/en/release-5.0/STA_tutorial/Class3D.html
-https://tomoguide.github.io/03-tutorial/05-sta-in-relion5/
+Mirrors ``RelionJob::initialiseClass3DJob`` / ``RelionJob::getCommandsClass3DJob``
+in ``relion-source/src/pipeline_jobs.cpp`` for **tomography** and **not** a
+continuation run: ``relion_refine`` without ``--auto_refine``, with ``--K``,
+``--flatten_solvent``, optional ``--skip_align``, etc.
 
-Example command:
-  relion_refine_mpi --o Class3D/job154/run --i particles.star --ref ref.mrc
-  --K 10 --iter 25 --skip_align --flatten_solvent --zero_mask --sym C1 --ctf ...
+See RELION STA tutorial (Class3D) and TomoGuide.
 """
 
 import os
 import re
 from glob import glob
 
-from emtools.image import Image
 from emtools.jobs import Batch, Args
 from emtools.metadata import StarFile
 
@@ -44,100 +40,98 @@ class RelionTomoClassify(RelionBasePipeline):
 
     Produces multiple class volumes and particles assigned to each class.
     """
-    name = 'emw-relion-tomoclassify'
+
+    name = "emw-relion-tomoclassify"
 
     def prerun(self):
-        input_ios = self._args.get('relion_classify3d.ios')
-        if not input_ios or not str(input_ios).strip():
-            raise Exception("Input particles/optimization set (--ios) is required.")
-        if not os.path.exists(input_ios):
-            raise Exception(f"Input optimization set '{input_ios}' does not exist.")
-
-        ref_vol = self._args.get('relion_classify3d.ref')
-        if not ref_vol or not str(ref_vol).strip():
-            raise Exception("Reference map (--ref) is required.")
-        if not os.path.exists(ref_vol):
-            raise Exception(f"Reference volume '{ref_vol}' does not exist.")
-
         batch = Batch(id=self.name, path=self.workingDir)
-        self.mkdir('output')
+        only_output = 'emwrap.only_output' in self._args['extra_args']
+        if not only_output:
+            self._classify(batch)
+        self._output(batch)
 
-        subargs = self.get_subargs('relion_classify3d')
-        subargs['--ios'] = input_ios
-        subargs['--ref'] = ref_vol
+    def _classify(self, batch):
+        self._check_input("relion_refine.ios", "Input optimisation set")
+        self._check_input("relion_refine.ref", "Reference volume")
+        self._check_input("relion_refine.solvent_mask", "Solvent mask", allow_empty=True)
 
-        
-        gpus = int(self._args.get('gpus', 1))
-        cpus = max(gpus * 10, int(self._args.get('cpus', 0)))
-        mpis = gpus + 1 if gpus > 1 else 5  # FIXME
-        threads = cpus // mpis
+        gpus = int(self._args.get("gpus", 1))
+        # This is one of the inverted booleans in Relion's GUI
+        perform_align = self._args['perform_image_alignment']
 
-        args = Args({
-            'relion_refine': mpis,
-            '--o': self.join('output/run'),
-            '--dont_combine_weights_via_disc': '',
-            '--pool': 30,
-            '--pad': 2,
-            '--norm': '',
-            '--scale': '',
-            '--flatten_solvent': '',
-            '--zero_mask': '',
-            '--gpu': '',
-            '--j': threads,
-        })
+        if not perform_align and gpus > 0:
+            raise Exception(
+                "RELION does not use GPUs when skipping alignment (--skip_align). "
+                "Set GPUs to 0 or enable alignment (Perform image alignment?)."
+            )
 
-        """
-        /research/rgs01/applications/hpcf/authorized_apps/cryo_apps/emstack/scripts/relion_launcher.sh relion_refine 8 \
---ios External/job052/optimisation_set.star \
---o External/job052/output/run \
---ref External/job011/output/run_class001.mrc \
---firstiter_cc \
---ini_high 15 \
---dont_combine_weights_via_disc \
---scratch_dir /lustre_scratch/user_scratch/jdela80/relion_tomorefine \
---pool 30 \
---pad 2 \
---ctf \
---iter 25 \
---tau2_fudge 3 \
---particle_diameter 180 \
---K 5 \
---flatten_solvent \
---zero_mask \
---solvent_mask External/job013/mask.mrc \
---skip_align \
---sym D2 \
---norm \
---scale \
---j 8 
-        """
+        inverted_booleans = [
+            "firstiter_cc",
+            "dont_combine_weights_via_disc",
+            "no_parallel_disc_io"
+        ]
+        subargs = self.get_subargs(
+            "relion_refine",
+            inverted_booleans=inverted_booleans,
+            possitive=["ini_high", "sigma_tilt"],
+        )
+
+        args = Args(
+            {
+                "relion_refine": gpus + 1,
+                "--o": self.join("output/run"),
+                "--flatten_solvent": "",
+                "--norm": "",
+                "--scale": "",
+                "--j": 10,
+            }
+        )
+
+        if perform_align:
+            subargs["--gpu"] = ""
+            subargs["--oversampling"] = 1
+            subargs["--offset_step"] = float(subargs["--offset_step"]) * 2
+            if self._args['do_local_ang_searches']:
+                subargs["--sigma_ang"] = float(subargs["--sigma_ang"]) / 3.0
+            else:
+                for k in ["--sigma_ang", "--relax_sym"]:
+                    subargs.pop(k, None)
+            
+        else:
+            subargs['--skip_align'] = ''
+            # Remove some parameters not used when skipping alignment
+            for k in ["--healpix_order", "--offset_range", "--offset_step", "--sigma_ang", "--relax_sym", "--allow_coarser_sampling"]:
+                subargs.pop(k, None)
+            
+
         args.update(subargs)
-        if extra_args := self._args.get('extra_args', None):
-            args.update(Args.fromString(extra_args))
 
+        if extra := self._args.get("extra_args"):
+            args.update(Args.fromString(extra))
 
-        self.batch_execute('relion_refine', batch, args)
+        self.mkdir("output")
+        self.batch_execute("relion_refine", batch, args)
 
-        # Register output: particles with class assignments
-        out_star = self.join('output', 'run_data.star')
+    def _output(self, batch):
+
+        out_star = self.join("output", "run_data.star")
         if not os.path.exists(out_star):
             raise Exception(
                 f"relion_refine did not produce run_data.star. Check {self.join('run.out')}."
             )
 
         with StarFile(out_star) as sf:
-            o = sf.getTable('optics')
+            o = sf.getTable("optics")
             box = o[0].rlnImageSize
             ps = o[0].rlnImagePixelSize
-            N = sf.getTableSize('particles')
+            N = sf.getTableSize("particles")
 
-        # Find latest iteration class maps (run_it{N}_class001.mrc, ...)
-        output_dir = self.join('output')
-        class_pattern = os.path.join(output_dir, 'run_it*_class*.mrc')
+        output_dir = self.join("output")
+        class_pattern = os.path.join(output_dir, "run_it*_class*.mrc")
         class_files = glob(class_pattern)
         last_iter = None
         last_iter_files = []
-        iter_re = re.compile(r'run_it(\d+)_class(\d+)\.mrc')
+        iter_re = re.compile(r"run_it(\d+)_class(\d+)\.mrc")
         for p in class_files:
             m = iter_re.search(os.path.basename(p))
             if m:
@@ -155,29 +149,28 @@ class RelionTomoClassify(RelionBasePipeline):
 
         n_classes = len(last_iter_files)
         self.outputs = {
-            'TomogramParticles': {
-                'label': 'Classified Particles',
-                'type': 'TomogramParticles',
-                'info': f"{N} pts, {n_classes} classes (box: {box} px, {ps} Å/px)",
-                'files': [
-                    [out_star, 'TomogramGroupMetadata.star.relion.tomo.particles']
-                ]
+            "TomogramParticles": {
+                "label": "Classified Particles",
+                "type": "TomogramParticles",
+                "info": f"{N} pts, {n_classes} classes (box: {box} px, {ps} Å/px)",
+                "files": [
+                    [out_star, "TomogramGroupMetadata.star.relion.tomo.particles"]
+                ],
             },
         }
 
-        # Register each class volume
         for i, vol_path in enumerate(last_iter_files, start=1):
-            self.outputs[f'Volume_class{i:02d}'] = {
-                'label': f'Class {i}',
-                'type': 'Volume',
-                'info': f"box size: {box} px, {ps} Å/px",
-                'files': [
-                    [vol_path, 'TomogramGroupMetadata.star.relion.volume']
-                ]
+            self.outputs[f"Volume_class{i:02d}"] = {
+                "label": f"Class {i}",
+                "type": "Volume",
+                "info": f"box size: {box} px, {ps} Å/px",
+                "files": [
+                    [vol_path, "TomogramGroupMetadata.star.relion.volume"]
+                ],
             }
 
         self.updateBatchInfo(batch)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     RelionTomoClassify.main()
