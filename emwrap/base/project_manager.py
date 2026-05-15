@@ -393,6 +393,36 @@ class ProjectManager(FolderManager):
 
         return job
 
+    def stopJob(self, jobId):
+        """ Stop a job. """
+        job = self._getJob(jobId)
+        if not self._isActiveJob(job):
+            raise Exception("Can not stop non-running jobs.")
+
+        
+        job['status'] = STATUS_ABORTED
+        if self.exists(jobId, 'job.id'):
+            with open(self.join(jobId, 'job.id')) as f:
+                job_id = f.readline().strip()
+
+            job_params = self._readJobParams(job)
+            qname = job_params.get('queue.param.name', 'NO-QUEUE')
+
+            if queue := ProcessingConfig.get_queue(qname):
+                cancelCmd = queue['cancel'].format(job_id=job_id)
+            else:
+                raise Exception(f"Queue {qname} not found in config for stopping job {jobId}.")
+
+            try:
+                subprocess.run(shlex.split(cancelCmd), check=True, capture_output=True, text=True)
+                scriptLog = self.join(jobId, 'job.log')
+                self._log(f"Stopping CLUSTER job, {cancelCmd}", jobFile=scriptLog, flush=True)
+            except subprocess.CalledProcessError as e:
+                self._log("ERROR: Stopping CLUSTER job failed", jobFile=scriptLog)
+                self._log(f"  Error: '{e.stderr.rstrip()}'", jobFile=scriptLog)
+        self._update_pipeline_star()
+        return job
+
     def _deleteJobFolder(self, job, validate=True):
         if validate and self._isActiveJob(job):
             raise Exception("Can not delete launched or running jobs, stop them first.")
@@ -458,16 +488,16 @@ class ProjectManager(FolderManager):
                 return path.replace(k, v)
         return path
 
-    def _runCmd(self, cmd, jobId, wait=False, job_params=None):
-        def _log(msg, jobFile=None, flush=False):
-            """ Log also to a job file. """
-            self.log(msg)
-            if jobFile:
-                with open(jobFile, 'a') as f:
-                    f.write(f"\n{Pretty.now()}: {msg}\n")
-                    if flush:
-                        f.flush()
+    def _log(self, msg, jobFile=None, flush=False):
+        """ Log also to a job file. """
+        self.log(msg)
+        if jobFile:
+            with open(jobFile, 'a') as f:
+                f.write(f"\n{Pretty.now()}: {msg}\n")
+                if flush:
+                    f.flush()
 
+    def _runCmd(self, cmd, jobId, wait=False, job_params=None):
         self._saveCmd(cmd, jobId)
         qname = job_params.get('queue.param.name', 'NO-QUEUE')
         if queue := ProcessingConfig.get_queue(qname):
@@ -509,14 +539,14 @@ class ProjectManager(FolderManager):
                 'gpus': gpus,
                 'cpus': cpus,
                 'working_dir': self.path,
-                'job_out': scriptFile.replace('.script', '.out'),
-                'job_err': scriptFile.replace('.script', '.err')
+                'job_out': scriptFile.replace('job.script', 'run.out'),
+                'job_err': scriptFile.replace('job.script', 'run.err')
             })
 
             with open(queue['template'], 'r') as f:
                 template = f.read()
                                     
-            _log(f"Writing CLUSTER submission script: {scriptFile}", jobFile=scriptLog, flush=True)
+            self._log(f"Writing CLUSTER submission script: {scriptFile}", jobFile=scriptLog, flush=True)
             with open(scriptFile, 'w') as f:
                 f.write(template.format(**qparams))
 
@@ -525,16 +555,23 @@ class ProjectManager(FolderManager):
             scriptFile = self.__fixMapping(queue, scriptFile)
 
             submitCmd = submit.format(job_script=scriptFile)
-            _log(f"Executing CLUSTER submit command: {Color.green(submitCmd)}", jobFile=scriptLog, flush=True)
-            ###os.system(submitCmd)
+            self._log(f"Executing CLUSTER submit command: {Color.green(submitCmd)}", jobFile=scriptLog, flush=True)
             try:
-                subprocess.run(shlex.split(submitCmd), check=True,
+                result = subprocess.run(shlex.split(submitCmd), check=True,
                                capture_output=True, text=True)
+                job_id = result.stdout.strip()
+                if not job_id.isdigit():
+                    raise Exception(f"Unexpected submission output: {result.stdout}")
+                else:
+                    self._log(f"Submission successful, JOB_ID: {job_id}", jobFile=scriptLog, flush=True)
+                    with open(scriptFile.replace('.script', '.id'), 'w') as f:
+                        f.write(job_id)
+                    return job_id
             except subprocess.CalledProcessError as e:
-                _log("ERROR: Submission to cluster failed", jobFile=scriptLog)
-                _log(f"  Error: '{e.stderr.rstrip()}'", jobFile=scriptLog)
+                self._log("ERROR: Submission to cluster failed", jobFile=scriptLog)
+                self._log(f"  Error: '{e.stderr.rstrip()}'", jobFile=scriptLog)
                 #self.log(f"  Cluster configured in config: {ProcessingConfig._fm.join('config.json')}")
-                _log( "  Maybe try to run locally?\n", jobFile=scriptLog, flush=True)
+                self._log( "  Maybe try to run locally?\n", jobFile=scriptLog, flush=True)
         else:
             args = shlex.split(cmd)
             stdout = open(self.join(jobId, 'run.out'), 'a')
@@ -760,6 +797,9 @@ class ProjectManager(FolderManager):
         g.add_argument('--delete', '-d', nargs='+', metavar='JOB_IDS',
                        help="Delete one or more jobs.")
 
+        g.add_argument('--stop', '-t', metavar='JOB_ID',
+                       help="Stop a launched or running job.")
+
         g.add_argument('-k', '--check', action='count', default=0,
                        help='Check and/or kill processes related to this project.'
                             'Pass more than one -k to kill processes.')
@@ -831,6 +871,9 @@ class ProjectManager(FolderManager):
             jobIdOrType = args.save[0]
             params = json.loads(args.save[1])
             pm.saveJob(jobIdOrType, params)
+
+        elif args.stop:
+            pm.stopJob(args.stop)
 
         elif args.delete:
             pm.deleteJobs(args.delete)
