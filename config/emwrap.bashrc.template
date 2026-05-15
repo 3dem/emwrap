@@ -29,6 +29,7 @@ export EMWRAP_CONFIG=$(cat <<EOF
             "name": "cryoem",
             "template": "$SCRIPTS/lsf_template.sh",
             "submit": "$SCRIPTS/lsf_submit.sh {job_script}",
+            "cancel": "bkill {job_id}",
             "params": [
                 {
                     "name": "queue_name",
@@ -49,6 +50,7 @@ export EMWRAP_CONFIG=$(cat <<EOF
             "name": "cryo_core",
             "template": "$SCRIPTS/lsf_template.sh",
             "submit": "$SCRIPTS/lsf_submit.sh {job_script}",
+            "cancel": "bkill {job_id}",
             "params": [
                 {
                     "name": "queue_name",
@@ -60,7 +62,8 @@ export EMWRAP_CONFIG=$(cat <<EOF
         {
             "name": "rtx5000",
             "template": "$SCRIPTS/slurm_rtx5000_template.sh",
-            "submit": "sbatch {job_script}",
+            "submit": "$SCRIPTS/slurm_submit.sh {job_script}",
+            "cancel": "scancel {job_id}",
             "params": [
                 {
                     "name": "queue_name",

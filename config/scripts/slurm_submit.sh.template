@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Submit an LSF batch job (bsub) and print only the numeric job ID on stdout.
-# On failure (bsub error, invalid submission script, etc.),
+# Submit a SLURM batch job and print only the numeric job ID on stdout.
+# On failure (sbatch error, invalid submission script, etc.),
 # print a single line to stderr beginning with ERROR:: and exit non-zero.
 #
 # Usage: exactly one argument — path to the batch submission script.
@@ -20,26 +20,25 @@ fi
 
 output=""
 exit_code=0
-output=$(bsub <"$submit_script" 2>&1) || exit_code=$?
+output=$(sbatch --parsable "$submit_script" 2>&1) || exit_code=$?
 
 if [[ $exit_code -ne 0 ]]; then
-  echo "ERROR:: bsub failed (exit $exit_code): ${output}" >&2
+  echo "ERROR:: sbatch failed (exit $exit_code): ${output}" >&2
   exit "$exit_code"
 fi
 
-# Typical success: "Job <12345> is submitted to queue <name>." (queue name may contain '<>')
-job_id=""
-if [[ "$output" =~ Job[[:space:]]+\<([0-9]+)\> ]]; then
-  job_id="${BASH_REMATCH[1]}"
-fi
+# Federation: "jobid;cluster" — emit only the job id part
+job_id="${output%%;*}"
+job_id="${job_id//$'\r'/}"
+job_id="${job_id//$'\n'/}"
 
 if [[ -z "$job_id" ]]; then
-  echo "ERROR:: bsub succeeded but no job id could be parsed (raw output: ${output})" >&2
+  echo "ERROR:: sbatch succeeded but produced no job id (raw output: ${output})" >&2
   exit 1
 fi
 
 if [[ ! "$job_id" =~ ^[0-9]+$ ]]; then
-  echo "ERROR:: unexpected bsub output (expected numeric job id): ${output}" >&2
+  echo "ERROR:: unexpected sbatch output (expected numeric job id): ${output}" >&2
   exit 1
 fi
 
