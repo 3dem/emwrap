@@ -143,7 +143,20 @@
                     "paramClass": "StringParam",
                     "default": "",
                     "help": "Optional extra tokens appended to relion_refine (e.g. expert flags)."
-                }
+                },
+                {
+                    "label": "Launcher",
+                    "paramClass": "Group",
+                    "help": "External launcher for relion_* programs.",
+                    "params": [
+                        {
+                            "name": "launcher",
+                            "label": "RELION",
+                            "paramClass": "StringParam",
+                            "help": "Launcher to use for RELION"
+                        }
+                    ]
+                } 
             ]
         }
     ]

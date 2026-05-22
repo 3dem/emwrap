@@ -129,6 +129,19 @@
                   "paramClass": "StringParam",
                   "help": "Hidden parameter to force the use of a single GPU.",
                   "condition": "false"
+                },                
+                {
+                    "label": "Launcher",
+                    "paramClass": "Group",
+                    "help": "External launcher for pytom_* programs.",
+                    "params": [
+                        {
+                            "name": "launcher",
+                            "label": "PYTOM",
+                            "paramClass": "StringParam",
+                            "help": "Launcher to use for PYTOM"
+                        }
+                    ]
                 }  
             ]
         }
