@@ -43,7 +43,7 @@ class PyTom:
         batch.create()
         outputDir = batch.mkdir('output')
         fm = FolderManager(outputDir)
-        launcher = ProcessingPipeline.get_launcher('PYTOM')
+        launcher = kwargs.get('launcher', '') or ProcessingPipeline.get_launcher('PYTOM')
 
         # Initialize with the launcher and load parameters from acquisition
         args = {'pytom_match_template.py': ''}

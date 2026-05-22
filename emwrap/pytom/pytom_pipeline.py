@@ -40,6 +40,7 @@ class PyTomPipeline(ProcessingPipeline):
         ProcessingPipeline.__init__(self, args, output)
         # FIXME add support to comma separated values for parallels in batches
         self.gpuList = [self.get_gpu_list(args['gpus'], as_string=True)]
+        self.launcher = args.get('launcher', '') or ProcessingPipeline.get_launcher('PYTOM')
 
         self.acq = self.loadAcquisition()
 
@@ -64,7 +65,7 @@ class PyTomPipeline(ProcessingPipeline):
             args = dict(self._pytom_args)
             args['pytom']['g'] = gpu
             pytom = PyTom(self.acq, args)
-            pytom.process_batch(batch)
+            pytom.process_batch(batch, launcher=self.launcher)
             return batch
 
         return _pytom

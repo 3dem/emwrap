@@ -31,7 +31,7 @@ class RelionBasePipeline(ProcessingPipeline):
                                  possitive=possitive)
 
     def _get_launcher(self):
-        return ProcessingPipeline.get_launcher('RELION')
+        return self._args.get('launcher', '') or ProcessingPipeline.get_launcher('RELION')
 
     def _check_input(self, key, name, allow_empty=False):
         fn = self._args.get(key, '')
