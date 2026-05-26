@@ -54,6 +54,9 @@ class WarpMtoolsCreate(WarpBasePipeline):
                 raise Exception("input_population is required when not creating a new population.")
             pop_path = input_population
 
+        if not self.exists(pop_path):
+            raise Exception(f"create_population: Error, population file was not generated: {pop_path}")
+
         self.log(f"Importing import folder from previous WARP run: {warpFolder}")
         self._importInputs(warpFolder, keys=['fs', 'fss', 'ts', 'tss', 'tm'])
 

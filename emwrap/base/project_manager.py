@@ -266,7 +266,7 @@ class ProjectManager(FolderManager):
         def _new_value(v, parents):
             for p in parents:
                 if isinstance(v, str) and v.startswith(p):
-                    return v.replace(p, newIdsDict[p])
+                    return v.replace(p, newIdsDict[p]) if p in newIdsDict else ''
             return v
 
         while toDuplicate:

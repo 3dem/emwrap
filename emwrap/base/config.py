@@ -102,6 +102,19 @@ class ProcessingConfig:
             return json.load(f)
 
     @classmethod
+    def save_workflow(cls, workflowId, workflowDef):
+        workflowFile = cls.get_workflow_file(workflowId)
+
+        if not os.path.exists(workflowFile):
+            raise Exception(f"Workflow file: {Color.red(workflowFile)} does not exists.")
+
+        with open(workflowFile, 'w') as f:
+            json.dump(workflowDef, f, indent=4)
+            f.write('\n')
+
+        return workflowFile
+
+    @classmethod
     def get_job_launcher(cls, jobtype):
         return cls.get_job_conf(jobtype).get('launcher', None)
 
@@ -142,6 +155,164 @@ class ProcessingConfig:
     @classmethod
     def print_config(cls):
         print(json.dumps(cls._get_config(), indent=4))
+
+    @classmethod
+    def get_scripts_dir(cls):
+        cls.scripts_dir = os.environ.get('SCRIPTS', '')
+        return cls.scripts_dir
+
+    @classmethod
+    def get_launcher_info(cls, item):
+        launcher = item.get('launcher', '')
+
+        if not launcher:
+            return {
+                'launcher': '',
+                'program': '',
+                'arguments': '',
+                'display_program': '',
+                'display': 'MISSING launcher.',
+                'exists': False,
+                'status': 'error',
+                'status_label': 'Missing'
+            }
+
+        parts = launcher.split()
+        program = parts[0]
+        arguments = ' '.join(parts[1:])
+        display_program = program
+        scripts_dir = cls.get_scripts_dir()
+
+        if scripts_dir and program.startswith(scripts_dir):
+            display_program = program.replace(scripts_dir, '$SCRIPTS')
+
+        exists = os.path.exists(program)
+
+        return {
+            'launcher': launcher,
+            'program': program,
+            'arguments': arguments,
+            'display_program': display_program,
+            'display': ' '.join(p for p in [display_program, arguments] if p),
+            'exists': exists,
+            'status': 'ok' if exists else 'error',
+            'status_label': 'OK' if exists else 'Missing executable'
+        }
+
+    @classmethod
+    def get_config_report(cls):
+        conf = cls._get_config()
+
+        if not conf:
+            raise Exception("Configuration is not valid.")
+
+        scripts_dir = cls.get_scripts_dir()
+        workflows_dir = conf.get('workflows', '')
+        workflows_exists = bool(workflows_dir) and os.path.exists(workflows_dir)
+        workflow_files = []
+        workflow_rows = []
+
+        if workflows_exists:
+            workflow_files = sorted(w for w in os.listdir(workflows_dir)
+                                    if w.endswith('.json'))
+            workflow_rows = [
+                {
+                    'name': workflow_file,
+                    'workflow_id': os.path.splitext(workflow_file)[0]
+                }
+                for workflow_file in workflow_files
+            ]
+
+        required_keys = ['jobs', 'programs', 'forms']
+        for key in required_keys:
+            if not conf.get(key, None):
+                raise Exception(f"Configuration is not valid: '{key}' is required.")
+
+        forms_dir = conf.get('forms', '')
+        forms_exists = bool(forms_dir) and os.path.exists(forms_dir)
+
+        def _count_value(value):
+            if isinstance(value, (dict, list, tuple, set)):
+                return len(value)
+            return 0
+
+        summary = [
+            {
+                'label': 'SCRIPTS',
+                'value': scripts_dir or 'NO SCRIPTS DIR SET',
+                'status': 'ok' if scripts_dir else 'warning',
+                'status_label': 'Configured' if scripts_dir else 'Unset',
+                'validation': 'Displayed by check_config',
+                'details': 'Used to shorten launcher paths.'
+            },
+            {
+                'label': 'WORKFLOWS',
+                'value': workflows_dir or 'NO WORKFLOWS DIR SET',
+                'status': 'ok' if workflows_exists else 'error' if workflows_dir else 'warning',
+                'status_label': 'OK' if workflows_exists else 'Missing dir' if workflows_dir else 'Unset',
+                'validation': 'Directory must exist when configured',
+                'details': f'{len(workflow_files)} workflow files found' if workflows_exists
+                           else 'No workflows directory configured' if not workflows_dir
+                           else 'WORKFLOWS DIR DOES NOT EXIST'
+            },
+            {
+                'label': 'FORMS',
+                'value': forms_dir or 'MISSING',
+                'status': 'ok' if forms_exists else 'warning' if forms_dir else 'error',
+                'status_label': 'OK' if forms_exists else 'Path missing' if forms_dir else 'Missing',
+                'validation': 'Required by check_config',
+                'details': 'Directory existence is shown for convenience.'
+            },
+            {
+                'label': 'JOBS',
+                'value': f"{_count_value(conf.get('jobs', {}))} configured",
+                'status': 'ok',
+                'status_label': 'OK',
+                'validation': 'Required by check_config',
+                'details': 'Configured processing job types.'
+            },
+            {
+                'label': 'PROGRAMS',
+                'value': f"{_count_value(conf.get('programs', {}))} configured",
+                'status': 'ok',
+                'status_label': 'OK',
+                'validation': 'Required by check_config',
+                'details': 'Configured external program launchers.'
+            }
+        ]
+
+        job_rows = []
+        for job_name, job_conf in sorted(conf.get('jobs', {}).items()):
+            launcher_info = cls.get_launcher_info(job_conf)
+            form_file = cls.get_job_form_file(job_name)
+            job_rows.append({
+                'name': job_name,
+                'launcher': launcher_info['display'],
+                'launcher_status': launcher_info['status'],
+                'launcher_status_label': launcher_info['status_label'],
+                'form_file': form_file,
+                'form_exists': os.path.exists(form_file),
+                'form_status': 'ok' if os.path.exists(form_file) else 'warning',
+                'form_status_label': 'OK' if os.path.exists(form_file) else 'Missing form'
+            })
+
+        program_rows = []
+        for program_name, program_conf in sorted(conf.get('programs', {}).items()):
+            launcher_info = cls.get_launcher_info(program_conf)
+            program_rows.append({
+                'name': program_name,
+                'launcher': launcher_info['display'],
+                'launcher_status': launcher_info['status'],
+                'launcher_status_label': launcher_info['status_label']
+            })
+
+        return {
+            'summary': summary,
+            'workflow_files': workflow_files,
+            'workflow_rows': workflow_rows,
+            'job_rows': job_rows,
+            'program_rows': program_rows
+        }
     
     @classmethod
     def check_config(cls):
@@ -151,30 +322,40 @@ class ProcessingConfig:
         if not conf:
             raise Exception("Configuration is not valid.")
 
-        if 'SCRIPTS' in os.environ:
-            print(f"\n{Color.cyan('SCRIPTS')}={Color.bold(os.environ['SCRIPTS'])}")
-            cls.scripts_dir = os.environ['SCRIPTS']
-        else:
-            cls.scripts_dir = 'NO SCRIPTS DIR SET'
+        report = cls.get_config_report()
+        summary = {row['label']: row for row in report['summary']}
 
-        
-        for key in ['jobs', 'programs', 'forms']:
-            if not conf.get(key, None):
-                raise Exception(f"Configuration is not valid: '{key}' is required.")
+        if scripts_dir := cls.get_scripts_dir():
+            print(f"\n{Color.cyan('SCRIPTS')}={Color.bold(scripts_dir)}")
+        else:
+            print(f"\n{Color.cyan('SCRIPTS')}={Color.red(summary['SCRIPTS']['value'])}")
+
+        workflows_dir = conf.get('workflows', 'NO WORKFLOWS DIR SET')   
+        if workflows_dir:
+            if os.path.exists(workflows_dir):
+                print(f"\n{Color.cyan('WORKFLOWS')}={Color.bold(workflows_dir)}")
+                for workflow in report['workflow_files']:
+                    print(f"  {Color.blue(workflow)}")
+            else:
+                print(f"\n{Color.cyan('WORKFLOWS')}={Color.red('WORKFLOWS DIR DOES NOT EXIST')}")
+        else:
+            print(f"\n{Color.cyan('WORKFLOWS')}={Color.red('NO WORKFLOWS DIR SET')}")
 
         cls.check_job_launchers(conf)
         cls.check_programs(conf)
 
     @classmethod
     def _check_launcher(cls, item):
-        if launcher := item.get('launcher', None):
-            parts = launcher.split()
-            prog = parts[0]
-            color = Color.green if os.path.exists(prog) else Color.red
-            if prog.startswith(cls.scripts_dir):
-                prog = prog.replace(cls.scripts_dir, '$SCRIPTS')
-            launcher_line = f"{color(prog)} {' '.join(parts[1:])}"
-            
+        launcher_info = cls.get_launcher_info(item)
+
+        if launcher_info['launcher']:
+            color = Color.green if launcher_info['exists'] else Color.red
+            launcher_line = ' '.join(
+                p for p in [
+                    color(launcher_info['display_program']),
+                    launcher_info['arguments']
+                ] if p
+            )
         else:
             launcher_line = Color.red(f"MISSING launcher.")
 
