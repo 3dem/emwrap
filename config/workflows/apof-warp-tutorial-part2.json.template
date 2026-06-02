@@ -1,0 +1,225 @@
+{
+    "name": "ApoF - M Refinements",
+    "description": "M refinement part of the same Warp Apoferritn tutorial.",
+    "jobs": [
+        {
+            "jobid": "External/job012",
+            "jobtype": "emw-warp-mcore",
+            "params": {
+                "extra_mcore": "",
+                "gpus": "4",
+                "mcore.ctf_cs": false,
+                "mcore.ctf_defocus": false,
+                "mcore.ctf_defocusexhaustive": false,
+                "mcore.ctf_zernike2": false,
+                "mcore.ctf_zernike3": false,
+                "mcore.ctf_zernike4": false,
+                "mcore.ctf_zernike5": false,
+                "mcore.iter": "0",
+                "mcore.perdevice_refine": "2",
+                "mcore.population": "External/job011/m/ApoF.population",
+                "mcore.refine_doming": false,
+                "mcore.refine_imagewarp": "",
+                "mcore.refine_mag": false,
+                "mcore.refine_particles": false,
+                "mcore.refine_stageangles": false
+            }
+        },
+        {
+            "jobid": "External/job013",
+            "jobtype": "emw-warp-mcore",
+            "params": {
+                "extra_mcore": "",
+                "gpus": "4",
+                "mcore.ctf_cs": false,
+                "mcore.ctf_defocus": true,
+                "mcore.ctf_defocusexhaustive": true,
+                "mcore.ctf_zernike2": false,
+                "mcore.ctf_zernike3": false,
+                "mcore.ctf_zernike4": false,
+                "mcore.ctf_zernike5": false,
+                "mcore.iter": "",
+                "mcore.perdevice_refine": "2",
+                "mcore.population": "External/job012/m/ApoF.population",
+                "mcore.refine_doming": false,
+                "mcore.refine_imagewarp": "3x3",
+                "mcore.refine_mag": false,
+                "mcore.refine_particles": true,
+                "mcore.refine_stageangles": false
+            }
+        },
+        {
+            "jobid": "External/job014",
+            "jobtype": "emw-warp-mcore",
+            "params": {
+                "extra_mcore": "",
+                "gpus": "4",
+                "mcore.ctf_cs": false,
+                "mcore.ctf_defocus": true,
+                "mcore.ctf_defocusexhaustive": false,
+                "mcore.ctf_zernike2": false,
+                "mcore.ctf_zernike3": false,
+                "mcore.ctf_zernike4": false,
+                "mcore.ctf_zernike5": false,
+                "mcore.iter": "",
+                "mcore.perdevice_refine": "2",
+                "mcore.population": "External/job013/m/ApoF.population",
+                "mcore.refine_doming": false,
+                "mcore.refine_imagewarp": "3x3",
+                "mcore.refine_mag": false,
+                "mcore.refine_particles": true,
+                "mcore.refine_stageangles": false
+            }
+        },
+        {
+            "jobid": "External/job015",
+            "jobtype": "emw-warp-mcore",
+            "params": {
+                "extra_mcore": "",
+                "gpus": "4",
+                "mcore.ctf_cs": false,
+                "mcore.ctf_defocus": false,
+                "mcore.ctf_defocusexhaustive": false,
+                "mcore.ctf_zernike2": false,
+                "mcore.ctf_zernike3": false,
+                "mcore.ctf_zernike4": false,
+                "mcore.ctf_zernike5": false,
+                "mcore.iter": "",
+                "mcore.perdevice_refine": "2",
+                "mcore.population": "External/job014/m/ApoF.population",
+                "mcore.refine_doming": false,
+                "mcore.refine_imagewarp": "3x3",
+                "mcore.refine_mag": false,
+                "mcore.refine_particles": true,
+                "mcore.refine_stageangles": true
+            }
+        },
+        {
+            "jobid": "External/job016",
+            "jobtype": "emw-warp-mcore",
+            "params": {
+                "extra_mcore": "",
+                "gpus": "4",
+                "mcore.ctf_cs": true,
+                "mcore.ctf_defocus": true,
+                "mcore.ctf_defocusexhaustive": false,
+                "mcore.ctf_zernike2": false,
+                "mcore.ctf_zernike3": true,
+                "mcore.ctf_zernike4": false,
+                "mcore.ctf_zernike5": false,
+                "mcore.iter": "",
+                "mcore.perdevice_refine": "2",
+                "mcore.population": "External/job015/m/ApoF.population",
+                "mcore.refine_doming": false,
+                "mcore.refine_imagewarp": "3x3",
+                "mcore.refine_mag": true,
+                "mcore.refine_particles": true,
+                "mcore.refine_stageangles": false
+            }
+        },
+        {
+            "jobid": "External/job017",
+            "jobtype": "emw-warp-estimate_weights",
+            "params": {
+                "estimate_weights.population": "External/job016/m/ApoF.population",
+                "estimate_weights.resolve_frames": false,
+                "estimate_weights.resolve_items": true,
+                "estimate_weights.source": "",
+                "extra_estimate_weights": "",
+                "gpus": "1"
+            }
+        },
+        {
+            "jobid": "External/job018",
+            "jobtype": "emw-warp-mcore",
+            "params": {
+                "extra_mcore": "",
+                "gpus": "4",
+                "mcore.ctf_cs": false,
+                "mcore.ctf_defocus": false,
+                "mcore.ctf_defocusexhaustive": false,
+                "mcore.ctf_zernike2": false,
+                "mcore.ctf_zernike3": false,
+                "mcore.ctf_zernike4": false,
+                "mcore.ctf_zernike5": false,
+                "mcore.iter": "",
+                "mcore.perdevice_refine": "2",
+                "mcore.population": "External/job017/m/ApoF.population",
+                "mcore.refine_doming": false,
+                "mcore.refine_imagewarp": "",
+                "mcore.refine_mag": false,
+                "mcore.refine_particles": false,
+                "mcore.refine_stageangles": false
+            }
+        },
+        {
+            "jobid": "External/job019",
+            "jobtype": "emw-warp-estimate_weights",
+            "params": {
+                "estimate_weights.population": "External/job018/m/ApoF.population",
+                "estimate_weights.resolve_frames": true,
+                "estimate_weights.resolve_items": false,
+                "estimate_weights.source": "",
+                "extra_estimate_weights": "",
+                "gpus": "1"
+            }
+        },
+        {
+            "jobid": "External/job020",
+            "jobtype": "emw-warp-mcore",
+            "params": {
+                "extra_mcore": "",
+                "gpus": "4",
+                "mcore.ctf_cs": false,
+                "mcore.ctf_defocus": false,
+                "mcore.ctf_defocusexhaustive": false,
+                "mcore.ctf_zernike2": false,
+                "mcore.ctf_zernike3": false,
+                "mcore.ctf_zernike4": false,
+                "mcore.ctf_zernike5": false,
+                "mcore.iter": "",
+                "mcore.perdevice_refine": "2",
+                "mcore.population": "External/job019/m/ApoF.population",
+                "mcore.refine_doming": false,
+                "mcore.refine_imagewarp": "",
+                "mcore.refine_mag": false,
+                "mcore.refine_particles": true,
+                "mcore.refine_stageangles": false
+            }
+        },
+        {
+            "jobid": "External/job021",
+            "jobtype": "emw-warp-mtools_resample",
+            "params": {
+                "extra_resample": "",
+                "gpus": "1",
+                "resample_trajectories.population": "External/job020/m/ApoF.population",
+                "resample_trajectories.samples": "2",
+                "resample_trajectories.species": ""
+            }
+        },
+        {
+            "jobid": "External/job022",
+            "jobtype": "emw-warp-mcore",
+            "params": {
+                "extra_mcore": "",
+                "gpus": "4",
+                "mcore.ctf_cs": true,
+                "mcore.ctf_defocus": true,
+                "mcore.ctf_defocusexhaustive": false,
+                "mcore.ctf_zernike2": false,
+                "mcore.ctf_zernike3": true,
+                "mcore.ctf_zernike4": false,
+                "mcore.ctf_zernike5": false,
+                "mcore.iter": "",
+                "mcore.perdevice_refine": "2",
+                "mcore.population": "External/job021/m/ApoF.population",
+                "mcore.refine_doming": false,
+                "mcore.refine_imagewarp": "3x3",
+                "mcore.refine_mag": true,
+                "mcore.refine_particles": true,
+                "mcore.refine_stageangles": true
+            }
+        }
+    ]
+}

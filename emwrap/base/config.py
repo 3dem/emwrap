@@ -102,6 +102,38 @@ class ProcessingConfig:
             return json.load(f)
 
     @classmethod
+    def get_workflows_dir(cls):
+        return cls._get_config('workflows', '')
+
+    @classmethod
+    def list_workflows(cls):
+        """Return title and description metadata for each configured workflow."""
+        workflows_dir = cls.get_workflows_dir()
+        if not workflows_dir or not os.path.exists(workflows_dir):
+            return []
+
+        workflows = []
+        for workflow_file in sorted(w for w in os.listdir(workflows_dir)
+                                     if w.endswith('.json')):
+            workflow_id = os.path.splitext(workflow_file)[0]
+            try:
+                workflow_def = cls.get_workflow(workflow_id)
+                title = workflow_def.get('title') or workflow_def.get('name', workflow_id)
+                description = workflow_def.get('description', '')
+            except Exception:
+                title = workflow_id
+                description = ''
+
+            workflows.append({
+                'id': workflow_id,
+                'file': workflow_file,
+                'title': title,
+                'description': description,
+            })
+
+        return workflows
+
+    @classmethod
     def save_workflow(cls, workflowId, workflowDef):
         workflowFile = cls.get_workflow_file(workflowId)
 

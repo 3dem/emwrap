@@ -45,6 +45,13 @@ JOB_STATUS_FILES = {
     'RELION_JOB_EXIT_ABORTED': STATUS_ABORTED
 }
 
+
+def _param_references_job(param_value, job_id):
+    """Return True when a param value points at a job folder or its outputs."""
+    if not isinstance(param_value, str):
+        return False
+    return param_value == job_id or param_value.startswith(f'{job_id}/')
+
 JOB_STATUS_ACTIVE = [STATUS_LAUNCHED, STATUS_RUNNING]
 
 
@@ -201,7 +208,7 @@ class ProjectManager(FolderManager):
         job.clearInputs()
         for k, v in params.items():
             for job2 in self._wf.jobs():
-                if isinstance(v, str) and job2.id in v:
+                if _param_references_job(v, job2.id):
                     # In this case the saved job is taking an input from this job
                     data = job2.getOutput(v)
                     if data is None:
@@ -253,34 +260,43 @@ class ProjectManager(FolderManager):
         """
         # Compute graph with dependencies
         for jobId, jobInfo in jobDict.items():
-            for k, v in jobInfo['params'].items():
+            for key, value in (jobInfo.get('params') or {}).items():
                 for jobId2 in jobDict:
-                    if isinstance(v, str) and v.startswith(jobId2):
+                    if jobId2 != jobId and _param_references_job(value, jobId2):
                         jobInfo['parents'].add(jobId2)
                         jobDict[jobId2]['children'].add(jobId)
 
-        # Let's start with root nodes
-        toDuplicate = [jobId for jobId in jobDict if not jobDict[jobId]['parents']]
+        # Instanciate in dependency order; jobs with multiple parents are created once
+        # after all of their parents exist in newIdsDict.
         newIdsDict = {}  # Map old ids to new ids
+        remaining = set(jobDict.keys())
 
         def _new_value(v, parents):
-            for p in parents:
-                if isinstance(v, str) and v.startswith(p):
-                    return v.replace(p, newIdsDict[p]) if p in newIdsDict else ''
+            for p in sorted(parents, key=len, reverse=True):
+                if _param_references_job(v, p):
+                    return v.replace(p, newIdsDict[p], 1) if p in newIdsDict else ''
             return v
 
-        while toDuplicate:
-            jobId = toDuplicate.pop(0)
-            jobInfo = jobDict[jobId]
-            params = jobInfo['params']
-            # Fix the params with the new ids of the parents
-            new_params = {k: _new_value(v, jobInfo['parents'])
-                          for k, v in params.items()}
-            newJob = self.saveJob(jobInfo['jobtype'], new_params)
-            newIdsDict[jobId] = newJob.id
-            toDuplicate.extend(jobInfo['children'])
+        while remaining:
+            ready = [
+                jobId for jobId in remaining
+                if jobDict[jobId]['parents'].issubset(newIdsDict)
+            ]
+            if not ready:
+                raise Exception(
+                    "Workflow job dependency cycle or missing parent references."
+                )
 
-        return list(newIdsDict.values())
+            for jobId in ready:
+                jobInfo = jobDict[jobId]
+                params = jobInfo['params']
+                new_params = {k: _new_value(v, jobInfo['parents'])
+                              for k, v in params.items()}
+                newJob = self.saveJob(jobInfo['jobtype'], new_params)
+                newIdsDict[jobId] = newJob.id
+                remaining.remove(jobId)
+
+        return newIdsDict
 
     def duplicateJobs(self, jobIds):
         """ Duplicate one or many jobs.
