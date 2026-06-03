@@ -23,11 +23,11 @@ from emtools.utils import Color, Process, FolderManager
 from emtools.jobs import Args
 from emtools.metadata import Table, Acquisition, StarFile, RelionStar, WarpPopulation
 from emtools.jobs import BatchManager
+from emwrap.base.config import ProcessingConfig
 
 
 class MockWarpApoF:
-    # FIXME: Read this from the config
-    path = '/Users/jdela80/work/data/TOMO/WarpTutorial2'
+    path = ProcessingConfig.get_mockup_data('WarpApoF')
     fm = FolderManager(path)
 
     acquisition = Acquisition(
@@ -384,6 +384,7 @@ class MockWarpApoF:
 
     def main(self):
         print(f">>> This is a {Color.blue('EMWRAP_MOCKUP')} program, running on the server.")
+        print(f">>> Mockup data path: {self.path}")
         program = sys.argv[1]
         functionMap = {
             'WarpTools': '_runWarpTools',

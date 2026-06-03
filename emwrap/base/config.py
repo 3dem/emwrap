@@ -42,6 +42,14 @@ class ProcessingConfig:
     def get_programs(cls):
         return cls._get_config('programs')
 
+    @classmethod
+    def get_mockup(cls, name):
+        return cls._get_config('mockup', {}).get(name, {})
+
+    @classmethod
+    def get_mockup_data(cls, name):
+        return cls.get_mockup(name).get('data', '')
+
     # @classmethod
     # def get_cluster(cls):
     #     return cls._get_config('cluster')
