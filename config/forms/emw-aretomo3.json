@@ -1,0 +1,86 @@
+{
+    "name": "emw-aretomo3",
+    "help": "Wrapper to run aretomo3 automated reconstruction. \n\n*REFERENCES*:\n[[https://warpem.github.io/warp/reference/warptools/api/tilt_series/?h=ts_aretomo#ts_aretomo][ts_aretomo]]",
+    "sections": [
+        {
+            "label": "Import",
+            "params": [
+                {
+                    "name": "input_tiltseries",
+                    "label": "Input tilt series:",
+                    "pattern": "",
+                    "help": "STAR file with input tilt-series",
+                    "paramClass": "PathParam",
+                    "pointerClass": "TiltSeries"
+                },
+                {
+                    "name": "ts_import.min_ntilts",
+                    "label": "Min number of tilts",
+                    "help": "",
+                    "default": 35
+                },
+                {
+                    "name": "ts_import.override_axis",
+                    "label": "Angle for Tilt Axis (deg)",
+                    "default": 85,
+                    "paramClass": "FloatParam",
+                    "help": ""
+                },
+                {
+                    "name": "create_settings.tomo_dimensions",
+                    "label": "Tomogram dimensions:",
+                    "default": "4096x4096x2000",
+                    "help": ""
+                },
+                {
+                    "name": "extra_ts_import",
+                    "label": "ts_import extra arguments",
+                    "paramClass": "StringParam",
+                    "help": "Extra arguments to pass to ts_import"
+                }
+            ]
+        },
+        {
+            "label": "Aretomo3",
+            "params": [
+            ]
+        },
+        {
+            "label": "Compute",
+            "params": [
+                {
+                    "name": "gpus",
+                    "label": "GPUs",                    
+                    "help": "If it is a single number (N), it will represent the total number of GPUs (0..N-1). It there are multiple values, it will be the specific GPUs ID."
+                },
+                {
+                    "name": "ts_aretomo.perdevice",
+                    "label": "Processes per device",
+                    "default": 2,
+                    "paramClass": "IntParam",
+                    "help": "(--per_device in ts_aretomo)"
+                },
+                {
+                    "label": "Launchers",
+                    "paramClass": "Group",
+                    "help": "Launchers to use for the different programs",
+                    "collapsed": true,
+                    "params": [
+                        {
+                            "name": "launcher_warp",
+                            "label": "WARP",
+                            "paramClass": "StringParam",
+                            "help": "Launcher to use for Warp"
+                        },
+                        {
+                            "name": "launcher_aretomo",
+                            "label": "ARETOMO",
+                            "paramClass": "StringParam",
+                            "help": "Launcher to use for Aretomo"
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}
