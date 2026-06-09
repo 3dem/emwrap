@@ -284,6 +284,7 @@ class WarpBaseTsAlign(WarpBasePipeline):
         tsAllTable = StarFile.getTableFromFile('global', inputTs)
         N, x, y, n, ps = self._getInfo(tsAllTable)
 
+        # FIXME: Remove input information, it should be taken from the output of the previous step
         self.inputs = {
             'TiltSeries': {
                 'label': 'Tilt Series',

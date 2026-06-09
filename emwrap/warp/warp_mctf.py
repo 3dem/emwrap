@@ -30,7 +30,7 @@ from .warp import WarpBasePipeline
 class WarpMotionCtf(WarpBasePipeline):
     """ Warp wrapper to run Motion correction and CTF estimation.
     It will run:
-        - create_settings -> frame_series.setting
+        - create_settings -> frame_series.settings
         - fs_motion_and_ctf
     """
     name = 'emw-warp-mctf'
@@ -81,6 +81,7 @@ class WarpMotionCtf(WarpBasePipeline):
                     dims = Image.get_dimensions(frameRow.rlnMicrographMovieName)
 
         x, y, n = dims
+        # FIXME: Remove input information, it should be taken from the output of the previous step
         self.inputs = {
             'FrameSeries': {
                 'label': 'Frame Series',

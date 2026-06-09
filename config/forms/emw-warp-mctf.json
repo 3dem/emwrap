@@ -1,5 +1,6 @@
 {
     "name": "emw-warp-mctf",
+    "label": "Warp - Motioncor and CTF",
     "help": "Warp wrapper to run the motion correction and CTF estimation. It will run the following programs:\n\n[[https://warpem.github.io/warp/reference/warptools/api/frame_series/?h=fs_motion_and_ctf][fs_motion_and_ctf]]",
     "sections": [        
         {
