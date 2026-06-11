@@ -81,6 +81,7 @@ class WarpMotionCtf(WarpBasePipeline):
                     dims = Image.get_dimensions(frameRow.rlnMicrographMovieName)
 
         x, y, n = dims
+
         # FIXME: Remove input information, it should be taken from the output of the previous step
         self.inputs = {
             'FrameSeries': {
@@ -269,8 +270,9 @@ class WarpMotionCtf(WarpBasePipeline):
 
                 # xml and average mrc already validated for whole TS above
                 ctf = WarpXml(movieXml).getDict('Movie', 'CTF', 'Param')
-                defocusDict['rlnDefocusU'] = _float(ctf['Defocus'])
-                defocusDict['rlnCtfAstigmatism'] = _float(ctf['DefocusDelta'])
+                
+                defocusDict['rlnDefocusU'] = _float(ctf['Defocus'] * 10000)  # Convert to Angstroms
+                defocusDict['rlnCtfAstigmatism'] = _float(ctf['DefocusDelta'] * 10000)  # Convert to Angstroms
                 defocusDict['rlnDefocusV'] = _float(defocusDict['rlnDefocusU'] + defocusDict['rlnCtfAstigmatism'])
                 defocusDict['rlnDefocusAngle'] = _float(ctf['DefocusAngle'])
 
