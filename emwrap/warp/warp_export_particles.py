@@ -54,7 +54,7 @@ class WarpExportParticles(WarpBasePipeline):
 
         self.log(f"Input star file: {Color.bold(inTomoStar)}")
         N = len(inTable)
-        n = sum(row.rlnCoordinatesCount for row in inTable)
+        n = sum(row.rlnParticleNumber for row in inTable)
         self.log(f"Total input tomograms: {Color.green(N)}")
 
         self.log(f"Input number of particles: {Color.green(n)}")

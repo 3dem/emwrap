@@ -100,6 +100,13 @@ class PyTom:
                     })
                     batch.call(launcher, args)
                     _rename_star('tophat')
+
+                # Run with relion5 compatibility mode
+                args.update({
+                    '--relion5-comp': ""
+                })
+                batch.call(launcher, args)
+                _rename_star('relion5')
         else:
             batch.log("No output json files, not running pytom_extract")
 

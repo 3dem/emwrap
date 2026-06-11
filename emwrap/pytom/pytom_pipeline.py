@@ -27,7 +27,7 @@ from emtools.utils import Color, FolderManager, Path, Process
 from emtools.metadata import StarFile, Acquisition, StarMonitor, Table
 from emtools.jobs import Batch
 from emtools.image import Image
-from emwrap.base import ProcessingPipeline, getTomoPixelSize
+from emwrap.base import ProcessingPipeline, getTomoPixelSize, getTomogram
 
 from .pytom import PyTom
 
@@ -89,7 +89,7 @@ class PyTomPipeline(ProcessingPipeline):
 
             rowDict.update({
                 'rlnCoordinatesMetadata': coordsStarPath,
-                'rlnCoordinatesCount': nCoords
+                'rlnParticleNumber': nCoords
             })
             self.outTable.addRowValues(**rowDict)
             with StarFile(self.outTomoStar, 'w') as sfOut:
@@ -127,7 +127,7 @@ class PyTomPipeline(ProcessingPipeline):
             self.log(f"Previously processed tomograms: {Color.cyan(counter)}")
             blacklist = self.outTable
         else:
-            extraLabels = ['rlnCoordinatesMetadata', 'rlnCoordinatesCount']
+            extraLabels = ['rlnCoordinatesMetadata', 'rlnParticleNumber']
             self.outTable = Table(inTable.getColumnNames() + extraLabels)
 
         self.acq.update(self._loadAcquisitionFromRow(inTable[0]))
@@ -153,7 +153,7 @@ class PyTomPipeline(ProcessingPipeline):
             yield Batch(id=batchId, index=counter,
                         rowDict=row._asdict(),
                         path=os.path.join(self.tmpDir, batchId),
-                        tsName=tsName, tomogram=row.rlnTomogram,
+                        tsName=tsName, tomogram=getTomogram(row),
                         defocus=float(row.rlnDefocus),
                         tilt_angles=[float(r.wrpAngleTilt) for r in t],
                         dose_accumulation=[float(r.wrpDose) for r in t])
@@ -163,7 +163,7 @@ class PyTomPipeline(ProcessingPipeline):
         first = inputTomoTable[0]
         N = len(inputTomoTable)
         if self._dims is None:
-            self._dims = Image.get_dimensions(first.rlnTomogram)
+            self._dims = Image.get_dimensions(getTomogram(first))
         x, y, n = self._dims
         ps = getTomoPixelSize(first)
         bin = first.rlnTomoTomogramBinning
@@ -180,7 +180,7 @@ class PyTomPipeline(ProcessingPipeline):
 
     def _updateOutput(self):
         N = len(self.outTable)
-        n = sum(row.rlnCoordinatesCount for row in self.outTable)
+        n = sum(row.rlnParticleNumber for row in self.outTable)
         self.outputs = {
             'TomogramCoordinates': {
                 'label': 'Tomogram Coordinates',
