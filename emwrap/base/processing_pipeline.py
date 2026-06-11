@@ -139,7 +139,7 @@ class ProcessingPipeline(Pipeline, FolderManager):
 
     def log_cmd(self, args):
         """ Log a command to the logfile. """
-        with open(self.join('commands.txt'), 'a') as f:
+        with open(self.join('note.txt'), 'a') as f:
             e = ''
             logStr = ' \\\n'.join("%s %s" % (k, v) for k, v in args.items())
             f.write(f"{logStr}\n\n")
