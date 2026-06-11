@@ -57,13 +57,13 @@ class WarpMotionCtf(WarpBasePipeline):
             inputJobFolder = os.path.dirname(self.inputTs)
             jobStar = os.path.join(inputJobFolder, 'job.star')
             if os.path.exists(jobStar):
-                jobOptions = StarFile.getTableFromFile('joboptions_values', jobStar)
+                jobOptions = StarFile.getTableFromFile('joboptions_values', jobStar, guessType=False)
                 jobOptionsDict = {row.rlnJobOptionVariable: row.rlnJobOptionValue for row in jobOptions}
                 if mdocPattern := jobOptionsDict.get('mdoc_files', None):
-                    if mdocs := glob(mdocPattern):
-                        for mdocFile in mdocs:
-                            mdocName = Path.removeBaseExt(mdocFile).split('.')[0]
-                            mdocs[mdocName] = mdocFile
+                    if mdocFiles := glob(mdocPattern):
+                        for mdocFn in mdocFiles:
+                            mdocName = Path.removeBaseExt(mdocFn).split('.')[0]
+                            mdocs[mdocName] = mdocFn
                     else:
                         raise Exception(f"No mdoc files found for pattern {mdocPattern}...skipping.")
                 else:
@@ -312,8 +312,8 @@ class WarpMotionCtf(WarpBasePipeline):
                 # xml and average mrc already validated for whole TS above
                 ctf = WarpXml(movieXml).getDict('Movie', 'CTF', 'Param')
                 
-                defocusDict['rlnDefocusU'] = _float(ctf['Defocus'] * 10000)  # Convert to Angstroms
-                defocusDict['rlnCtfAstigmatism'] = _float(ctf['DefocusDelta'] * 10000)  # Convert to Angstroms
+                defocusDict['rlnDefocusU'] = _float(float(ctf['Defocus']) * 10000)  # Convert to Angstroms
+                defocusDict['rlnCtfAstigmatism'] = _float(float(ctf['DefocusDelta']) * 10000)  # Convert to Angstroms
                 defocusDict['rlnDefocusV'] = _float(defocusDict['rlnDefocusU'] + defocusDict['rlnCtfAstigmatism'])
                 defocusDict['rlnDefocusAngle'] = _float(ctf['DefocusAngle'])
 
