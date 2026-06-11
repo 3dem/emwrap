@@ -18,6 +18,7 @@ import os
 from glob import glob
 from datetime import datetime
 from collections import defaultdict
+import shutil
 
 from emtools.utils import FolderManager, Path
 from emtools.jobs import Args
@@ -48,7 +49,7 @@ class WarpMotionCtf(WarpBasePipeline):
         """ Find the mdoc files for the tilt series if not present in the input star file.
         Returning an empty dictionary if the rlnMdocFile is already present.
         """
-        mdocs = {}
+        mdocsMapping = {}
 
         # If the rlnMdocFile column is not present, try to find matching mdoc files.
         if not tsAllTable.hasColumn('rlnMdocFile'):
@@ -63,7 +64,7 @@ class WarpMotionCtf(WarpBasePipeline):
                     if mdocFiles := glob(mdocPattern):
                         for mdocFn in mdocFiles:
                             mdocName = Path.removeBaseExt(mdocFn).split('.')[0]
-                            mdocs[mdocName] = mdocFn
+                            mdocsMapping[mdocName] = mdocFn
                     else:
                         raise Exception(f"No mdoc files found for pattern {mdocPattern}...skipping.")
                 else:
@@ -71,8 +72,10 @@ class WarpMotionCtf(WarpBasePipeline):
             else:
                 raise Exception(f"No job.star file found in {inputJobFolder}...skipping.")
 
-        print("MODCS: ", mdocs)
-        return mdocs
+        else:
+            mdocsMapping = {row.rlnTomoName: row.rlnMdocFile for row in tsAllTable}
+
+        return mdocsMapping
 
     def _create_settings(self, batch, kwargs):
         """ This method should only be called the first time the pipeline is run. 
@@ -81,9 +84,6 @@ class WarpMotionCtf(WarpBasePipeline):
         """
         framesFm = FolderManager(batch.join('frames'))
         framesFm.create()
-
-        mdocsFm = FolderManager(batch.join('mdocs'))
-        mdocsFm.create()
 
         batch.mkdir(self.FS)
 
@@ -97,22 +97,11 @@ class WarpMotionCtf(WarpBasePipeline):
         inputTsStar = kwargs['inputTs']
         tsAllTable = StarFile.getTableFromFile('global', inputTsStar)
 
-        # Find the mdoc files for the tilt series if not present in the input star file.
-        mdocs = self._find_mdoc_files(tsAllTable)
-        
-
         for tsRow in tsAllTable:
             tsName = tsRow.rlnTomoName
             ps = tsRow.rlnMicrographOriginalPixelSize
             tsTable = StarFile.getTableFromFile(tsName, tsRow.rlnTomoTiltSeriesStarFile)
-            inputMdocFile = mdocs.get(tsName, '') if mdocs else tsRow.rlnMdocFile
-
-            if os.path.exists(inputMdocFile):
-                mdocsFm.link(inputMdocFile)
-            else:
-                self.log(f"Mdoc {inputMdocFile}not found for TS {tsName}, skipping...")
-                continue
-
+            
             N = len(tsTable)
             for frameRow in tsTable:
                 frameBase = framesFm.link(frameRow.rlnMicrographMovieName)
@@ -237,17 +226,35 @@ class WarpMotionCtf(WarpBasePipeline):
         newPs = None
         n = None
         dims = None
+        mdocsFm = FolderManager(batch.join('mdocs'))
+        mdocsFm.create()
 
         newPsLabel = 'rlnTomoTiltSeriesPixelSize'
-        newTsAllTable = Table(tsAllTable.getColumnNames() + [newPsLabel])
+        new_cols = [newPsLabel]
+        if not tsAllTable.hasColumn('rlnMdocFile'):
+            new_cols.append('rlnMdocFile')
+        newTsAllTable = Table(tsAllTable.getColumnNames() + new_cols)
         failedTable = Table(newTsAllTable.getColumnNames())
 
+        mdocsMapping = self._find_mdoc_files(tsAllTable)
+    
         for tsRow in tsAllTable:
             tsName = tsRow.rlnTomoName
             tsStarFile = self.join('tilt_series', tsName + '.star')
             ps = tsRow.rlnMicrographOriginalPixelSize
             if newPs is None:
                 newPs = self.targetPs(ps)
+
+            mdocFile = mdocsMapping.get(tsName, '')
+            if not mdocFile or not os.path.exists(mdocFile):
+                self.log(f"Mdoc {mdocFile} not found for TS {tsName}, skipping...")
+                failedTable.addRowValues(**tsRow._asdict())
+                continue
+
+            dstMdocFile = mdocsFm.join(f'{tsName}.mdoc')
+            shutil.copy(mdocFile, dstMdocFile)
+            tsDict['rlnMdocFile'] = dstMdocFile
+            newTsAllTable.addRowValues(**tsDict)
 
             tsTable = StarFile.getTableFromFile(tsName, tsRow.rlnTomoTiltSeriesStarFile)
             n = len(tsTable)
@@ -277,6 +284,7 @@ class WarpMotionCtf(WarpBasePipeline):
                 tsDict['rlnTomoTiltSeriesStarFile'] = "None"
                 failedTable.addRowValues(**tsDict)
                 continue
+            
             # FIXME: Do not add even/odd when this option is not selected
             extra_cols = [
                 'rlnCtfPowerSpectrum', 'rlnMicrographName', 'rlnMicrographMetadata',
