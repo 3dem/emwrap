@@ -81,7 +81,6 @@ class WarpCtfReconstruct(WarpBasePipeline):
 
         extraLabels = [
             'rlnTomogram',
-            'rlnTomogramPixelSize',
             'rlnTomoTomogramBinning',
             'rlnDefocus',
             'rlnTomoSizeX',
@@ -132,7 +131,6 @@ class WarpCtfReconstruct(WarpBasePipeline):
 
             tsDict.update({
                 'rlnTomogram': t,
-                'rlnTomogramPixelSize': newPs,
                 'rlnTomoTomogramBinning': bin,
                 'rlnDefocus': defocus,
                 'rlnTomoSizeX': dims[0],

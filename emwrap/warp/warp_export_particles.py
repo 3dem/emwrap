@@ -27,6 +27,7 @@ from emtools.utils import Color, FolderManager, Path, Process
 from emtools.metadata import StarFile, Acquisition, Table
 from emtools.jobs import Batch, Args
 from emtools.image import Image
+from emwrap.base import getTomoPixelSize
 
 
 from .warp import WarpBasePipeline
@@ -90,7 +91,7 @@ class WarpExportParticles(WarpBasePipeline):
         args.update(subargs)
         args.update({
             "--input_star": "all_coordinates.star",
-            "--coords_angpix": firstRow.rlnTomogramPixelSize,
+            "--coords_angpix": getTomoPixelSize(firstRow),
             "--output_star": outStar,
             "--output_processing": "Particles",
             f"--{self._args['ts_export_type']}": ""  # 2d or 3d

@@ -27,7 +27,7 @@ from emtools.utils import Color, FolderManager, Path, Process
 from emtools.metadata import StarFile, Acquisition, StarMonitor, Table
 from emtools.jobs import Batch
 from emtools.image import Image
-from emwrap.base import ProcessingPipeline
+from emwrap.base import ProcessingPipeline, getTomoPixelSize
 
 from .pytom import PyTom
 
@@ -107,7 +107,7 @@ class PyTomPipeline(ProcessingPipeline):
             voltage=row.rlnVoltage,
             cs=row.rlnSphericalAberration,
             amplitude_contrast=row.rlnAmplitudeContrast,
-            pixel_size=row.rlnTomogramPixelSize
+            pixel_size=getTomoPixelSize(row)
         )
 
     def _getInputTomograms(self):
@@ -165,7 +165,7 @@ class PyTomPipeline(ProcessingPipeline):
         if self._dims is None:
             self._dims = Image.get_dimensions(first.rlnTomogram)
         x, y, n = self._dims
-        ps = first.rlnTomogramPixelSize
+        ps = getTomoPixelSize(first)
         bin = first.rlnTomoTomogramBinning
         self.inputs = {
             'Tomograms': {

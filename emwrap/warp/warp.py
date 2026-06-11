@@ -346,7 +346,7 @@ class WarpBaseTsAlign(WarpBasePipeline):
         self.log("Registering output STAR files.")
         tsAllTable = StarFile.getTableFromFile('global', self.inputTs)
 
-        newTsStarFile = batch.join('tilt_series_aln.star')
+        newTsStarFile = batch.join('tilt_series_aligned.star')
         failedStarFile = batch.join('tilt_series_failed.star')
 
         newTsAllTable = Table(tsAllTable.getColumnNames() + ['rlnTiltSeriesAligned'])
