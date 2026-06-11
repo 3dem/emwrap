@@ -44,6 +44,36 @@ class WarpMotionCtf(WarpBasePipeline):
         v = self._args.get('create_settings.bin_angpix', '') or 0
         return float(v) or inputPs
 
+    def _find_mdoc_files(self, tsAllTable):
+        """ Find the mdoc files for the tilt series if not present in the input star file.
+        Returning an empty dictionary if the rlnMdocFile is already present.
+        """
+        mdocs = {}
+
+        # If the rlnMdocFile column is not present, try to find matching mdoc files.
+        if not tsAllTable.hasColumn('rlnMdocFile'):
+            self.log("No rlnMdocFile column found in the input tilt series...trying to find matching mdoc files.")
+            self.log("Reading job.star from previous run to find matching mdoc glob pattern.")
+            inputJobFolder = os.path.dirname(self.inputTs)
+            jobStar = os.path.join(inputJobFolder, 'job.star')
+            if os.path.exists(jobStar):
+                jobOptions = StarFile.getTableFromFile('joboptions_values', jobStar)
+                jobOptionsDict = {row.rlnJobOptionVariable: row.rlnJobOptionValue for row in jobOptions}
+                if mdocPattern := jobOptionsDict.get('mdoc_files', None):
+                    if mdocs := glob(mdocPattern):
+                        for mdocFile in mdocs:
+                            mdocName = Path.removeBaseExt(mdocFile).split('.')[0]
+                            mdocs[mdocName] = mdocFile
+                    else:
+                        raise Exception(f"No mdoc files found for pattern {mdocPattern}...skipping.")
+                else:
+                    raise Exception(f"No mdoc_files option found in job.star file...skipping.")
+            else:
+                raise Exception(f"No job.star file found in {inputJobFolder}...skipping.")
+
+        print("MODCS: ", mdocs)
+        return mdocs
+
     def _create_settings(self, batch, kwargs):
         """ This method should only be called the first time the pipeline is run. 
         It will make the import from previous WARP run and create the settings file.
@@ -67,11 +97,22 @@ class WarpMotionCtf(WarpBasePipeline):
         inputTsStar = kwargs['inputTs']
         tsAllTable = StarFile.getTableFromFile('global', inputTsStar)
 
+        # Find the mdoc files for the tilt series if not present in the input star file.
+        mdocs = self._find_mdoc_files(tsAllTable)
+        
+
         for tsRow in tsAllTable:
             tsName = tsRow.rlnTomoName
             ps = tsRow.rlnMicrographOriginalPixelSize
             tsTable = StarFile.getTableFromFile(tsName, tsRow.rlnTomoTiltSeriesStarFile)
-            mdocsFm.link(tsRow.rlnMdocFile)
+            inputMdocFile = mdocs.get(tsName, '') if mdocs else tsRow.rlnMdocFile
+
+            if os.path.exists(inputMdocFile):
+                mdocsFm.link(inputMdocFile)
+            else:
+                self.log(f"Mdoc {inputMdocFile}not found for TS {tsName}, skipping...")
+                continue
+
             N = len(tsTable)
             for frameRow in tsTable:
                 frameBase = framesFm.link(frameRow.rlnMicrographMovieName)
