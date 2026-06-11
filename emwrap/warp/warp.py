@@ -172,11 +172,15 @@ class WarpBasePipeline(ProcessingPipeline):
             self.log(f"{self.name}: Linking gain gain: {gain}")
             self.link(gain)
 
+    def _only_output(self):
+        """ To be implemented in subclasses to return True if only the output should be generated."""
+        return False
+
     def prerunTs(self):
         """ Common operations for tilt-series prerun implementation in subclasses. """
         self.inputTs = self._args['input_tiltseries']
         batch = Batch(id=self.name, path=self.path)
-        if self._args['__j'] != 'only_output':
+        if not self._only_output():
             self.log("Running Warp commands.")
             self.runBatch(batch, inputTs=self.inputTs)
         else:

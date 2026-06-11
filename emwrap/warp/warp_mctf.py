@@ -167,6 +167,10 @@ class WarpMotionCtf(WarpBasePipeline):
         self.batch_execute('create_settings', batch, args)
         return ngroups
 
+    def _only_output(self):
+        """ Mainly for debugging purposes. """
+        return '--emwrap_only_output' in self._args.get('extra_create_settings', '')
+
     def runBatch(self, batch, **kwargs):
         """ This method can be run for only the Mctf pipeline
          or for the preprocessing one, where import inputs is not needed.
@@ -251,11 +255,6 @@ class WarpMotionCtf(WarpBasePipeline):
                 failedTable.addRowValues(**tsRow._asdict())
                 continue
 
-            dstMdocFile = mdocsFm.join(f'{tsName}.mdoc')
-            shutil.copy(mdocFile, dstMdocFile)
-            tsDict['rlnMdocFile'] = dstMdocFile
-            newTsAllTable.addRowValues(**tsDict)
-
             tsTable = StarFile.getTableFromFile(tsName, tsRow.rlnTomoTiltSeriesStarFile)
             n = len(tsTable)
 
@@ -277,6 +276,9 @@ class WarpMotionCtf(WarpBasePipeline):
                 newPsLabel: newPs,
                 'rlnTomoTiltSeriesStarFile': tsStarFile
             })
+            dstMdocFile = mdocsFm.join(f'{tsName}.mdoc')
+            shutil.copy(mdocFile, dstMdocFile)
+            tsDict['rlnMdocFile'] = dstMdocFile
 
             if missing:
                 for moviePrefix, reason, path in missing:
@@ -284,7 +286,7 @@ class WarpMotionCtf(WarpBasePipeline):
                 tsDict['rlnTomoTiltSeriesStarFile'] = "None"
                 failedTable.addRowValues(**tsDict)
                 continue
-            
+
             # FIXME: Do not add even/odd when this option is not selected
             extra_cols = [
                 'rlnCtfPowerSpectrum', 'rlnMicrographName', 'rlnMicrographMetadata',
