@@ -48,13 +48,16 @@ class PyTom:
         # Initialize with the launcher and load parameters from acquisition
         args = {'pytom_match_template.py': ''}
         args.update(self.argsFromAcq(self.acq))
-        args.update({
+        extraArgs = {
             '--destination': 'output',
             '--tomogram': batch.link(batch['tomogram']),
             '--tilt-angles': _write_list('tilt_angles', 'rawtlt'),
-            '--dose-accumulation': _write_list('dose_accumulation', 'txt'),
-            '--defocus': batch['defocus']
-        })
+            '--dose-accumulation': _write_list('dose_accumulation', 'txt')
+        }
+        if defocus := batch.get('defocus', None):
+            extraArgs['--defocus'] = defocus
+
+        args.update(extraArgs)
 
         for k, v in self.args['pytom'].items():
             # Let's create some relative symbolic links and update arguments
@@ -73,9 +76,13 @@ class PyTom:
         def _rename_star(newSuffix):
             """ Rename output star files to avoid overwrite. """
             e = '_particles.star'
-            for fn in fm.glob(f'*Apx{e}'):
-                newFn = fn.replace(e, f'_{newSuffix}{e}')
-                os.rename(fn, newFn)
+            if files := fm.glob(f'*{e}'):
+                for fn in files:
+                    newFn = fn.replace(e, f'_particles_{newSuffix}.star')
+                    print(f'>>> Renaming {fn} to {newFn}')
+                    os.rename(fn, newFn)
+            else:
+                print(f'>>> ERROR: Not files found for prefix "{newSuffix}')
 
         if files := fm.glob('*.json'):
             jsonFile = os.path.basename(files[0])
@@ -94,11 +101,12 @@ class PyTom:
                 _rename_star('default')
 
                 if subargs['tophat-filter']:
-                    args.update({
+                    argsT = dict(args)
+                    argsT.update({
                         '--tophat-filter': "",
                         '--tophat-connectivity': subargs['tophat-connectivity']
                     })
-                    batch.call(launcher, args)
+                    batch.call(launcher, argsT)
                     _rename_star('tophat')
 
                 # Run with relion5 compatibility mode
