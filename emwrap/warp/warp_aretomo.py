@@ -17,6 +17,7 @@
 import os
 
 from emtools.jobs import Args
+from emtools.metadata import TextFile, RelionStar
 
 from .warp import WarpBaseTsAlign
 
@@ -51,6 +52,25 @@ class WarpAreTomo(WarpBaseTsAlign):
         self.batch_execute('ts_aretomo', batch, args) 
                            #launcher=self.get_launcher_arg('launcher_warp', 'WARP'))
 
+    def parseAlignmentParams(self, batch, tsName, ps):
+        self.log(f"Parsing alignments for tomo: {tsName}")
+        alnFile = batch.join(self.TS, 'tiltstack', tsName, f'{tsName}.st.aln')
+        alignments = []
+        # Despite Warp's Aretomo wrapper writes the angles from positive to negative
+        # Aretomo always write the alignment back from negative to positive order,
+        # So we don't need to reverse it when parsing to the STAR file
+        for line in TextFile.stripLines(alnFile):
+            parts = line.split()
+            values = {
+                'rlnTomoXTilt': 0,
+                'rlnTomoYTilt': float(parts[-1]),
+                "rlnTomoZRot": float(parts[1]),
+                'rlnTomoXShiftAngst': float(parts[3]) * ps,
+                'rlnTomoYShiftAngst': float(parts[4]) * ps,
+            }
+            alignments.append({k: float(values[k]) for k in values})
+
+        return alignments
 
 if __name__ == '__main__':
     WarpAreTomo.main()

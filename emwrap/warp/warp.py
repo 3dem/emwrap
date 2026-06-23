@@ -17,7 +17,7 @@
 import os
 
 from emtools.utils import FolderManager, Path
-from emtools.metadata import StarFile, Table
+from emtools.metadata import StarFile, Table, RelionStar
 from emtools.jobs import Batch, Args
 from emtools.image import Image
 from emwrap.base import ProcessingPipeline
@@ -282,6 +282,10 @@ class WarpBaseTsAlign(WarpBasePipeline):
         """ Abstract method that should be implemented in subclasses. """
         raise Exception("Missing implementation in base class.")
 
+    def parseAlignmentParams(self, batch, tsName, ps):
+        """ Parse alignment parameters from the underlying program file (e.g. Aretomo or Imod). """
+        raise Exception("Missing implementation in base class.")
+
     def runBatch(self, batch, importInputs=True, **kwargs):
         # Input run folder from the Motion correction and CTF job
         inputTs = kwargs['inputTs']
@@ -341,6 +345,10 @@ class WarpBaseTsAlign(WarpBasePipeline):
 
         self.updateBatchInfo(batch)
 
+    def _only_output(self):
+        """ Mainly for debugging purposes. """
+        return '--emwrap_output_only' in self._args.get('extra_ts_import', '')
+
     def _output(self, batch):
         """ Register output STAR files. """
         def _float(v):
@@ -349,6 +357,7 @@ class WarpBaseTsAlign(WarpBasePipeline):
         batch.mkdir('tilt_series')
         self.log("Registering output STAR files.")
         tsAllTable = StarFile.getTableFromFile('global', self.inputTs)
+        newPs = float(self._args['ts_aretomo.angpix'])
 
         newTsStarFile = batch.join('tilt_series_aligned.star')
         failedStarFile = batch.join('tilt_series_failed.star')
@@ -378,11 +387,25 @@ class WarpBaseTsAlign(WarpBasePipeline):
             })
             table.addRowValues(**tsDict)
 
+            # Let's generate the proper metadata star file for this row
+            tsTable = StarFile.getTableFromFile(tsName, tsRow.rlnTomoTiltSeriesStarFile)
+            # Get the alignment parameters in Relion convention
+            alignments = self.parseAlignmentParams(batch, tsName, newPs)
+            newTsTable = Table(tsTable.getColumnNames() + RelionStar.TOMO_ALIGNMENT_COLUMNS)
+            for aln, tiltRow in zip(alignments, tsTable):
+                tiltRowDict = tiltRow._asdict()
+                tiltRowDict.update(aln)
+                newTsTable.addRowValues(**tiltRowDict)
+
+            with StarFile(tsStarFile, 'w') as sf:
+                sf.writeTable(tsName, newTsTable, timeStamp=True)
+
+
         self.write_ts_table('global', newTsAllTable, newTsStarFile)
         
         N = len(newTsAllTable)
         # ps = newTsAllTable[0].rlnTomoTiltSeriesPixelSize
-        newPs = float(self._args[self.output_angpix])
+
         x, y, n = dims
         self.outputs = {
             'TiltSeriesAligned': {

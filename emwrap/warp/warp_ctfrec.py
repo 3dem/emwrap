@@ -68,6 +68,10 @@ class WarpCtfReconstruct(WarpBasePipeline):
         self.batch_execute('ts_reconstruct', batch, args)
         self.updateBatchInfo(batch)
 
+    def _only_output(self):
+        return True
+        return '--emwrap_output_only' in 'xxx'
+
     def _output(self, batch):
         """ Register output STAR files. """
 
@@ -80,7 +84,7 @@ class WarpCtfReconstruct(WarpBasePipeline):
         newTsStarFile = batch.join('tomograms.star')
 
         extraLabels = [
-            'rlnTomogram',
+            'rlnTomoReconstructedTomogram',
             'rlnTomoTomogramBinning',
             'rlnDefocus',
             'rlnTomoSizeX',
@@ -128,14 +132,18 @@ class WarpCtfReconstruct(WarpBasePipeline):
 
             # FIXME: validate for missing tomostar files
             tomostar = self.join(self.TM, tsName + '.tomostar')
+            # For Relion tomomagram.star, we need the original tomogram dimensions
+            wxml = WarpXml(self.join(self.TSS))
+            d = wxml.getDict('Settings', 'Tomo', 'Param')
+            # {'DimensionsX': '4400', 'DimensionsY': '6000', 'DimensionsZ': '1000'}
 
             tsDict.update({
-                'rlnTomogram': t,
+                'rlnTomoReconstructedTomogram': t,
                 'rlnTomoTomogramBinning': bin,
                 'rlnDefocus': defocus,
-                'rlnTomoSizeX': dims[0],
-                'rlnTomoSizeY': dims[1],
-                'rlnTomoSizeZ': dims[2],
+                'rlnTomoSizeX': d['DimensionsX'],
+                'rlnTomoSizeY': d['DimensionsY'],
+                'rlnTomoSizeZ': d['DimensionsZ'],
                 'rlnTomoReconstructedTomogramHalf1': te,
                 'rlnTomoReconstructedTomogramHalf2': to,
                 'wrpTomostar': tomostar
