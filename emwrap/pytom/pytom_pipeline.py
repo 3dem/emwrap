@@ -113,7 +113,7 @@ class PyTomPipeline(ProcessingPipeline):
             rowDict = batch['rowDict']
             rowDict['rlnParticleNumber'] = 0
             rowDict['rlnCoordinatesMetadata'] = 'None'
-            if coordsStar := outFiles.get('default_particles.star'):
+            if coordsStar := outFiles.get('particles_default.star'):
                 t = StarFile.getTableFromFile('particles', coordsStar)
                 rowDict.update({
                     'rlnCoordinatesMetadata': coordsStar,
