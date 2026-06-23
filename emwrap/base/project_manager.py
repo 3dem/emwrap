@@ -68,6 +68,12 @@ class ProjectManager(FolderManager):
         if self.exists(self.pipeline_star):
             self.log(f"Loading project from: {apath}")
             self._wf = RelionStar.pipeline_to_workflow(self.pipeline_star)
+            # Load additional info for all outputs
+            for job in self._wf.jobs():
+                filesDict = self.loadJobOutputs(job)
+                for o in job.outputs:
+                    if oInfo := filesDict.get(o.id, None):
+                        o['data'] = oInfo
         elif create:
             # Create a new project
             self._wf = Workflow()
@@ -101,6 +107,14 @@ class ProjectManager(FolderManager):
         job['status'] = 'Launched'
         cmd += f" --output {jobId}"
         self._runCmd(cmd, jobId, wait=wait)
+
+    def listJobDetails(self, jobId):
+        job = None
+        if self._hasJob(jobId):
+            job = self._getJob(jobId)
+
+        if job is None:
+            raise Exception(f"There is no job with jobId: {jobId}.")
 
     def listJobs(self):
         """ List current jobs. """
@@ -176,21 +190,6 @@ class ProjectManager(FolderManager):
                             if not job.hasOutput(fn):
                                 job.registerOutput(fn, datatype=datatype)
                                 update = True
-
-                # # FIXME: this is a quick and dirty to define some known
-                # # output star files for tomography
-                # jobPath = self.join(job.id)
-                #
-                # def _is_output(fn):
-                #     return (fn.endswith('.star') and
-                #             (fn.startswith('tomograms') or
-                #              fn.startswith('tilt_series')))
-                #
-                # for fn in os.listdir(jobPath):
-                #     if _is_output(fn):
-                #         dataId = os.path.join(job.id, fn)
-                #         if not job.hasOutput(dataId):
-                #             job.registerOutput(dataId, datatype='File')
 
         if update:
             self._update_pipeline_star()
@@ -731,7 +730,7 @@ class ProjectManager(FolderManager):
 
         # Setup job's id as its output folder, base on the
         # configured output folder for this jobType and its ID
-        jobTypeFolder = jobConf.get('folder', 'External')
+        jobTypeFolder = jobConf.get('output', 'External')
         jobId = f'{jobTypeFolder}/job{jobIndex:03}'
         self.mkdir(jobId)
 
@@ -878,10 +877,9 @@ class ProjectManager(FolderManager):
                        help="Update job status and pipeline star file.")
 
         # list is None unless -l/--list appears; bare -l uses const 'jobs'.
-        g.add_argument('--list', '-l', nargs='?', const='jobs', default=None,
-                       choices=('jobs', 'inputs', 'outputs'), metavar='WHAT',
-                       help="List WHAT: jobs (default when -l is used without a "
-                            "value), inputs, or outputs. Omit -l to perform no listing.")
+        g.add_argument('--list', '-l', nargs='?', default=None,
+                       metavar='JOB_ID', const='',
+                       help="List all jobs or the details of a given one if JOB_ID is passed.")
 
         g.add_argument('--run', '-r', nargs='+',
                        metavar=('JOB_TYPE_OR_ID', 'PARAMS'),
@@ -964,12 +962,10 @@ class ProjectManager(FolderManager):
             pm.update()
 
         elif args.list is not None:  # only when -l / --list is on the command line
-            if args.list == 'jobs':
+            if jobId := args.list:  # it can be empty string when no value is passed
+                pm.listJobDetails(jobId)
+            else:
                 pm.listJobs()
-            elif args.list == 'inputs':
-                pm.listInputs()
-            elif args.list == 'outputs':
-                pm.listOutputs()
 
         elif args.run:
             jobTypeOrId = args.run[0]
