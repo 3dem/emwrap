@@ -212,16 +212,16 @@ class PyTomPipeline(ProcessingPipeline):
     def _updateOutput(self):
         N = len(self.outTable)
         n = sum(row.rlnParticleNumber for row in self.outTable)
+        outputNodes = [[self.outTomoStar, 'TomogramGroupMetadata.star.relion.tomo.tomocoordinates']]
         self.outputs = {
             'TomogramCoordinates': {
                 'label': 'Tomogram Coordinates',
                 'type': 'TomogramCoordinates',
                 'info': f"{n} particles from {N} tomograms",
-                'files': [
-                    [self.outTomoStar, 'TomogramGroupMetadata.star.relion.tomo.tomocoordinates']
-                ]
+                'files': outputNodes
             }
         }
+        self.writeRelionOutputNodes(outputNodes)
 
     def prerun(self):
         self.log("Testing output generation, nothing else....exiting.")

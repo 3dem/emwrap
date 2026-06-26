@@ -200,7 +200,7 @@ class WarpMotionCtf(WarpBasePipeline):
 
         subargs = self.get_subargs('fs_motion_and_ctf')
         def _expand_x(param, extra_value):
-            value = subargs[param]
+            value = subargs[param].lower()
             n = value.count('x')
             if n == 1:
                 subargs[param] = f'{value}x{extra_value}'
@@ -345,16 +345,18 @@ class WarpMotionCtf(WarpBasePipeline):
             x, y = 0, 0
         else:
             x, y = dims[0], dims[1]
+
+        outputNodes = [[newTsStarFile, 'TomogramGroupMetadata.star.emwrap.mctf']]
         self.outputs = {
             'TiltSeries': {
                 'label': 'Tilt Series',
                 'type': 'TiltSeries',
                 'info': f"{len(newTsAllTable)} items, {x} x {y} x {n}, {newPs:0.3f} Å/px",
-                'files': [
-                    [newTsStarFile, 'TomogramGroupMetadata.star.relion.tomo.import']
-                ]
+                'files':outputNodes
             }
         }
+        self.writeRelionOutputNodes(outputNodes)
+
         if len(failedTable) > 0:
             self.write_ts_table('global', failedTable, failedStarFile)
             self.outputs['TiltSeriesFailed'] = {
@@ -362,7 +364,7 @@ class WarpMotionCtf(WarpBasePipeline):
                 'type': 'TiltSeriesFailed',
                 'info': f"{len(failedTable)} items",
                 'files': [
-                    [failedStarFile, 'TomogramGroupMetadata.star.relion.tomo.failed']
+                    [failedStarFile, 'TomogramGroupMetadata.star.emwrap.mctf-failed']
                 ]
             }
 

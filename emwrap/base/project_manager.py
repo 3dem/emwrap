@@ -533,12 +533,20 @@ class ProjectManager(FolderManager):
     def _prepareQueueSubmission(self, cmd, job_params, folder_path, job_id=None):
         """Build cluster submission script content and command for a job folder."""
         qname = job_params.get('queue.name', 'NO-NAME')
+
+        def eprint(*args, **kwargs):
+            print(Pretty.now(), *args, file=sys.stderr, flush=True, **kwargs)
+
+        eprint(f'qname = {qname}\n')
+
         if qname == 'None':
             return None
 
         queue = ProcessingConfig.get_queue(qname)
         if not queue:
-            self.log(f"Queue {qname} not found in config for submitting job {job_id}.")
+            msg = f"Queue {qname} not found in config for submitting job {job_id}."
+            self.log(msg)
+            eprint(msg)
             return None
 
         qprefix = f'queue.param.{qname}.'

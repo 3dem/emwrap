@@ -324,6 +324,9 @@ class WarpBaseTsAlign(WarpBasePipeline):
             '--mdocs': 'mdocs'
         })
         subargs = self.get_subargs('ts_import', '--')
+        if ts_import_extra := self._args.get('extra_ts_import', None):
+            subargs.update(Args.fromString(ts_import_extra))
+
         args.update(subargs)
         self.batch_execute('ts_import', batch, args)
 
@@ -338,6 +341,7 @@ class WarpBaseTsAlign(WarpBasePipeline):
             '--exposure': self.acq['total_dose']
         })
         subargs = self.get_subargs('create_settings', '--')
+
         args.update(subargs)
         self.batch_execute('create_settings', batch, args)
 
@@ -368,7 +372,6 @@ class WarpBaseTsAlign(WarpBasePipeline):
         dims = 0, 0, 0
         for tsRow in tsAllTable:
             tsName = tsRow.rlnTomoName
-            # FIXME: The proper star files for each aligned TS needs to be generated
             tsStarFile = self.join('tilt_series', tsName + '.star')
             tsAligned = self.join(self.TS, 'tiltstack', tsName, f"{tsName}_aligned.mrc")
             if not os.path.exists(tsAligned):
@@ -392,7 +395,10 @@ class WarpBaseTsAlign(WarpBasePipeline):
             # Get the alignment parameters in Relion convention
             alignments = self.parseAlignmentParams(batch, tsName, newPs)
             newTsTable = Table(tsTable.getColumnNames() + RelionStar.TOMO_ALIGNMENT_COLUMNS)
-            for aln, tiltRow in zip(alignments, tsTable):
+            # Alignments from AreTomo are sorted from negative to positive tilt angle
+            # so we need to sort the TS metadata to match that order
+            sortedRows = sorted(tsTable, key=lambda r: float(r.rlnTomoNominalStageTiltAngle))
+            for aln, tiltRow in zip(alignments, sortedRows):
                 tiltRowDict = tiltRow._asdict()
                 tiltRowDict.update(aln)
                 newTsTable.addRowValues(**tiltRowDict)
@@ -407,16 +413,17 @@ class WarpBaseTsAlign(WarpBasePipeline):
         # ps = newTsAllTable[0].rlnTomoTiltSeriesPixelSize
 
         x, y, n = dims
+        outputNodes = [[newTsStarFile, 'TomogramGroupMetadata.star.emwrap.tsalign']]
         self.outputs = {
             'TiltSeriesAligned': {
                 'label': 'Tilt Series Aligned',
                 'type': 'TiltSeriesAligned',
                 'info': f"{N} items, {x} x {y} x {n}, {newPs:0.3f} Å/px",
-                'files': [
-                    [newTsStarFile, 'TomogramGroupMetadata.star.relion.tomo.aligntiltseries']
-                ]
+                'files': outputNodes
             }
         }
+        self.writeRelionOutputNodes(outputNodes)
+
         if len(failedTable) > 0:
             self.write_ts_table('global', failedTable, failedStarFile)
             self.outputs['TiltSeriesFailed'] = {
@@ -424,7 +431,7 @@ class WarpBaseTsAlign(WarpBasePipeline):
                 'type': 'TiltSeriesFailed',
                 'info': f"{len(failedTable)} items",
                 'files': [
-                    [failedStarFile, 'TomogramGroupMetadata.star.relion.tomo.failed']
+                    [failedStarFile, 'TomogramGroupMetadata.star.emwrap.tsalign-failed']
                 ]
             }
         self.updateBatchInfo(batch)

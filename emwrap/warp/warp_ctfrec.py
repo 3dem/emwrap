@@ -69,7 +69,7 @@ class WarpCtfReconstruct(WarpBasePipeline):
         self.updateBatchInfo(batch)
 
     def _only_output(self):
-        return True
+        return False
         return '--emwrap_output_only' in 'xxx'
 
     def _output(self, batch):
@@ -155,17 +155,17 @@ class WarpCtfReconstruct(WarpBasePipeline):
 
         N = len(newTsAllTable)
         x, y, n = dims
+        outputNodes = [[newTsStarFile, 'TomogramGroupMetadata.star.relion.tomo.tomograms']]
         self.outputs = {
             'Tomograms': {
                 'label': 'Tomograms',
                 'type': 'Tomograms',
                 'info': f"{N} items, {x} x {y} x {n}, {newPs:0.3f} Å/px, bin {bin}",
-                'files': [
-                    [newTsStarFile, 'TomogramGroupMetadata.star.relion.tomo.tomograms']
-                ]
+                'files': outputNodes
             }
         }
         self.updateBatchInfo(batch)
+        self.writeRelionOutputNodes(outputNodes)
 
     def prerun(self):
         self.prerunTs()

@@ -346,6 +346,16 @@ class ProcessingPipeline(Pipeline, FolderManager):
         with open(self.infoFile, 'w') as f:
             json.dump(self.info, f, indent=4)
 
+    def writeRelionOutputNodes(self, outputs):
+        """ Write expected file by relion in case the jobs are launched
+        from the Relion pipeliner. This function might be automated later
+        based on the self.outputs. """
+        t = Table(columns=['rlnPipeLineNodeName', 'rlnPipeLineNodeTypeLabel'])
+        for oName, oType in outputs:
+            t.addRowValues(oName, oType)
+        with StarFile(self.join('RELION_OUTPUT_NODES.star'), 'w') as sf:
+            sf.writeTable('pipeline_nodes', t, timeStamp=True)
+
     def fixOutputPath(self, path):
         """ Add the output prefix to a path that is relative to
         the output folder, to make it relative to the working dir

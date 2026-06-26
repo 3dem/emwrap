@@ -44,9 +44,6 @@ class WarpAreTomo(WarpBaseTsAlign):
         if self.gpuList:
             args['--device_list'] = self.gpuList
 
-        if ts_import_extra := self._args.get('extra_ts_import', None):
-            args.update(Args.fromString(ts_import_extra))
-
         subargs = self._args.subset('ts_aretomo', '--', filters=['remove_false', 'remove_empty'])
         args.update(subargs)
         self.batch_execute('ts_aretomo', batch, args) 
