@@ -27,7 +27,7 @@ from emtools.utils import Color, FolderManager, Path, Process
 from emtools.metadata import StarFile, Acquisition, StarMonitor, Table
 from emtools.jobs import Batch
 from emtools.image import Image
-from emwrap.base import ProcessingPipeline
+from emwrap.base import ProcessingPipeline, getTomoPixelSize, getTomogram
 
 from .pytom import PyTom
 
@@ -35,6 +35,14 @@ from .pytom import PyTom
 class PyTomPipeline(ProcessingPipeline):
     """ Pipeline PyTom picking in a set of tomograms. """
     name = 'emw-pytom'
+
+    # Expected suffices after running PyTom in one batch
+    OUTPUT_SUFFICES = ['angles.mrc',
+                       'extraction_graph.svg',
+                       'job.json',
+                       'particles_default.star',
+                       'particles_relion5.star',
+                       'scores.mrc']
 
     def __init__(self, args, output):
         ProcessingPipeline.__init__(self, args, output)
@@ -70,6 +78,29 @@ class PyTomPipeline(ProcessingPipeline):
 
         return _pytom
 
+    def _moveBatchFiles(self, batch):
+        tsName = batch['tsName']
+        missing = []
+        outFiles = {}
+        def _out(s):
+            return self.join('Coordinates', f'{tsName}_{s}')
+
+        for suffix in self.OUTPUT_SUFFICES:
+            if files := batch.glob(f'output/*_{suffix}'):
+                f = files[0]
+                dst = _out(suffix)
+                shutil.copy(f, dst)
+                outFiles[suffix] = dst
+            else:
+                missing.append(suffix)
+        if missing:
+            with open(_out('missing.json'), 'w') as f:
+                json.dump(missing, f)
+
+        return outFiles
+
+        Process.system(f"mv {batch.join('output', '*')} {self.join('Coordinates')}")
+
     def _output(self, batch):
         tsName = batch['tsName']
 
@@ -78,19 +109,17 @@ class PyTomPipeline(ProcessingPipeline):
         if batch.error:
             batch.log(f"ERROR: {batch.error}")
         else:
-            Process.system(f"mv {batch.join('output', '*')} {self.join('Coordinates')}")
+            outFiles = self._moveBatchFiles(batch)
             rowDict = batch['rowDict']
-            coordsStar = Path.replaceBaseExt(batch['tomogram'], '_default_particles.star')
-            coordsStarPath = self.join('Coordinates', coordsStar)
-            nCoords = 0
-            if os.path.exists(coordsStarPath):
-                t = StarFile.getTableFromFile('particles', coordsStarPath)
-                nCoords = len(t)
+            rowDict['rlnParticleNumber'] = 0
+            rowDict['rlnCoordinatesMetadata'] = 'None'
+            if coordsStar := outFiles.get('particles_default.star'):
+                t = StarFile.getTableFromFile('particles', coordsStar)
+                rowDict.update({
+                    'rlnCoordinatesMetadata': coordsStar,
+                    'rlnParticleNumber': len(t)
+                })
 
-            rowDict.update({
-                'rlnCoordinatesMetadata': coordsStarPath,
-                'rlnCoordinatesCount': nCoords
-            })
             self.outTable.addRowValues(**rowDict)
             with StarFile(self.outTomoStar, 'w') as sfOut:
                 sfOut.writeTable('global', self.outTable,
@@ -107,7 +136,7 @@ class PyTomPipeline(ProcessingPipeline):
             voltage=row.rlnVoltage,
             cs=row.rlnSphericalAberration,
             amplitude_contrast=row.rlnAmplitudeContrast,
-            pixel_size=row.rlnTomogramPixelSize
+            pixel_size=getTomoPixelSize(row)
         )
 
     def _getInputTomograms(self):
@@ -127,7 +156,7 @@ class PyTomPipeline(ProcessingPipeline):
             self.log(f"Previously processed tomograms: {Color.cyan(counter)}")
             blacklist = self.outTable
         else:
-            extraLabels = ['rlnCoordinatesMetadata', 'rlnCoordinatesCount']
+            extraLabels = ['rlnCoordinatesMetadata', 'rlnParticleNumber']
             self.outTable = Table(inTable.getColumnNames() + extraLabels)
 
         self.acq.update(self._loadAcquisitionFromRow(inTable[0]))
@@ -146,26 +175,28 @@ class PyTomPipeline(ProcessingPipeline):
             counter += 1
             nowPrefix = datetime.now().strftime('%y%m%d-%H%M%S')
             batchId = f"{nowPrefix}_{counter:03}_{tsName}"
-            # FIXME: Now reading these values from Warp tomostar, but
-            # it should be from Relion's star files
-            t = StarFile.getTableFromFile('', row.wrpTomostar,
+            t = StarFile.getTableFromFile(tsName, row.rlnTomoTiltSeriesStarFile,
                                           guessType=False)
-            yield Batch(id=batchId, index=counter,
+
+            batch = Batch(id=batchId, index=counter,
                         rowDict=row._asdict(),
                         path=os.path.join(self.tmpDir, batchId),
-                        tsName=tsName, tomogram=row.rlnTomogram,
-                        defocus=float(row.rlnDefocus),
-                        tilt_angles=[float(r.wrpAngleTilt) for r in t],
-                        dose_accumulation=[float(r.wrpDose) for r in t])
+                        tsName=tsName, tomogram=getTomogram(row),
+                        tilt_angles=[float(r.rlnTomoNominalStageTiltAngle) for r in t],
+                        dose_accumulation=[float(r.rlnMicrographPreExposure) for r in t])
+            if hasattr(row, 'rlnDefocus'):
+                batch['defocus'] = float(row.rlnDefocus)
+
+            yield batch
 
     def _updateInput(self):
         inputTomoTable = StarFile.getTableFromFile('global', self.inTomoStar)
         first = inputTomoTable[0]
         N = len(inputTomoTable)
         if self._dims is None:
-            self._dims = Image.get_dimensions(first.rlnTomogram)
+            self._dims = Image.get_dimensions(getTomogram(first))
         x, y, n = self._dims
-        ps = first.rlnTomogramPixelSize
+        ps = getTomoPixelSize(first)
         bin = first.rlnTomoTomogramBinning
         self.inputs = {
             'Tomograms': {
@@ -180,19 +211,21 @@ class PyTomPipeline(ProcessingPipeline):
 
     def _updateOutput(self):
         N = len(self.outTable)
-        n = sum(row.rlnCoordinatesCount for row in self.outTable)
+        n = sum(row.rlnParticleNumber for row in self.outTable)
+        outputNodes = [[self.outTomoStar, 'TomogramGroupMetadata.star.relion.tomo.tomocoordinates']]
         self.outputs = {
             'TomogramCoordinates': {
                 'label': 'Tomogram Coordinates',
                 'type': 'TomogramCoordinates',
                 'info': f"{n} particles from {N} tomograms",
-                'files': [
-                    [self.outTomoStar, 'TomogramGroupMetadata.star.relion.tomo.tomocoordinates']
-                ]
+                'files': outputNodes
             }
         }
+        self.writeRelionOutputNodes(outputNodes)
 
     def prerun(self):
+        self.log("Testing output generation, nothing else....exiting.")
+
         self._dims = None
         self._updateInput()
         self.writeInfo()
@@ -209,6 +242,63 @@ class PyTomPipeline(ProcessingPipeline):
             outputQueue = p.outputQueue
 
         self.addProcessor(outputQueue, self._output)
+
+    def postrun(self):
+        self.log("Generating Relion 5 compatible outputs: optimisation_set.star and related files.")
+        tomoCoordsTable = StarFile.getTableFromFile('global', self.join('tomograms_coords.star'))
+
+        def _output(key):
+            return self.join(f'pytom_{key}.star')
+
+        optsetFn = _output('optimisation_set')
+        tomogramsFn = _output('tomograms')
+        particlesFn = _output('particles')
+
+        # First create the optimisation_set.star file and then the associated tomograms and particles
+        with StarFile(optsetFn, 'w') as sf:
+            t = Table(columns=['rlnTomoParticlesFile', 'rlnTomoTomogramsFile'])
+            t.addRowValues(particlesFn, tomogramsFn)
+            sf.writeTable('optimisation_set', t, timeStamp=True)
+
+        with StarFile(tomogramsFn, 'w') as sf:
+            newTomoTable = tomoCoordsTable.cloneColumns(['rlnCoordinatesMetadata'])
+            for row in tomoCoordsTable:
+                rowDict = row._asdict()
+                del rowDict['rlnCoordinatesMetadata']
+                newTomoTable.addRowValues(**rowDict)
+            sf.writeTable('global', newTomoTable, timeStamp=True)
+
+        ptsColumns = [
+            'rlnTomoName',
+            'rlnCenteredCoordinateXAngst',
+            'rlnCenteredCoordinateYAngst',
+            'rlnCenteredCoordinateZAngst',
+            'rlnAngleRot',
+            'rlnAngleTilt',
+            'rlnAnglePsi',
+            'rlnLCCmax'
+        ]
+
+        with StarFile(particlesFn, 'w') as sf:
+            ptsTable = Table(columns=ptsColumns)
+            for row in tomoCoordsTable:
+                tsName = row.rlnTomoName
+                # FIMXE Now it is hardcoded how to match tomoName with its particle
+                # we might handle this at the batch output, instead of using simply mv
+                # we can prefix it with the proper tomoName
+                coordsFn = self.join('Coordinates', f'{tsName}_particles_relion5.star')
+                self.log(f'Mapped tomo {tsName} to coordinates {coordsFn}')
+                if os.path.exists(coordsFn):
+                    coordsTable = StarFile.getTableFromFile('particles', coordsFn)
+                    for coord in coordsTable:
+                        values = {c: getattr(coord, c) for c in ptsColumns}
+                        values['rlnTomoName'] = tsName
+                        ptsTable.addRowValues(**values)
+
+                else:
+                    self.log(f'ERROR: coordinate file {coordsFn} does not exist, skipping')
+
+            sf.writeTable('particles', ptsTable, timeStamp=True)
 
 
 if __name__ == '__main__':
