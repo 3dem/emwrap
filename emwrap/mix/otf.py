@@ -24,7 +24,7 @@ import argparse
 from glob import glob
 
 from emtools.utils import Color, Timer, Path, Process, FolderManager, Pretty
-from emtools.metadata import Table, StarFile, Acquisition, EPU
+from emtools.metadata import Table, StarFile, Acquisition, EPU, MovieFiles
 from emtools.image import Image
 
 from emwrap.base import ProjectManager
@@ -252,25 +252,38 @@ class OTF(FolderManager):
                       f"   {runErr:<40}")
 
 
+def get_session_data_paths(dc, session_id, session=None):
+    """ Return GSCEM, Jude and frames paths for a session. """
+    if session is None:
+        session = dc.get_session(session_id)
+
+    raw = session['extra']['raw']
+    sconfig = dc.get_config('sessions')
+    attrs = {"attrs": {"id": session_id}}
+    users = dc.request('get_session_users', jsonData=attrs).json()['session_users']
+    group = users['group']
+    gscemRoot = Path.addslash(os.path.join(sconfig['raw']['root'], group))
+    gscemPath = raw['path']
+    dataPath = gscemPath.replace(gscemRoot, '')
+    judeRootDefault = sconfig['raw']['jude_group_folder'].format(group=group)
+    judeRoot = sconfig['raw']['jude_group_mapping'].get(group, judeRootDefault)
+    judePath = os.path.join(judeRoot, dataPath)
+
+    return {
+        'group': group,
+        'gscemRoot': gscemRoot,
+        'gscemPath': gscemPath,
+        'jude_path': judePath,
+        'framesPath': raw.get('frames'),
+    }
+
+
 def monitorSessionFolder(session_id):
     from emhub.client import open_client
     with open_client() as dc:
         session = dc.get_session(session_id)
-        raw = session['extra']['raw']
-        sconfig = dc.get_config('sessions')
-        attrs = {"attrs": {"id": session_id}}
-        users = dc.request('get_session_users', jsonData=attrs).json()['session_users']
-        group = users['group']
-        gscemRoot = Path.addslash(os.path.join(sconfig['raw']['root'], group))
-        gscemPath = raw['path']
-        dataPath = gscemPath.replace(gscemRoot, '')
-        judeRootDefault = sconfig['raw']['jude_group_folder'].format(group=group)
-        judeRoot = sconfig['raw']['jude_group_mapping'].get(group, judeRootDefault)
-        judePath = os.path.join(judeRoot, dataPath)
-        dirs = [raw['frames'], gscemPath, judePath]
-        # print("Frames: ", raw['frames'])
-        # print("GSCEM: ", gscemPath)
-        # print("Jude: ", judePath)
+        paths = get_session_data_paths(dc, session_id, session=session)
+        dirs = [paths['framesPath'], paths['gscemPath'], paths['jude_path']]
         maxlen = max(len(d) for d in dirs)
 
         def _pad(s):
@@ -281,6 +294,59 @@ def monitorSessionFolder(session_id):
             print(f"{_pad(d)}: {EPU.count_movies(d):>8}")
 
 
+def updateSessionFiles(session_id):
+    """ Scan session jude path and update file info in EMhub. """
+    from emhub.client import open_client
+    with open_client() as dc:
+        try:
+            session = dc.get_session(session_id)
+        except Exception as e:
+            print(Color.red(f"Session {session_id}: error retrieving session: {e}"))
+            return
+
+        if not session or 'extra' not in session:
+            print(Color.red(f"Session {session_id}: not found"))
+            return
+
+        extra = session['extra']
+        raw = extra.get('raw', {})
+
+        try:
+            paths = get_session_data_paths(dc, session_id, session=session)
+        except Exception as e:
+            print(Color.red(f"Session {session_id}: error computing data paths: {e}"))
+            return
+
+        jude_path = paths['jude_path']
+        if not os.path.exists(jude_path):
+            print(Color.red(f"Session {session_id}: jude path does not exist: {jude_path}"))
+            return
+
+        # This is to avoid CS folder that some groups process inside the data folder
+        images_path = os.path.join(jude_path, 'Images-Disc1')
+        print(f"images_path: {images_path}, exists: {os.path.exists(images_path)}")
+        scan_path = images_path if os.path.exists(images_path) else jude_path
+
+        print(Color.bold(f"session_id = {session_id}, scanning files..."))
+        print(f"    path: {scan_path}")
+
+        mf = MovieFiles()
+        mf.scan(scan_path)
+        update_args = mf.info()
+        raw.update(update_args)
+        extra.update({'raw': raw, 'updated': Pretty.now()})
+        dc.update_session({
+            'id': session_id,
+            'extra': extra
+        })
+
+        summary = dict(update_args)
+        summary.pop('files', None)
+        print(Color.green("Session updated:"))
+        for k, v in summary.items():
+            print(f"    {k}: {v}")
+
+
 def main():
     p = argparse.ArgumentParser()
     g = p.add_mutually_exclusive_group()
@@ -288,8 +354,8 @@ def main():
                    help="Create new OTF project, previous files will be cleaned.")
     g.add_argument('--monitor', '-m', metavar='SESSION_IDS', nargs='+',
                    help="Monitor data transfer for one of several sessions.")
-    # g.add_argument('--update', '-u', action='store_true',
-    #                help="Update job status and pipeline star file.")
+    g.add_argument('--update', '-u', metavar='SESSION_ID',
+                   help="Scan jude path and update session file info in EMhub.")
     g.add_argument('--run', '-r', action='store_true')
     g.add_argument('--status', '-s', action='store_true')
 
@@ -309,6 +375,9 @@ def main():
     elif args.monitor:
         for m in args.monitor:
             monitorSessionFolder(int(m))
+
+    elif args.update:
+        updateSessionFiles(int(args.update))
 
     elif args.run:
         otf.run()
