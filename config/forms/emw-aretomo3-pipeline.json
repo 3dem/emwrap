@@ -293,11 +293,17 @@
                     "help": "If a single number (N), it represents the total number of GPUs (0..N-1). If multiple values, these are specific GPU IDs."
                 },
                 {
-                    "name": "aretomo3.perdevice",
-                    "label": "Processes per device",
-                    "default": 1,
-                    "paramClass": "IntParam",
-                    "help": "(--per_device in aretomo3)"
+                    "name": "cpus",
+                    "label": "CPUs",
+                    "default": "",
+                    "help": "If empty, the program will use the number of GPUs * 10 CPUs."
+                }, 
+                {
+                    "name": "register_output_only",
+                    "label": "Register output only",
+                    "paramClass": "BooleanParam",
+                    "default": false,
+                    "help": "If enabled, the job will only register the output files, but not run the program."
                 },
                 {
                     "label": "Launchers",
