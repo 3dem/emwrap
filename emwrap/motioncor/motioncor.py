@@ -21,7 +21,6 @@ from emtools.jobs import Args
 from emtools.metadata import Table, StarFile, TextFile, Acquisition
 from emtools.image import Image
 
-
 class Motioncor:
     """ Motioncor wrapper to run in a batch folder. """
     def __init__(self, acq, **kwargs):
@@ -31,9 +30,16 @@ class Motioncor:
         else:
             self.path, self.version = Motioncor.__get_environ()
         self.ctf = kwargs.get('ctf', False)
+        self.framesPerMovie = kwargs['movieDims'][2]
+        self.minFractionDose = float(kwargs['min_fraction_dose'])
+
+        # Get from project acquisition settings: PixSize, kV, Cs, AmpCont, Gain
         self.acq = Acquisition(acq)
         self.args = self.argsFromAcq(acq)
-        self.args.update(kwargs.get('extra_args', {}))
+
+        # Get from protocol GUI
+        self.frameDose = 0.0
+        self.argsFromGui(kwargs)
         self.outputPrefix = "output/aligned_"
 
     @property
@@ -63,6 +69,7 @@ class Motioncor:
         elif extLower.startswith('.eer'):
             inArg = '-InEer'
             kwargs['-EerSampling'] = 1
+            self.make_frame_integration(batch)
         else:
             raise Exception(f"Unsupported movie format: {ext}")
 
@@ -136,6 +143,15 @@ class Motioncor:
             'mc_output': total
         })
 
+    def make_frame_integration(self, batch):
+        """Create frame integration file for EER files."""
+
+        self.frame_file = os.path.join(batch.path, 'motioncor-frame.txt')
+        numFramesToCombine = max( int(self.minFractionDose/self.frameDose), 1)
+        with open(self.frame_file, 'w') as f:
+            f.write(f"{self.framesPerMovie} {numFramesToCombine} {self.frameDose:0.3f}")
+        self.args['–FmIntFile'] = self.frame_file
+
     def __expect(self, fileName):
         if not os.path.exists(fileName):
             raise Exception(f"Missing expected output: {fileName}")
@@ -186,14 +202,14 @@ class Motioncor:
 
         if program := os.environ.get(varPath, None):
             if not os.path.exists(program):
-                raise Exception(f"Motioncor path ({varPath}={program}) does not exists.")
+                raise Exception(f"MotionCor path ({varPath}={program}) does not exists.")
         else:
-            raise Exception(f"Motioncor path variable {varPath} is not defined.")
+            raise Exception(f"MotionCor path variable {varPath} is not defined.")
 
         if version := int(os.getenv(varVersion, 3)):
             pass
         else:
-            raise Exception(f"Motioncor version variable {varVersion} is not defined.")
+            raise Exception(f"MotionCor version variable {varVersion} is not defined.")
 
         return program, version
 
@@ -207,7 +223,15 @@ class Motioncor:
         return None
 
     def argsFromAcq(self, acq):
-        """ Define arguments from a given acquisition """
+        """
+        Add arguments from acquisition parameters:
+            PixSize
+            kV
+            Cs
+            AmpCont
+            Gain (can be overridden from protocol GUI)
+        """
+
         args = Args({
             '-PixSize': acq.pixel_size,
             '-kV': acq.voltage,
@@ -218,3 +242,31 @@ class Motioncor:
             args['-Gain'] = gain
 
         return args
+
+    def argsFromGui(self, kwargs):
+        """Add arguments from GUI entry."""
+
+        ###print(f"\n{os.path.basename(__file__)}:248: self.args({type(self.args)})='{self.args}'")
+        self.args.update(kwargs.get('extra_args', {}))
+        ###print(f"\n{os.path.basename(__file__)}:251: kwargs({type(kwargs)})='{kwargs}'")
+
+        self.args['-Patch'] = f"{kwargs['patch_x']} {kwargs['patch_y']}"
+        if kwargs['gain_rot'] != '0'  : self.args['-RotGain']  = kwargs['gain_rot']
+        if kwargs['gain_flip'] != '0' : self.args['-FlipGain'] = kwargs['gain_flip']
+        if kwargs['fn_defect'] : self.args['-DefectFile'] = kwargs['fn_defect']
+        if int(kwargs['reference_frame']) > 0 : self.args['-FmRef'] = kwargs['reference_frame']
+        if kwargs['do_split_sum'] : self.args['-SplitSum'] = 1
+        if 'num_iters' in kwargs:
+            if kwargs['num_iters'] : self.args['-Iter'] = kwargs['num_iters']
+        if kwargs['err_tolerance'] : self.args['-Tol'] = kwargs['err_tolerance']
+
+        # If Kv, PixSize, and FmDose are provided, then dose-weighted sums are generated
+        if kwargs['do_dose_weighting'] : self.args['-FmDose'] = kwargs['dose_per_frame']
+        if 'dose_per_frame' in kwargs :
+            if kwargs['dose_per_frame'] : self.frameDose = float(kwargs['dose_per_frame'])
+
+        # Override gain reference if provided in protocol GUI
+        if 'fn_gain_ref' in kwargs:
+            if kwargs['fn_gain_ref'] : self.args['-Gain'] = kwargs['fn_gain_ref']
+
+        return
