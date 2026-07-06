@@ -55,8 +55,8 @@
                             "help": ""
                         },
                         {
-                            "name": "acq.amplitude_constrast",
-                            "label": "Amplitude Constrast",
+                            "name": "acq.amplitude_contrast",
+                            "label": "Amplitude Contrast",
                             "default": 0.1,
                             "paramClass": "FloatParam",
                             "help": ""
