@@ -14,3 +14,18 @@
 # *
 # **************************************************************************
 
+
+def getTomoPixelSize(row):
+    """ Compute the tomogram pixel size in the row by multiplying the TS pixel size by the binning.
+    """
+    return float(row.rlnTomoTiltSeriesPixelSize) * float(row.rlnTomoTomogramBinning)
+
+
+def getTomogram(row):
+    """ Return tomogram path, tryng from different columns.
+    """
+    cols = ['rlnTomoReconstructedTomogram', 'rlnTomoReconstructedTomogramDenoised']
+    for col in cols:
+        if value := row.get(col):
+            return value
+    raise ValueError(f"No tomogram column ({', '.join(cols)}) found in row: {row}")

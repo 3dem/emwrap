@@ -18,6 +18,7 @@ import os
 from glob import glob
 from datetime import datetime
 from collections import defaultdict
+import shutil
 
 from emtools.utils import FolderManager, Path
 from emtools.jobs import Args
@@ -30,7 +31,7 @@ from .warp import WarpBasePipeline
 class WarpMotionCtf(WarpBasePipeline):
     """ Warp wrapper to run Motion correction and CTF estimation.
     It will run:
-        - create_settings -> frame_series.setting
+        - create_settings -> frame_series.settings
         - fs_motion_and_ctf
     """
     name = 'emw-warp-mctf'
@@ -44,6 +45,38 @@ class WarpMotionCtf(WarpBasePipeline):
         v = self._args.get('create_settings.bin_angpix', '') or 0
         return float(v) or inputPs
 
+    def _find_mdoc_files(self, tsAllTable):
+        """ Find the mdoc files for the tilt series if not present in the input star file.
+        Returning an empty dictionary if the rlnMdocFile is already present.
+        """
+        mdocsMapping = {}
+
+        # If the rlnMdocFile column is not present, try to find matching mdoc files.
+        if not tsAllTable.hasColumn('rlnMdocFile'):
+            self.log("No rlnMdocFile column found in the input tilt series...trying to find matching mdoc files.")
+            self.log("Reading job.star from previous run to find matching mdoc glob pattern.")
+            inputJobFolder = os.path.dirname(self.inputTs)
+            jobStar = os.path.join(inputJobFolder, 'job.star')
+            if os.path.exists(jobStar):
+                jobOptions = StarFile.getTableFromFile('joboptions_values', jobStar, guessType=False)
+                jobOptionsDict = {row.rlnJobOptionVariable: row.rlnJobOptionValue for row in jobOptions}
+                if mdocPattern := jobOptionsDict.get('mdoc_files', None):
+                    if mdocFiles := glob(mdocPattern):
+                        for mdocFn in mdocFiles:
+                            mdocName = Path.removeBaseExt(mdocFn).split('.')[0]
+                            mdocsMapping[mdocName] = mdocFn
+                    else:
+                        raise Exception(f"No mdoc files found for pattern {mdocPattern}...skipping.")
+                else:
+                    raise Exception(f"No mdoc_files option found in job.star file...skipping.")
+            else:
+                raise Exception(f"No job.star file found in {inputJobFolder}...skipping.")
+
+        else:
+            mdocsMapping = {row.rlnTomoName: row.rlnMdocFile for row in tsAllTable}
+
+        return mdocsMapping
+
     def _create_settings(self, batch, kwargs):
         """ This method should only be called the first time the pipeline is run. 
         It will make the import from previous WARP run and create the settings file.
@@ -51,9 +84,6 @@ class WarpMotionCtf(WarpBasePipeline):
         """
         framesFm = FolderManager(batch.join('frames'))
         framesFm.create()
-
-        mdocsFm = FolderManager(batch.join('mdocs'))
-        mdocsFm.create()
 
         batch.mkdir(self.FS)
 
@@ -71,7 +101,7 @@ class WarpMotionCtf(WarpBasePipeline):
             tsName = tsRow.rlnTomoName
             ps = tsRow.rlnMicrographOriginalPixelSize
             tsTable = StarFile.getTableFromFile(tsName, tsRow.rlnTomoTiltSeriesStarFile)
-            mdocsFm.link(tsRow.rlnMdocFile)
+            
             N = len(tsTable)
             for frameRow in tsTable:
                 frameBase = framesFm.link(frameRow.rlnMicrographMovieName)
@@ -81,6 +111,8 @@ class WarpMotionCtf(WarpBasePipeline):
                     dims = Image.get_dimensions(frameRow.rlnMicrographMovieName)
 
         x, y, n = dims
+
+        # FIXME: Remove input information, it should be taken from the output of the previous step
         self.inputs = {
             'FrameSeries': {
                 'label': 'Frame Series',
@@ -135,6 +167,10 @@ class WarpMotionCtf(WarpBasePipeline):
         self.batch_execute('create_settings', batch, args)
         return ngroups
 
+    def _only_output(self):
+        """ Mainly for debugging purposes. """
+        return '--emwrap_only_output' in self._args.get('extra_create_settings', '')
+
     def runBatch(self, batch, **kwargs):
         """ This method can be run for only the Mctf pipeline
          or for the preprocessing one, where import inputs is not needed.
@@ -164,7 +200,7 @@ class WarpMotionCtf(WarpBasePipeline):
 
         subargs = self.get_subargs('fs_motion_and_ctf')
         def _expand_x(param, extra_value):
-            value = subargs[param]
+            value = subargs[param].lower()
             n = value.count('x')
             if n == 1:
                 subargs[param] = f'{value}x{extra_value}'
@@ -194,17 +230,30 @@ class WarpMotionCtf(WarpBasePipeline):
         newPs = None
         n = None
         dims = None
+        mdocsFm = FolderManager(batch.join('mdocs'))
+        mdocsFm.create()
 
         newPsLabel = 'rlnTomoTiltSeriesPixelSize'
-        newTsAllTable = Table(tsAllTable.getColumnNames() + [newPsLabel])
+        new_cols = [newPsLabel]
+        if not tsAllTable.hasColumn('rlnMdocFile'):
+            new_cols.append('rlnMdocFile')
+        newTsAllTable = Table(tsAllTable.getColumnNames() + new_cols)
         failedTable = Table(newTsAllTable.getColumnNames())
 
+        mdocsMapping = self._find_mdoc_files(tsAllTable)
+    
         for tsRow in tsAllTable:
             tsName = tsRow.rlnTomoName
             tsStarFile = self.join('tilt_series', tsName + '.star')
             ps = tsRow.rlnMicrographOriginalPixelSize
             if newPs is None:
                 newPs = self.targetPs(ps)
+
+            mdocFile = mdocsMapping.get(tsName, '')
+            if not mdocFile or not os.path.exists(mdocFile):
+                self.log(f"Mdoc {mdocFile} not found for TS {tsName}, skipping...")
+                failedTable.addRowValues(**tsRow._asdict())
+                continue
 
             tsTable = StarFile.getTableFromFile(tsName, tsRow.rlnTomoTiltSeriesStarFile)
             n = len(tsTable)
@@ -227,6 +276,9 @@ class WarpMotionCtf(WarpBasePipeline):
                 newPsLabel: newPs,
                 'rlnTomoTiltSeriesStarFile': tsStarFile
             })
+            dstMdocFile = mdocsFm.join(f'{tsName}.mdoc')
+            shutil.copy(mdocFile, dstMdocFile)
+            tsDict['rlnMdocFile'] = dstMdocFile
 
             if missing:
                 for moviePrefix, reason, path in missing:
@@ -234,6 +286,7 @@ class WarpMotionCtf(WarpBasePipeline):
                 tsDict['rlnTomoTiltSeriesStarFile'] = "None"
                 failedTable.addRowValues(**tsDict)
                 continue
+
             # FIXME: Do not add even/odd when this option is not selected
             extra_cols = [
                 'rlnCtfPowerSpectrum', 'rlnMicrographName', 'rlnMicrographMetadata',
@@ -268,8 +321,9 @@ class WarpMotionCtf(WarpBasePipeline):
 
                 # xml and average mrc already validated for whole TS above
                 ctf = WarpXml(movieXml).getDict('Movie', 'CTF', 'Param')
-                defocusDict['rlnDefocusU'] = _float(ctf['Defocus'])
-                defocusDict['rlnCtfAstigmatism'] = _float(ctf['DefocusDelta'])
+                
+                defocusDict['rlnDefocusU'] = _float(float(ctf['Defocus']) * 10000)  # Convert to Angstroms
+                defocusDict['rlnCtfAstigmatism'] = _float(float(ctf['DefocusDelta']) * 10000)  # Convert to Angstroms
                 defocusDict['rlnDefocusV'] = _float(defocusDict['rlnDefocusU'] + defocusDict['rlnCtfAstigmatism'])
                 defocusDict['rlnDefocusAngle'] = _float(ctf['DefocusAngle'])
 
@@ -291,16 +345,18 @@ class WarpMotionCtf(WarpBasePipeline):
             x, y = 0, 0
         else:
             x, y = dims[0], dims[1]
+
+        outputNodes = [[newTsStarFile, 'TomogramGroupMetadata.star.emwrap.mctf']]
         self.outputs = {
             'TiltSeries': {
                 'label': 'Tilt Series',
                 'type': 'TiltSeries',
                 'info': f"{len(newTsAllTable)} items, {x} x {y} x {n}, {newPs:0.3f} Å/px",
-                'files': [
-                    [newTsStarFile, 'TomogramGroupMetadata.star.relion.tomo.import']
-                ]
+                'files':outputNodes
             }
         }
+        self.writeRelionOutputNodes(outputNodes)
+
         if len(failedTable) > 0:
             self.write_ts_table('global', failedTable, failedStarFile)
             self.outputs['TiltSeriesFailed'] = {
@@ -308,7 +364,7 @@ class WarpMotionCtf(WarpBasePipeline):
                 'type': 'TiltSeriesFailed',
                 'info': f"{len(failedTable)} items",
                 'files': [
-                    [failedStarFile, 'TomogramGroupMetadata.star.relion.tomo.failed']
+                    [failedStarFile, 'TomogramGroupMetadata.star.emwrap.mctf-failed']
                 ]
             }
 

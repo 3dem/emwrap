@@ -139,7 +139,7 @@ class ProcessingPipeline(Pipeline, FolderManager):
 
     def log_cmd(self, args):
         """ Log a command to the logfile. """
-        with open(self.join('commands.txt'), 'a') as f:
+        with open(self.join('note.txt'), 'a') as f:
             e = ''
             logStr = ' \\\n'.join("%s %s" % (k, v) for k, v in args.items())
             f.write(f"{logStr}\n\n")
@@ -345,6 +345,16 @@ class ProcessingPipeline(Pipeline, FolderManager):
         """ Write file with internal information to info.json. """
         with open(self.infoFile, 'w') as f:
             json.dump(self.info, f, indent=4)
+
+    def writeRelionOutputNodes(self, outputs):
+        """ Write expected file by relion in case the jobs are launched
+        from the Relion pipeliner. This function might be automated later
+        based on the self.outputs. """
+        t = Table(columns=['rlnPipeLineNodeName', 'rlnPipeLineNodeTypeLabel'])
+        for oName, oType in outputs:
+            t.addRowValues(oName, oType)
+        with StarFile(self.join('RELION_OUTPUT_NODES.star'), 'w') as sf:
+            sf.writeTable('pipeline_nodes', t, timeStamp=True)
 
     def fixOutputPath(self, path):
         """ Add the output prefix to a path that is relative to

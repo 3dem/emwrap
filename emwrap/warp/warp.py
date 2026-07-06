@@ -17,7 +17,7 @@
 import os
 
 from emtools.utils import FolderManager, Path
-from emtools.metadata import StarFile, Table
+from emtools.metadata import StarFile, Table, RelionStar
 from emtools.jobs import Batch, Args
 from emtools.image import Image
 from emwrap.base import ProcessingPipeline
@@ -172,11 +172,15 @@ class WarpBasePipeline(ProcessingPipeline):
             self.log(f"{self.name}: Linking gain gain: {gain}")
             self.link(gain)
 
+    def _only_output(self):
+        """ To be implemented in subclasses to return True if only the output should be generated."""
+        return False
+
     def prerunTs(self):
         """ Common operations for tilt-series prerun implementation in subclasses. """
         self.inputTs = self._args['input_tiltseries']
         batch = Batch(id=self.name, path=self.path)
-        if self._args['__j'] != 'only_output':
+        if not self._only_output():
             self.log("Running Warp commands.")
             self.runBatch(batch, inputTs=self.inputTs)
         else:
@@ -278,12 +282,17 @@ class WarpBaseTsAlign(WarpBasePipeline):
         """ Abstract method that should be implemented in subclasses. """
         raise Exception("Missing implementation in base class.")
 
+    def parseAlignmentParams(self, batch, tsName, ps):
+        """ Parse alignment parameters from the underlying program file (e.g. Aretomo or Imod). """
+        raise Exception("Missing implementation in base class.")
+
     def runBatch(self, batch, importInputs=True, **kwargs):
         # Input run folder from the Motion correction and CTF job
         inputTs = kwargs['inputTs']
         tsAllTable = StarFile.getTableFromFile('global', inputTs)
         N, x, y, n, ps = self._getInfo(tsAllTable)
 
+        # FIXME: Remove input information, it should be taken from the output of the previous step
         self.inputs = {
             'TiltSeries': {
                 'label': 'Tilt Series',
@@ -315,6 +324,9 @@ class WarpBaseTsAlign(WarpBasePipeline):
             '--mdocs': 'mdocs'
         })
         subargs = self.get_subargs('ts_import', '--')
+        if ts_import_extra := self._args.get('extra_ts_import', None):
+            subargs.update(Args.fromString(ts_import_extra))
+
         args.update(subargs)
         self.batch_execute('ts_import', batch, args)
 
@@ -329,12 +341,17 @@ class WarpBaseTsAlign(WarpBasePipeline):
             '--exposure': self.acq['total_dose']
         })
         subargs = self.get_subargs('create_settings', '--')
+
         args.update(subargs)
         self.batch_execute('create_settings', batch, args)
 
         self.runAlignment(batch)
 
         self.updateBatchInfo(batch)
+
+    def _only_output(self):
+        """ Mainly for debugging purposes. """
+        return '--emwrap_output_only' in self._args.get('extra_ts_import', '')
 
     def _output(self, batch):
         """ Register output STAR files. """
@@ -344,8 +361,9 @@ class WarpBaseTsAlign(WarpBasePipeline):
         batch.mkdir('tilt_series')
         self.log("Registering output STAR files.")
         tsAllTable = StarFile.getTableFromFile('global', self.inputTs)
+        newPs = float(self._args['ts_aretomo.angpix'])
 
-        newTsStarFile = batch.join('tilt_series_aln.star')
+        newTsStarFile = batch.join('tilt_series_aligned.star')
         failedStarFile = batch.join('tilt_series_failed.star')
 
         newTsAllTable = Table(tsAllTable.getColumnNames() + ['rlnTiltSeriesAligned'])
@@ -354,7 +372,6 @@ class WarpBaseTsAlign(WarpBasePipeline):
         dims = 0, 0, 0
         for tsRow in tsAllTable:
             tsName = tsRow.rlnTomoName
-            # FIXME: The proper star files for each aligned TS needs to be generated
             tsStarFile = self.join('tilt_series', tsName + '.star')
             tsAligned = self.join(self.TS, 'tiltstack', tsName, f"{tsName}_aligned.mrc")
             if not os.path.exists(tsAligned):
@@ -373,22 +390,40 @@ class WarpBaseTsAlign(WarpBasePipeline):
             })
             table.addRowValues(**tsDict)
 
+            # Let's generate the proper metadata star file for this row
+            tsTable = StarFile.getTableFromFile(tsName, tsRow.rlnTomoTiltSeriesStarFile)
+            # Get the alignment parameters in Relion convention
+            alignments = self.parseAlignmentParams(batch, tsName, newPs)
+            newTsTable = Table(tsTable.getColumnNames() + RelionStar.TOMO_ALIGNMENT_COLUMNS)
+            # Alignments from AreTomo are sorted from negative to positive tilt angle
+            # so we need to sort the TS metadata to match that order
+            sortedRows = sorted(tsTable, key=lambda r: float(r.rlnTomoNominalStageTiltAngle))
+            for aln, tiltRow in zip(alignments, sortedRows):
+                tiltRowDict = tiltRow._asdict()
+                tiltRowDict.update(aln)
+                newTsTable.addRowValues(**tiltRowDict)
+
+            with StarFile(tsStarFile, 'w') as sf:
+                sf.writeTable(tsName, newTsTable, timeStamp=True)
+
+
         self.write_ts_table('global', newTsAllTable, newTsStarFile)
         
         N = len(newTsAllTable)
         # ps = newTsAllTable[0].rlnTomoTiltSeriesPixelSize
-        newPs = float(self._args[self.output_angpix])
+
         x, y, n = dims
+        outputNodes = [[newTsStarFile, 'TomogramGroupMetadata.star.emwrap.tsalign']]
         self.outputs = {
             'TiltSeriesAligned': {
                 'label': 'Tilt Series Aligned',
                 'type': 'TiltSeriesAligned',
                 'info': f"{N} items, {x} x {y} x {n}, {newPs:0.3f} Å/px",
-                'files': [
-                    [newTsStarFile, 'TomogramGroupMetadata.star.relion.tomo.aligntiltseries']
-                ]
+                'files': outputNodes
             }
         }
+        self.writeRelionOutputNodes(outputNodes)
+
         if len(failedTable) > 0:
             self.write_ts_table('global', failedTable, failedStarFile)
             self.outputs['TiltSeriesFailed'] = {
@@ -396,7 +431,7 @@ class WarpBaseTsAlign(WarpBasePipeline):
                 'type': 'TiltSeriesFailed',
                 'info': f"{len(failedTable)} items",
                 'files': [
-                    [failedStarFile, 'TomogramGroupMetadata.star.relion.tomo.failed']
+                    [failedStarFile, 'TomogramGroupMetadata.star.emwrap.tsalign-failed']
                 ]
             }
         self.updateBatchInfo(batch)

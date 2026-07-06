@@ -68,6 +68,12 @@ class ProjectManager(FolderManager):
         if self.exists(self.pipeline_star):
             self.log(f"Loading project from: {apath}")
             self._wf = RelionStar.pipeline_to_workflow(self.pipeline_star)
+            # Load additional info for all outputs
+            for job in self._wf.jobs():
+                filesDict = self.loadJobOutputs(job)
+                for o in job.outputs:
+                    if oInfo := filesDict.get(o.id, None):
+                        o['data'] = oInfo
         elif create:
             # Create a new project
             self._wf = Workflow()
@@ -101,6 +107,14 @@ class ProjectManager(FolderManager):
         job['status'] = 'Launched'
         cmd += f" --output {jobId}"
         self._runCmd(cmd, jobId, wait=wait)
+
+    def listJobDetails(self, jobId):
+        job = None
+        if self._hasJob(jobId):
+            job = self._getJob(jobId)
+
+        if job is None:
+            raise Exception(f"There is no job with jobId: {jobId}.")
 
     def listJobs(self):
         """ List current jobs. """
@@ -176,21 +190,6 @@ class ProjectManager(FolderManager):
                             if not job.hasOutput(fn):
                                 job.registerOutput(fn, datatype=datatype)
                                 update = True
-
-                # # FIXME: this is a quick and dirty to define some known
-                # # output star files for tomography
-                # jobPath = self.join(job.id)
-                #
-                # def _is_output(fn):
-                #     return (fn.endswith('.star') and
-                #             (fn.startswith('tomograms') or
-                #              fn.startswith('tilt_series')))
-                #
-                # for fn in os.listdir(jobPath):
-                #     if _is_output(fn):
-                #         dataId = os.path.join(job.id, fn)
-                #         if not job.hasOutput(dataId):
-                #             job.registerOutput(dataId, datatype='File')
 
         if update:
             self._update_pipeline_star()
@@ -422,7 +421,9 @@ class ProjectManager(FolderManager):
                 job_id = f.readline().strip()
 
             job_params = self._readJobParams(job)
-            qname = job_params.get('queue.param.name', 'NO-QUEUE')
+            qname = job_params.get('queue.name', 'NO-NAME')
+            if qname == 'NO-NAME':
+                raise Exception(f"No queue name found for stopping job {jobId}.")
 
             if queue := ProcessingConfig.get_queue(qname):
                 cancelCmd = queue['cancel'].format(job_id=job_id)
@@ -513,95 +514,191 @@ class ProjectManager(FolderManager):
                 if flush:
                     f.flush()
 
+    def _resolveOutputFolder(self, output_folder):
+        if os.path.isabs(output_folder):
+            return output_folder
+        return self.join(output_folder)
+
+    def _writeJobStarFile(self, job_type, params, job_star):
+        job_conf = ProcessingConfig.get_job_conf(job_type)
+        job_form = ProcessingConfig.get_job_form(job_type)
+        values = ProcessingConfig.get_form_values(job_form)
+        values.update(params)
+        is_continue = 1 if os.path.exists(job_star) else 0
+        is_tomo = 1 if job_conf.get('tomo', False) else 0
+        self.log(f"Writing job params: {job_star}")
+        RelionStar.write_jobstar(job_type, values, job_star,
+                                 isTomo=is_tomo, isContinue=is_continue)
+
+    def _prepareQueueSubmission(self, cmd, job_params, folder_path, job_id=None):
+        """Build cluster submission script content and command for a job folder."""
+        qname = job_params.get('queue.name', 'NO-NAME')
+
+        def eprint(*args, **kwargs):
+            print(Pretty.now(), *args, file=sys.stderr, flush=True, **kwargs)
+
+        eprint(f'qname = {qname}\n')
+
+        if qname == 'None':
+            return None
+
+        queue = ProcessingConfig.get_queue(qname)
+        if not queue:
+            msg = f"Queue {qname} not found in config for submitting job {job_id}."
+            self.log(msg)
+            eprint(msg)
+            return None
+
+        qprefix = f'queue.param.{qname}.'
+        qparams = {k.replace(qprefix, ''): v for k, v in job_params.items()
+                   if k.startswith(qprefix)}
+
+        script_file = os.path.join(folder_path, 'job.script')
+        script_log = os.path.join(folder_path, 'job.log')
+        gpus = int(job_params.get('gpus', 0))   # FIXME Get gpu list and take the length
+
+        if gpus > 0:
+            if cpus := job_params.get('cpus', ''):
+                if 'x' in cpus:
+                    mpi, threads = cpus.split('x')
+                    cpus = int(mpi) * int(threads)
+                else:
+                    cpus = int(cpus)
+            else:
+                cpus = gpus * 10
+        else:
+            cpus = int(job_params.get('cpus', 1))
+
+        if cpus == 0:
+            raise Exception("Neither CPUs nor GPUs are set. Please set at least one of them.")
+
+        if gpus:
+            # FIXME: Use emgoat for a more general interaction with HPC
+            gpu_line = f'#BSUB -gpu "num={gpus}/host:mode=shared"'
+            gpu_type = qparams.get('gpu_type', 'any')
+            if gpu_type != 'any':
+                gpu_line += f'\n#BSUB -R {gpu_type.lower()}'
+        else:
+            gpu_line = ''
+
+        qparams.update({
+            'queue_name': qname,
+            'jobId': job_id or os.path.basename(folder_path.rstrip(os.sep)),
+            'command': cmd,
+            'gpu_line': gpu_line,
+            'gpus': gpus,
+            'cpus': cpus,
+            'working_dir': self.path,
+            'job_out': os.path.join(folder_path, 'run.out'),
+            'job_err': os.path.join(folder_path, 'run.err')
+        })
+
+        with open(queue['template'], 'r') as f:
+            template = f.read()
+
+        script_content = template.format(**qparams)
+        mapped_script = self.__fixMapping(queue, script_file)
+        submit_cmd = queue['submit'].format(job_script=mapped_script)
+
+        return {
+            'queue': queue,
+            'script_file': script_file,
+            'script_log': script_log,
+            'script_content': script_content,
+            'submit_cmd': submit_cmd,
+        }
+
+    def _executeQueueSubmission(self, submission):
+        script_file = submission['script_file']
+        script_log = submission['script_log']
+        submit_cmd = submission['submit_cmd']
+
+        self._log(f"Writing CLUSTER submission script: {script_file}",
+                  jobFile=script_log, flush=True)
+        with open(script_file, 'w') as f:
+            f.write(submission['script_content'])
+
+        self._log(f"Executing CLUSTER submit command: {Color.green(submit_cmd)}",
+                  jobFile=script_log, flush=True)
+        try:
+            result = subprocess.run(shlex.split(submit_cmd), check=True,
+                                    capture_output=True, text=True)
+            job_id = result.stdout.strip()
+            if not job_id.isdigit():
+                raise Exception(f"Unexpected submission output: {result.stdout}")
+            self._log(f"Submission successful, JOB_ID: {job_id}",
+                      jobFile=script_log, flush=True)
+            with open(script_file.replace('.script', '.id'), 'w') as f:
+                f.write(job_id)
+            return job_id
+        except subprocess.CalledProcessError as e:
+            self._log("ERROR: Submission to cluster failed", jobFile=script_log)
+            self._log(f"  Error: '{e.stderr.rstrip()}'", jobFile=script_log)
+            self._log("  Maybe try to run locally?\n", jobFile=script_log, flush=True)
+
+    def _runLocalCmd(self, cmd, folder_path, wait=False):
+        args = shlex.split(cmd)
+        stdout = open(os.path.join(folder_path, 'run.out'), 'a')
+        stderr = open(os.path.join(folder_path, 'run.err'), 'a')
+        logged_cmd = self.log(f"{Color.green(args[0])} {Color.bold(' '.join(args[1:]))}")
+        stdout.write(f"\n\n{logged_cmd}\n")
+        stdout.flush()
+
+        p = subprocess.Popen(args, cwd=self.path,
+                             stdout=stdout, stderr=stderr, close_fds=True)
+        if wait:
+            p.wait()
+
+    def submitJob(self, job_type, params, output_folder, dry=False):
+        """Submit a job outside the project workflow.
+
+        When dry=False, write job.star in output_folder and either run locally
+        or submit to a cluster queue based on queue parameters in params.
+        When dry=True, only print the run or queue submission commands.
+        """
+        if isinstance(params, str):
+            params = ProcessingPipeline.loadParams(params)
+
+        job_conf = ProcessingConfig.get_job_conf(job_type)
+        if job_conf is None:
+            raise Exception(f"Unknown job type: {job_type}.")
+
+        launcher = ProcessingConfig.get_job_launcher(job_type)
+        if not launcher:
+            raise Exception(f"Invalid launcher for job type: {job_type}")
+
+        folder_path = self._resolveOutputFolder(output_folder)
+        job_star = os.path.join(output_folder, 'job.star')
+        cmd = f"{launcher} -i {job_star} -o {output_folder}"
+
+        submission = self._prepareQueueSubmission(cmd, params, folder_path)
+
+        if dry:
+            if submission:
+                print('COMMAND:', submission['submit_cmd'])
+                print('SCRIPT:', submission['script_content'])
+            else:
+                print('COMMAND:', cmd)
+            return cmd
+
+        os.makedirs(folder_path, exist_ok=True)
+        self._writeJobStarFile(job_type, params, os.path.join(folder_path, 'job.star'))
+
+        if submission:
+            return self._executeQueueSubmission(submission)
+
+        self._runLocalCmd(cmd, folder_path)
+        return cmd
+
     def _runCmd(self, cmd, jobId, wait=False, job_params=None):
         self._saveCmd(cmd, jobId)
-        qname = job_params.get('queue.param.name', 'NO-QUEUE')
-        if queue := ProcessingConfig.get_queue(qname):
-            qprefix = f'queue.param.{qname}.' # prefix to remove from the job_params keys  
-            qparams = {k.replace(qprefix, ''): v for k, v in job_params.items() if k.startswith(qprefix)}
-            
-            scriptFile = self.join(jobId, 'job.script')
-            scriptLog = self.join(jobId, 'job.log')
-            gpus = int(job_params.get('gpus', 0))   # FIXME Get gpu list and take the length
-
-            if gpus > 0:
-                if cpus := job_params.get('cpus', ''):
-                    if 'x' in cpus:
-                        mpi, threads = cpus.split('x')
-                        cpus = int(mpi) * int(threads)
-                    else:
-                        cpus = int(cpus)
-                else:
-                    cpus = gpus * 10
-            else: 
-                cpus = int(job_params.get('cpus', 1))
-
-            if cpus == 0:
-                raise Exception("Neither CPUs nor GPUs are set. Please set at least one of them.")
-
-            if gpus:
-                # FIXME: Use emgoat for a more general interaction with HPC
-                gpu_line = f'#BSUB -gpu "num={gpus}/host:mode=shared"'
-                gpu_type = qparams.get('gpu_type', 'any')
-                if gpu_type != 'any':
-                    gpu_line += f'\n#BSUB -R {gpu_type.lower()}'
-            else:
-                gpu_line = ''
-
-            qparams.update({
-                'jobId': jobId,
-                'command': cmd,
-                'gpu_line': gpu_line,
-                'gpus': gpus,
-                'cpus': cpus,
-                'working_dir': self.path,
-                'job_out': scriptFile.replace('job.script', 'run.out'),
-                'job_err': scriptFile.replace('job.script', 'run.err')
-            })
-
-            with open(queue['template'], 'r') as f:
-                template = f.read()
-                                    
-            self._log(f"Writing CLUSTER submission script: {scriptFile}", jobFile=scriptLog, flush=True)
-            with open(scriptFile, 'w') as f:
-                f.write(template.format(**qparams))
-
+        folder_path = self.join(jobId)
+        if submission := self._prepareQueueSubmission(cmd, job_params, folder_path,
+                                                      job_id=jobId):
             # FIXME Implement the wait option when submitting to a cluster
-            submit = queue['submit']
-            scriptFile = self.__fixMapping(queue, scriptFile)
-
-            submitCmd = submit.format(job_script=scriptFile)
-            self._log(f"Executing CLUSTER submit command: {Color.green(submitCmd)}", jobFile=scriptLog, flush=True)
-            try:
-                result = subprocess.run(shlex.split(submitCmd), check=True,
-                               capture_output=True, text=True)
-                job_id = result.stdout.strip()
-                if not job_id.isdigit():
-                    raise Exception(f"Unexpected submission output: {result.stdout}")
-                else:
-                    self._log(f"Submission successful, JOB_ID: {job_id}", jobFile=scriptLog, flush=True)
-                    with open(scriptFile.replace('.script', '.id'), 'w') as f:
-                        f.write(job_id)
-                    return job_id
-            except subprocess.CalledProcessError as e:
-                self._log("ERROR: Submission to cluster failed", jobFile=scriptLog)
-                self._log(f"  Error: '{e.stderr.rstrip()}'", jobFile=scriptLog)
-                #self.log(f"  Cluster configured in config: {ProcessingConfig._fm.join('config.json')}")
-                self._log( "  Maybe try to run locally?\n", jobFile=scriptLog, flush=True)
+            self._executeQueueSubmission(submission)
         else:
-            args = shlex.split(cmd)
-            stdout = open(self.join(jobId, 'run.out'), 'a')
-            stderr = open(self.join(jobId, 'run.err'), 'a')
-            cmd = self.log(f"{Color.green(args[0])} {Color.bold(' '.join(args[1:]))}")
-            stdout.write(f"\n\n{cmd}\n")
-            stdout.flush()
-
-            # Run the command
-            p = subprocess.Popen(args, cwd=self.path,
-                                 stdout=stdout, stderr=stderr, close_fds=True)
-
-            if wait:
-                p.wait()
+            self._runLocalCmd(cmd, folder_path, wait=wait)
 
     def get_workflow(self):
         return self._wf
@@ -641,7 +738,7 @@ class ProjectManager(FolderManager):
 
         # Setup job's id as its output folder, base on the
         # configured output folder for this jobType and its ID
-        jobTypeFolder = jobConf.get('folder', 'External')
+        jobTypeFolder = jobConf.get('output', 'External')
         jobId = f'{jobTypeFolder}/job{jobIndex:03}'
         self.mkdir(jobId)
 
@@ -649,7 +746,7 @@ class ProjectManager(FolderManager):
         # and write updated pipeline_star
         job = self._wf.registerJob(jobId,
                                    status=STATUS_SAVED,
-                                   alias='None',
+                                   alias='None',    
                                    jobtype=jobType)
 
         # Write job.star file
@@ -788,10 +885,9 @@ class ProjectManager(FolderManager):
                        help="Update job status and pipeline star file.")
 
         # list is None unless -l/--list appears; bare -l uses const 'jobs'.
-        g.add_argument('--list', '-l', nargs='?', const='jobs', default=None,
-                       choices=('jobs', 'inputs', 'outputs'), metavar='WHAT',
-                       help="List WHAT: jobs (default when -l is used without a "
-                            "value), inputs, or outputs. Omit -l to perform no listing.")
+        g.add_argument('--list', '-l', nargs='?', default=None,
+                       metavar='JOB_ID', const='',
+                       help="List all jobs or the details of a given one if JOB_ID is passed.")
 
         g.add_argument('--run', '-r', nargs='+',
                        metavar=('JOB_TYPE_OR_ID', 'PARAMS'),
@@ -816,6 +912,13 @@ class ProjectManager(FolderManager):
         g.add_argument('--stop', '-t', metavar='JOB_ID',
                        help="Stop a launched or running job.")
 
+        g.add_argument('--submit', nargs=3,
+                       metavar=('JOB_TYPE', 'PARAMS_OR_FILE', 'OUTPUT_FOLDER'),
+                       help="Submit a job: write job.star and run locally or "
+                            "submit to a cluster queue. PARAMS_OR_FILE is a "
+                            "JSON string or a path to a .json or .star file. "
+                            "Use --dry to only print the commands.")
+
         g.add_argument('-k', '--check', action='count', default=0,
                        help='Check and/or kill processes related to this project.'
                             'Pass more than one -k to kill processes.')
@@ -829,6 +932,10 @@ class ProjectManager(FolderManager):
                        help='Register a FILE as an output of the job containing the file. '
                             'Paths are relative to project.')
 
+
+        p.add_argument('--dry', action='store_true',
+                       help="With --submit, print the run or queue submission "
+                            "commands without writing files or executing.")
 
         p.add_argument('--wait', '-w', action='store_true',
                        help="Works with --run and make the project waits for "
@@ -863,12 +970,10 @@ class ProjectManager(FolderManager):
             pm.update()
 
         elif args.list is not None:  # only when -l / --list is on the command line
-            if args.list == 'jobs':
+            if jobId := args.list:  # it can be empty string when no value is passed
+                pm.listJobDetails(jobId)
+            else:
                 pm.listJobs()
-            elif args.list == 'inputs':
-                pm.listInputs()
-            elif args.list == 'outputs':
-                pm.listOutputs()
 
         elif args.run:
             jobTypeOrId = args.run[0]
@@ -890,6 +995,10 @@ class ProjectManager(FolderManager):
 
         elif args.stop:
             pm.stopJob(args.stop)
+
+        elif args.submit:
+            params = ProcessingPipeline.loadParams(args.submit[1])
+            pm.submitJob(args.submit[0], params, args.submit[2], dry=args.dry)
 
         elif args.delete:
             pm.deleteJobs(args.delete)
