@@ -15,14 +15,6 @@
 # **************************************************************************
 
 import os
-import subprocess
-import pathlib
-import sys
-import json
-import argparse
-import math
-from glob import glob
-from pprint import pprint
 import re
 import ntpath
 import posixpath
@@ -30,13 +22,13 @@ import shutil
 import csv
 
 #Plots
-import mrcfile
-import numpy as np
+# import mrcfile
+# import numpy as np
 
-from emtools.utils import Color, Timer, Path, Process, FolderManager
+from emtools.utils import Color, FolderManager
 from emtools.image import Image
-from emtools.jobs import Args, Batch, TsStarBatchManager
-from emtools.metadata import Mdoc, StarFile, RelionStar, Acquisition, Table, Column
+from emtools.jobs import Args, TsStarBatchManager
+from emtools.metadata import StarFile, RelionStar, Acquisition, Table
 
 from emwrap.base import ProcessingPipeline
 from .aretomo3 import AreTomo3
@@ -78,7 +70,7 @@ def _fix_mdoc_subframe_paths(mdocPath, destPath, relDir='.'):
 
 class AreTomo3Pipeline(ProcessingPipeline):
     """ Pipeline specific to AreTomo3 preprocessing. """
-    name = 'emw-aretomo3-pipeline'
+    name = 'emw-aretomo3'
 
     def __init__(self, args, output):
         ProcessingPipeline.__init__(self, args, output) # self._args is defined here
@@ -106,7 +98,7 @@ class AreTomo3Pipeline(ProcessingPipeline):
             mdoc = batch['tsMdoc']
             
             batch.create()
-            # Link all input movies in the batch folder
+            
             def _absfn(item):
                 return os.path.abspath(item['rlnMicrographMovieName'])
 
@@ -139,32 +131,16 @@ class AreTomo3Pipeline(ProcessingPipeline):
             if self.inputGain:
                 acq['gain'] = batch.link(self.inputGain)
 
-            args = self._args_without_wrapper_flags()
-            # at3 = AreTomo3(acq, **self._args)
-            at3 = AreTomo3(acq, **args)
+            at3 = AreTomo3(acq, **self._args)
             at3.process_batch(batch, gpu=gpu)
             
             return batch
 
         return _aretomo3
 
-    # ---------- start DEBUG functions ----------- 
-    def _get_extra_a3_tokens(self):
-        extra = self._args.get('extra_a3_args', '') or ''
-        return extra.split()
-
     def _is_register_only(self):
-        return '-registerOnly' in self._get_extra_a3_tokens()
-
-    def _args_without_wrapper_flags(self):
-        args = dict(self._args)
-        extra = args.get('extra_a3_args', '') or ''
-
-        tokens = extra.split()
-        tokens = [t for t in tokens if t != '-registerOnly']
-
-        args['extra_a3_args'] = ' '.join(tokens)
-        return args
+        """ DEBUG: if True, don't run AreTomo3, just rebuild outputs from the final job folders. """
+        return self._args.get('register_output_only', False)
 
     def _collect_existing_final_result(self, tsName):
         tsFolder = self._getOutputTsFolder(tsName)
@@ -179,9 +155,10 @@ class AreTomo3Pipeline(ProcessingPipeline):
                 return path
             return None
 
-        # TODO: we could iterate both the aligned_tilt_series.star and tomograms.star files to rebuild the result dict, but for now we just check the expected files in the final output folders.
         # Files expected in jobX/tiltseries/<tsName>/
         _add_if_exists('rlnTiltSeriesAligned', tsFolder, f'{tsName}.mrc')
+        _add_if_exists('rlnTiltSeriesOdd', tsFolder, f'{tsName}_ODD.mrc')
+        _add_if_exists('rlnTiltSeriesEvn', tsFolder, f'{tsName}_EVN.mrc')
         _add_if_exists('rlnTomoAlignmentFile', tsFolder, f'{tsName}.aln')
         _add_if_exists('rlnTomoCtfFile', tsFolder, f'{tsName}_CTF.txt')
         _add_if_exists('rlnTomoCtfMrc', tsFolder, f'{tsName}_CTF.mrc')
@@ -231,7 +208,6 @@ class AreTomo3Pipeline(ProcessingPipeline):
             r for r in self._allResults.values()
             if 'error' not in r
         ])
-    # ---------- end DEBUG functions ----------- 
     
     def _getOutputTsFolder(self, tsName):
         return FolderManager(self.join(self.outputTsDir, tsName))
@@ -272,6 +248,8 @@ class AreTomo3Pipeline(ProcessingPipeline):
 
             # --- Aligned tilt series outputs -> outputTsDir
             _copy('rlnTiltSeriesAligned', tsFolder)
+            _copy('rlnTiltSeriesOdd', tsFolder)
+            _copy('rlnTiltSeriesEvn', tsFolder)
             _copy('rlnTomoAlignmentFile', tsFolder)
             _copy('rlnTomoCtfFile', tsFolder)
             _copy('rlnTomoCtfMrc', tsFolder)
@@ -326,7 +304,7 @@ class AreTomo3Pipeline(ProcessingPipeline):
             tGeneral = sf.getTable('general')
             row = tGeneral[0]._asdict()
 
-        pathFields = ['rlnTiltSeriesAligned', 'rlnTomoAlignmentFile',
+        pathFields = ['rlnTiltSeriesAligned', 'rlnTiltSeriesOdd', 'rlnTiltSeriesEvn', 'rlnTomoAlignmentFile',
                     'rlnTomogram', 'rlnTomoCtfFile', 'rlnTomoCtfMrc',
                     'rlnTomoNameOdd', 'rlnTomoNameEvn']
         for field in pathFields:
@@ -410,7 +388,7 @@ class AreTomo3Pipeline(ProcessingPipeline):
         Tomograms) from everything in self._allResults so far, and update
         self.outputs. Called after every batch completes, so the pipeline
         can stream partial results before the full input is processed. """
-        tsExtraCols = ['rlnTiltSeriesAligned', 'rlnTomoAlignmentFile',
+        tsExtraCols = ['rlnTiltSeriesAligned', 'rlnTiltSeriesOdd', 'rlnTiltSeriesEvn','rlnTomoAlignmentFile',
                     'rlnTomoCtfFile', 'rlnTomoMetadata']
         tomExtraCols = ['rlnTomogram', 'rlnTomoNameOdd', 'rlnTomoNameEvn',
                         'rlnTomoTiltSeriesPixelSize']
@@ -459,6 +437,8 @@ class AreTomo3Pipeline(ProcessingPipeline):
 
             tsDict.update({
                 'rlnTiltSeriesAligned': tsAligned,
+                'rlnTiltSeriesOdd': result.get('rlnTiltSeriesOdd', ''),
+                'rlnTiltSeriesEvn': result.get('rlnTiltSeriesEvn', ''),
                 'rlnTomoAlignmentFile': result.get('rlnTomoAlignmentFile', ''),
                 'rlnTomoCtfFile': result.get('rlnTomoCtfFile', ''),
                 'rlnTomoMetadata': result.get('rlnTomoMetadata', ''),
@@ -540,7 +520,7 @@ class AreTomo3Pipeline(ProcessingPipeline):
         return defaultValue
 
     def _globalStarColumns(self):
-        return ['rlnTomoName', 'rlnTiltSeriesAligned',
+        return ['rlnTomoName', 'rlnTiltSeriesAligned', 'rlnTiltSeriesOdd', 'rlnTiltSeriesEvn',
                 'rlnTomoAlignmentFile', 'rlnTomoCtfFile',
                 'rlnTomogram', 'rlnTomoNameOdd', 'rlnTomoNameEvn',
                 'rlnTomoMetadata', 'rlnTomoTiltSeriesPixelSize']

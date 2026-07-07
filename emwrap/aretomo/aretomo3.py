@@ -15,9 +15,11 @@
 # **************************************************************************
 
 import os
+import shlex
+
 from emtools.utils import Color, Timer, Path
 from emtools.jobs import Args
-from emtools.metadata import Table, StarFile, Acquisition
+from emtools.metadata import Table, StarFile
 
 from emwrap.base import ProcessingPipeline
 
@@ -29,46 +31,7 @@ from emwrap.base import ProcessingPipeline
 class AreTomo3:
     """ AreTomo3 wrapper to run in a batch folder. """
 
-    # Maps form param name -> CLI flag, for simple 1:1 scalar params.
-    _SCALAR_FLAGS = {
-        'fm_int': '-FmInt',
-        'eer_sampling': '-EerSampling',
-        'mc_bin': '-McBin',
-        'align_z': '-AlignZ',
-        'dark_tolerance': '-DarkTol',
-        'ctf_amp_contrast': '-AmpContrast',
-        'vol_z': '-VolZ',
-        'extra_z': '-ExtZ',
-        'tilt_cor': '-TiltCor',
-        'out_imod': '-OutImod',
-    }
-
-    # Maps form param name -> CLI flag, for BooleanParam fields. Value is
-    # the Python bool arriving from the form; serialized to '1'/'0'.
-    _BOOLEAN_FLAGS = {
-        'wbp': '-Wbp',
-        'correct_ctf': '-CorrCTF',
-        'flip_vol': '-FlipVol',
-        'split_sum': '-SplitSum',
-    }
-
-    # Maps form param name -> CLI flag, for "XxY"-notation multi-value
-    # strings (e.g. '5x5' -> '5 5'). Single bare numbers pass through
-    # unchanged since there's no 'x' to split on.
-    _GRID_FLAGS = {
-        'mc_patch': '-McPatch',
-        'at_patch': '-AtPatch',
-        'mc_group': '-Group',
-    }
-
-    # Paired Line fields (two separate form keys) -> single CLI flag,
-    # joined with a space. Second key is optional; if absent/empty,
-    # only the first value is passed.
-    _PAIRED_FLAGS = {
-        '-AtBin': ('at_bin', 'at_bin2'),
-        '-Sart': ('sart_iter', 'sart_proj'),
-        '-ReconRange': ('recon_range_min', 'recon_range_max'),
-    }
+    _MULTIPLE_VALUE_FLAGS = ['McPatch', 'AtPatch', 'Group', 'TiltAxis', 'ReconRange', 'AtBin', 'Sart']
 
     def __init__(self, acq, **kwargs):
         self.acq = acq
@@ -80,58 +43,81 @@ class AreTomo3:
 
     @classmethod
     def _serialize_form_args(cls, formArgs):
-        """ Translate flat form-param names/values (as defined in the
-        EMHub form JSON) into AreTomo3 CLI flag/value pairs. """
-        args = Args({})
+        args = Args(formArgs)
+        subargs = args.subset('aretomo3', new_prefix="-", 
+                                 filters=['remove_empty', 'binary_boolean', 'multiple_values'], 
+                                 multiple_values=cls._MULTIPLE_VALUE_FLAGS)
+        
+         # Do not pass the GUI ExtraArgs field itself as "-ExtraArgs".
+        subargs.pop('-ExtraArgs', None)
 
-        for name, flag in cls._SCALAR_FLAGS.items():
-            if name in formArgs and formArgs[name] not in (None, ''):
-                args[flag] = formArgs[name]
+        # Parse the content of aretomo3.ExtraArgs and merge it into subargs.
+        cls._add_extra_args(subargs, formArgs, col='aretomo3.ExtraArgs')
+        
+        return subargs
 
-        for name, flag in cls._BOOLEAN_FLAGS.items():
-            if name in formArgs and formArgs[name] is not None:
-                args[flag] = 1 if formArgs[name] else 0
+    @classmethod
+    def _is_negative_number(cls, token):
+        try:
+            float(token)
+            return str(token).startswith('-')
+        except ValueError:
+            return False
 
-        for name, flag in cls._GRID_FLAGS.items():
-            if name in formArgs and formArgs[name] not in (None, ''):
-                args[flag] = str(formArgs[name]).replace('x', ' ').split()
+    @classmethod
+    def _is_cli_flag(cls, token):
+        return (
+            isinstance(token, str)
+            and token.startswith('-')
+            and not cls._is_negative_number(token)
+        )
 
-        # This needs to be store as a list
-        for flag, (firstKey, secondKey) in cls._PAIRED_FLAGS.items():
-            first = formArgs.get(firstKey, None)
-            second = formArgs.get(secondKey, None)
-            if first not in (None, ''):
-                if second not in (None, ''):
-                    args[flag] = [str(first), str(second)]
-                else:
-                    args[flag] = [str(first)]
+    @classmethod
+    def _store_extra_arg(cls, args, flag, values):
+        if not values:
+            args[flag] = ''
+        elif len(values) == 1:
+            args[flag] = values[0]
+        else:
+            args[flag] = values
 
-        # -TiltAxis: optional first value (angle), optional second value
-        # (refinement mode).
-        #   omitted entirely         -> AreTomo3 auto-searches full range
-        #   angle + 0                -> AreTomo3 refines within ±10°
-        #   angle + positive number  -> AreTomo3 refines within ±3°
-        #   angle + negative number  -> AreTomo3 uses angle as-is, no refinement
-        tiltAxis = formArgs.get('ts_import.override_axis', None)
-        if tiltAxis not in (None, ''):
-            tiltAxisRefine = formArgs.get('tilt_axis_refine', None)
-            if tiltAxisRefine not in (None, ''):
-                args['-TiltAxis'] = [str(tiltAxis), str(tiltAxisRefine)]
+    @classmethod
+    def _parse_extra_args(cls, raw):
+        parsed = Args({})
+
+        if raw in (None, ''):
+            return parsed
+
+        tokens = shlex.split(str(raw))
+        current_flag = None
+        current_values = []
+
+        for token in tokens:
+            if cls._is_cli_flag(token):
+                if current_flag is not None:
+                    cls._store_extra_arg(parsed, current_flag, current_values)
+
+                current_flag = token
+                current_values = []
             else:
-                args['-TiltAxis'] = [str(tiltAxis)]
-                    
-        # Any keys not recognized above pass straight through, in case
-        # they're already raw CLI flags (e.g. from a previous version of
-        # extra_args, or manually-entered '-Flag' keys in extra_a3_args).
-        known = (set(cls._SCALAR_FLAGS) | set(cls._BOOLEAN_FLAGS) |
-                set(cls._GRID_FLAGS) |
-                {k for pair in cls._PAIRED_FLAGS.values() for k in pair} |
-                {'ts_import.override_axis', 'tilt_axis_refine'})
-        for key, value in formArgs.items():
-            if key not in known and key.startswith('-'):
-                args[key] = value
+                if current_flag is None:
+                    raise ValueError(
+                        f"ExtraArgs token '{token}' does not belong to any flag. "
+                        "Use syntax like '-Arg Value' or '-Arg'."
+                    )
 
-        return args
+                current_values.append(token)
+
+        if current_flag is not None:
+            cls._store_extra_arg(parsed, current_flag, current_values)
+
+        return parsed
+
+    @classmethod
+    def _add_extra_args(cls, args, formArgs, col='aretomo3.ExtraArgs'):
+        raw = formArgs.get(col, None)
+        if raw not in (None, ''):
+            args.update(cls._parse_extra_args(raw))
 
     # @property
     # def bin(self):
@@ -140,10 +126,6 @@ class AreTomo3:
     # @property
     # def at_bin(self):
     #     return self.args.get('-AtBin', '1.0')
-
-    # @property
-    # def local_alignment(self):
-    #     return self.args.get('-McPatch', '1 1') != '1 1'
 
     @property
     def reconstruct(self):
@@ -208,13 +190,12 @@ class AreTomo3:
 
         result = {'rlnTomoName': tsName}
         try:
-            # Aligned tilt series MRC is always produced, regardless of
+            # Tilt series MRC is always produced, regardless of
             # whether tomogram reconstruction is enabled.
             outTiltSeriesMrc = batch.join('output', f'{tsName}.mrc')
             self.__expect(outTiltSeriesMrc)
             batch['outputs'].append(outTiltSeriesMrc)
             result['rlnTiltSeriesAligned'] = outTiltSeriesMrc
-            # result['rlnTomoTiltSeriesStarFile'] = outTiltSeriesStar we dont have it
             # Alignment file (.aln) is always produced alongside it.
             alnFile = batch.join('output', f'{tsName}.aln')
             if os.path.exists(alnFile):
@@ -252,8 +233,17 @@ class AreTomo3:
                     result['rlnTomoCtfMrc'] = ctfFileMrc
     
             if self.split_sum:
+                # Tomogram
                 for tag, key in (('_ODD', 'rlnTomoNameOdd'),
                                   ('_EVN', 'rlnTomoNameEvn')):
+                    splitName = batch.join('output', f'{tsName}{tag}{suffix}.mrc')
+                    self.__expect(splitName)
+                    batch['outputs'].append(splitName)
+                    result[key] = splitName
+                # Tilt series
+                suffix = ''
+                for tag, key in (('_ODD', 'rlnTiltSeriesOdd'),
+                                  ('_EVN', 'rlnTiltSeriesEvn')):
                     splitName = batch.join('output', f'{tsName}{tag}{suffix}.mrc')
                     self.__expect(splitName)
                     batch['outputs'].append(splitName)
@@ -306,6 +296,8 @@ class AreTomo3:
         # Append only the optional fields that were actually populated.
         optionalFields = [
             ('rlnTiltSeriesAligned', result.get('rlnTiltSeriesAligned')),
+            ('rlnTiltSeriesOdd', result.get('rlnTiltSeriesOdd')),
+            ('rlnTiltSeriesEvn', result.get('rlnTiltSeriesEvn')),
             ('rlnTomoAlignmentFile', result.get('rlnTomoAlignmentFile')),
             ('rlnTomogram', result.get('rlnTomogram')),
             ('rlnTomoCtfFile', result.get('rlnTomoCtfFile')),
