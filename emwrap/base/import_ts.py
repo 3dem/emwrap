@@ -106,7 +106,7 @@ class ImportTsPipeline(ProcessingPipeline):
                 'rlnMicrographOriginalPixelSize',
                 'rlnTomoHand',
                 'rlnOpticsGroupName',
-                'rlnMdocFile'
+                'rlnTomoMdocFile'
             ])
 
         ps = self.acq.pixel_size
@@ -119,7 +119,7 @@ class ImportTsPipeline(ProcessingPipeline):
             rlnMicrographOriginalPixelSize=ps,
             rlnTomoHand=-1,
             rlnOpticsGroupName='optics_group1',
-            rlnMdocFile=mdocFile
+            rlnTomoMdocFile=mdocFile
         )
 
         with StarFile(self.outputStar, 'w') as sfOut:

@@ -47,13 +47,13 @@ class WarpMotionCtf(WarpBasePipeline):
 
     def _find_mdoc_files(self, tsAllTable):
         """ Find the mdoc files for the tilt series if not present in the input star file.
-        Returning an empty dictionary if the rlnMdocFile is already present.
+        Returning an empty dictionary if the rlnTomoMdocFile is already present.
         """
         mdocsMapping = {}
 
-        # If the rlnMdocFile column is not present, try to find matching mdoc files.
-        if not tsAllTable.hasColumn('rlnMdocFile'):
-            self.log("No rlnMdocFile column found in the input tilt series...trying to find matching mdoc files.")
+        # If the rlnTomoMdocFile column is not present, try to find matching mdoc files.
+        if not tsAllTable.hasColumn('rlnTomoMdocFile'):
+            self.log("No rlnTomoMdocFile column found in the input tilt series...trying to find matching mdoc files.")
             self.log("Reading job.star from previous run to find matching mdoc glob pattern.")
             inputJobFolder = os.path.dirname(self.inputTs)
             jobStar = os.path.join(inputJobFolder, 'job.star')
@@ -73,7 +73,7 @@ class WarpMotionCtf(WarpBasePipeline):
                 raise Exception(f"No job.star file found in {inputJobFolder}...skipping.")
 
         else:
-            mdocsMapping = {row.rlnTomoName: row.rlnMdocFile for row in tsAllTable}
+            mdocsMapping = {row.rlnTomoName: row.rlnTomoMdocFile for row in tsAllTable}
 
         return mdocsMapping
 
@@ -235,8 +235,8 @@ class WarpMotionCtf(WarpBasePipeline):
 
         newPsLabel = 'rlnTomoTiltSeriesPixelSize'
         new_cols = [newPsLabel]
-        if not tsAllTable.hasColumn('rlnMdocFile'):
-            new_cols.append('rlnMdocFile')
+        if not tsAllTable.hasColumn('rlnTomoMdocFile'):
+            new_cols.append('rlnTomoMdocFile')
         newTsAllTable = Table(tsAllTable.getColumnNames() + new_cols)
         failedTable = Table(newTsAllTable.getColumnNames())
 
@@ -278,7 +278,7 @@ class WarpMotionCtf(WarpBasePipeline):
             })
             dstMdocFile = mdocsFm.join(f'{tsName}.mdoc')
             shutil.copy(mdocFile, dstMdocFile)
-            tsDict['rlnMdocFile'] = dstMdocFile
+            tsDict['rlnTomoMdocFile'] = dstMdocFile
 
             if missing:
                 for moviePrefix, reason, path in missing:
