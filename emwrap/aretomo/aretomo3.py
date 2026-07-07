@@ -48,76 +48,9 @@ class AreTomo3:
                                  filters=['remove_empty', 'binary_boolean', 'multiple_values'], 
                                  multiple_values=cls._MULTIPLE_VALUE_FLAGS)
         
-         # Do not pass the GUI ExtraArgs field itself as "-ExtraArgs".
-        subargs.pop('-ExtraArgs', None)
-
-        # Parse the content of aretomo3.ExtraArgs and merge it into subargs.
-        cls._add_extra_args(subargs, formArgs, col='aretomo3.ExtraArgs')
+        subargs.update(Args.fromString(subargs.pop('-ExtraArgs', '')))
         
         return subargs
-
-    @classmethod
-    def _is_negative_number(cls, token):
-        try:
-            float(token)
-            return str(token).startswith('-')
-        except ValueError:
-            return False
-
-    @classmethod
-    def _is_cli_flag(cls, token):
-        return (
-            isinstance(token, str)
-            and token.startswith('-')
-            and not cls._is_negative_number(token)
-        )
-
-    @classmethod
-    def _store_extra_arg(cls, args, flag, values):
-        if not values:
-            args[flag] = ''
-        elif len(values) == 1:
-            args[flag] = values[0]
-        else:
-            args[flag] = values
-
-    @classmethod
-    def _parse_extra_args(cls, raw):
-        parsed = Args({})
-
-        if raw in (None, ''):
-            return parsed
-
-        tokens = shlex.split(str(raw))
-        current_flag = None
-        current_values = []
-
-        for token in tokens:
-            if cls._is_cli_flag(token):
-                if current_flag is not None:
-                    cls._store_extra_arg(parsed, current_flag, current_values)
-
-                current_flag = token
-                current_values = []
-            else:
-                if current_flag is None:
-                    raise ValueError(
-                        f"ExtraArgs token '{token}' does not belong to any flag. "
-                        "Use syntax like '-Arg Value' or '-Arg'."
-                    )
-
-                current_values.append(token)
-
-        if current_flag is not None:
-            cls._store_extra_arg(parsed, current_flag, current_values)
-
-        return parsed
-
-    @classmethod
-    def _add_extra_args(cls, args, formArgs, col='aretomo3.ExtraArgs'):
-        raw = formArgs.get(col, None)
-        if raw not in (None, ''):
-            args.update(cls._parse_extra_args(raw))
 
     # @property
     # def bin(self):
