@@ -363,8 +363,8 @@ class WarpBaseTsAlign(WarpBasePipeline):
         tsAllTable = StarFile.getTableFromFile('global', self.inputTs)
         newPs = float(self._args['ts_aretomo.angpix'])
 
-        newTsStarFile = batch.join('tilt_series_aligned.star')
-        failedStarFile = batch.join('tilt_series_failed.star')
+        newTsStarFile = batch.join('aligned_tilt_series.star')
+        failedStarFile = batch.join('failed_tilt_series.star')
 
         newTsAllTable = Table(tsAllTable.getColumnNames() + ['rlnTiltSeriesAligned'])
         failedTable = Table(newTsAllTable.getColumnNames())
