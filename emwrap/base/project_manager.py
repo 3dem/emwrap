@@ -279,7 +279,7 @@ class ProjectManager(FolderManager):
         for jobId, jobInfo in jobDict.items():
             for key, value in (jobInfo.get('params') or {}).items():
                 for jobId2 in jobDict:
-                    if jobId2 != jobId and _param_references_job(value, jobId2):
+                    if jobId2 != jobId and self._param_references_job(value, jobId2):
                         jobInfo['parents'].add(jobId2)
                         jobDict[jobId2]['children'].add(jobId)
 
@@ -290,7 +290,7 @@ class ProjectManager(FolderManager):
 
         def _new_value(v, parents):
             for p in sorted(parents, key=len, reverse=True):
-                if _param_references_job(v, p):
+                if self._param_references_job(v, p):
                     return v.replace(p, newIdsDict[p], 1) if p in newIdsDict else ''
             return v
 

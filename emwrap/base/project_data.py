@@ -101,6 +101,8 @@ _rlnTomoYShiftAngst
                         raise ValueError(f"Tilt series {filepath} does not have the required columns:  "
                                         f"{RelionStar.TOMO_FRAME_SERIES_COLUMNS}")
 
+                    # 'info': f"{len(self.allTsTable)} items, {x} x {y} x {n} x {N}, {ps:0.3f} Å/px",
+
                     if ts_table.hasColumn('rlnMicrographName'):
                         datatype = 'TiltSeries'
 
