@@ -291,18 +291,6 @@ class WarpBaseTsAlign(WarpBasePipeline):
         inputTs = kwargs['inputTs']
         tsAllTable = StarFile.getTableFromFile('global', inputTs)
         N, x, y, n, ps = self._getInfo(tsAllTable)
-
-        # FIXME: Remove input information, it should be taken from the output of the previous step
-        self.inputs = {
-            'TiltSeries': {
-                'label': 'Tilt Series',
-                'type': 'TiltSeries',
-                'info': f"{N} items, {x} x {y} x {n}, {ps:0.3f} Å/px",
-                'files': [
-                    [inputTs, 'TomogramGroupMetadata.star.relion.tomo.motioncorr']
-                ]
-            }
-        }
         self.writeInfo()
 
         inputFolder = FolderManager(os.path.dirname(inputTs))
@@ -414,26 +402,12 @@ class WarpBaseTsAlign(WarpBasePipeline):
 
         x, y, n = dims
         outputNodes = [[newTsStarFile, 'TomogramGroupMetadata.star.emwrap.tsalign']]
-        self.outputs = {
-            'TiltSeriesAligned': {
-                'label': 'Tilt Series Aligned',
-                'type': 'TiltSeriesAligned',
-                'info': f"{N} items, {x} x {y} x {n}, {newPs:0.3f} Å/px",
-                'files': outputNodes
-            }
-        }
-        self.writeRelionOutputNodes(outputNodes)
 
         if len(failedTable) > 0:
             self.write_ts_table('global', failedTable, failedStarFile)
-            self.outputs['TiltSeriesFailed'] = {
-                'label': 'Tilt Series Failed',
-                'type': 'TiltSeriesFailed',
-                'info': f"{len(failedTable)} items",
-                'files': [
-                    [failedStarFile, 'TomogramGroupMetadata.star.emwrap.tsalign-failed']
-                ]
-            }
+            outputNodes.append([failedStarFile, 'TomogramGroupMetadata.star.emwrap.tsalign-failed'])
+
+        self.writeRelionOutputNodes(outputNodes)
         self.updateBatchInfo(batch)
 
     def prerun(self):

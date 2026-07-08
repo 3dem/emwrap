@@ -148,29 +148,8 @@ class RelionTomoClassify(RelionBasePipeline):
             )
 
         n_classes = len(last_iter_files)
-        self.outputs = {
-            "TomogramParticles": {
-                "label": "Classified Particles",
-                "type": "TomogramParticles",
-                "info": f"{N} pts, {n_classes} classes (box: {box} px, {ps} Å/px)",
-                "files": [
-                    [out_star, "TomogramGroupMetadata.star.relion.tomo.particles"]
-                ],
-            },
-        }
-
+        outputNodes = [[out_star, 'TomogramGroupMetadata.star.relion.tomo.particles']]
         for i, vol_path in enumerate(last_iter_files, start=1):
-            self.outputs[f"Volume_class{i:02d}"] = {
-                "label": f"Class {i}",
-                "type": "Volume",
-                "info": f"box size: {box} px, {ps} Å/px",
-                "files": [
-                    [vol_path, "TomogramGroupMetadata.star.relion.volume"]
-                ],
-            }
-
+            outputNodes.append([vol_path, 'TomogramGroupMetadata.star.relion.volume'])
+        self.writeRelionOutputNodes(outputNodes)
         self.updateBatchInfo(batch)
-
-
-if __name__ == "__main__":
-    RelionTomoClassify.main()

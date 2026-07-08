@@ -198,29 +198,11 @@ class PyTomPipeline(ProcessingPipeline):
         x, y, n = self._dims
         ps = getTomoPixelSize(first)
         bin = first.rlnTomoTomogramBinning
-        self.inputs = {
-            'Tomograms': {
-                'label': 'Tomograms',
-                'type': 'Tomograms',
-                'info': f"{N} items, {x} x {y} x {n}, {ps:0.3f} Å/px, bin {bin:0.1f}",
-                'files': [
-                    [self.inTomoStar, 'TomogramGroupMetadata.star.relion.tomo.tomograms']
-                ]
-            }
-        }
 
     def _updateOutput(self):
         N = len(self.outTable)
         n = sum(row.rlnParticleNumber for row in self.outTable)
         outputNodes = [[self.outTomoStar, 'TomogramGroupMetadata.star.relion.tomo.tomocoordinates']]
-        self.outputs = {
-            'TomogramCoordinates': {
-                'label': 'Tomogram Coordinates',
-                'type': 'TomogramCoordinates',
-                'info': f"{n} particles from {N} tomograms",
-                'files': outputNodes
-            }
-        }
         self.writeRelionOutputNodes(outputNodes)
 
     def prerun(self):

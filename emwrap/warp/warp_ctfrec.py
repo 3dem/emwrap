@@ -156,16 +156,8 @@ class WarpCtfReconstruct(WarpBasePipeline):
         N = len(newTsAllTable)
         x, y, n = dims
         outputNodes = [[newTsStarFile, 'TomogramGroupMetadata.star.relion.tomo.tomograms']]
-        self.outputs = {
-            'Tomograms': {
-                'label': 'Tomograms',
-                'type': 'Tomograms',
-                'info': f"{N} items, {x} x {y} x {n}, {newPs:0.3f} Å/px, bin {bin}",
-                'files': outputNodes
-            }
-        }
-        self.updateBatchInfo(batch)
         self.writeRelionOutputNodes(outputNodes)
+        self.updateBatchInfo(batch)
 
     def prerun(self):
         self.prerunTs()

@@ -118,14 +118,12 @@ class WarpMtoolsCreate(WarpBasePipeline):
             else self._args.get('input_population', '')
         )
         species_dir = batch.join(self.M, 'species')
-        self.outputs = {}
+        
+        #TODO: Review registration and info for population outputs
         if population_file and (os.path.isfile(population_file) or not new_population):
-            self.outputs['Population'] = {
-                'label': 'Population',
-                'type': 'WarpPopulation',
-                'info': f"Name: {pop_name}",
-                'files': [[population_file, 'WarpPopulation']]
-            }
+            outputNodes = [[population_file, 'WarpPopulation']]
+            self.writeRelionOutputNodes(outputNodes)
+
         self.updateBatchInfo(batch)
 
     def prerun(self):
