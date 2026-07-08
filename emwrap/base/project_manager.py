@@ -29,6 +29,7 @@ from emtools.metadata import Table, StarFile, RelionStar
 
 from .config import ProcessingConfig
 from .processing_pipeline import ProcessingPipeline
+from .project_data import ProjectData
 
 
 STATUS_LAUNCHED = 'Launched'
@@ -45,13 +46,6 @@ JOB_STATUS_FILES = {
     'RELION_JOB_EXIT_ABORTED': STATUS_ABORTED
 }
 
-
-def _param_references_job(param_value, job_id):
-    """Return True when a param value points at a job folder or its outputs."""
-    if not isinstance(param_value, str):
-        return False
-    return param_value == job_id or param_value.startswith(f'{job_id}/')
-
 JOB_STATUS_ACTIVE = [STATUS_LAUNCHED, STATUS_RUNNING]
 
 
@@ -66,20 +60,17 @@ class ProjectManager(FolderManager):
             raise Exception(f"Project path '{apath}' does not exist")
 
         if self.exists(self.pipeline_star):
-            self.log(f"Loading project from: {apath}")
+            self.log(f"ProjectManager::: Loading project from: {apath}")
             self._wf = RelionStar.pipeline_to_workflow(self.pipeline_star)
-            # Load additional info for all outputs
-            for job in self._wf.jobs():
-                filesDict = self.loadJobOutputs(job)
-                for o in job.outputs:
-                    if oInfo := filesDict.get(o.id, None):
-                        o['data'] = oInfo
+            
         elif create:
             # Create a new project
             self._wf = Workflow()
             self._create()
         else:
             raise Exception(f"'{self.pipeline_star} does not exist")
+
+        self._data = ProjectData(self)        
 
     def get_workflow(self):
         return self._wf
@@ -116,16 +107,32 @@ class ProjectManager(FolderManager):
         if job is None:
             raise Exception(f"There is no job with jobId: {jobId}.")
 
-    def listJobs(self):
+    def listJobs(self, update=True):
         """ List current jobs. """
-        self.update()
+        if update:
+            self.update()
 
-        header = ["JOB_ID", "JOB_TYPE", "JOB_STATUS"]
-        format = u'{:<25}{:<35}{:<25}'
+        header = ["JOB_ID", "JOB_TYPE", "JOB_STATUS", "OUTPUTS", "INPUTS"]
+        format = u'{:<25}{:<25}{:<15}{:<35}{:<45}'
         print(format.format(*header))
 
+        def _data_id(data_list, index):
+            return data_list[index].id if data_list and index < len(data_list) else ''
+
+        def _output(job_id, input_value):
+            return input_value.replace(f'{job_id}/', '') if input_value else ''
+
         for job in self._wf.jobs():
-            print(format.format(job.id, job['jobtype'], job['status']))
+            inputs = list(job.inputs)
+            outputs = list(job.outputs)
+            first_input = _data_id(inputs, 0)
+            first_output = _output(job.id, _data_id(outputs, 0))
+            print(format.format(job.id, job['jobtype'], job['status'], first_output, first_input))
+            max_length = max(len(inputs), len(outputs))
+            for i in range(1, max_length):
+                input = _output(job.id, _data_id(inputs, i))
+                output = _output(job.id, _data_id(outputs, i))
+                print(format.format('', '', '', input, output))
 
     def listOutputs(self):
         """ List current jobs. """
@@ -156,9 +163,6 @@ class ProjectManager(FolderManager):
         for job in self._wf.jobs():
             jobFilesDict = self.loadJobOutputs(job)
             filesDict.update(jobFilesDict)
-            # for k, v in jobFilesDict.items():
-            #     if not job.hasOutput(k):
-            #         job.registerOutput(k, )
 
         for job in self._wf.jobs():
             params = self._readJobParams(job)
@@ -174,7 +178,10 @@ class ProjectManager(FolderManager):
 
     def update(self):
         """ Update status of the running jobs. """
-        self.log("Updating project.")
+        self.log("ProjectManager::: Updating project.")
+        self._data.updateWorkflow()
+        self._data.save()
+
         t = Timer()
         update = False
         for job in self._wf.jobs():
@@ -194,7 +201,7 @@ class ProjectManager(FolderManager):
         if update:
             self._update_pipeline_star()
 
-        self.log(t.getToc("Update took"))
+        self.log(t.getToc(f"{Color.cyan('Update took')}"))
 
     def _validateJobInputs(self, jobDef, params):
         """ Validate that provide values match with the job definition.
@@ -202,12 +209,23 @@ class ProjectManager(FolderManager):
         """
         pass
 
+    
+    def _param_references_job(self, param_value, job_id):
+        """Return True when a param value points at a job folder or its outputs."""
+        if not isinstance(param_value, str):
+            return False
+
+        if os.path.isabs(param_value):
+            param_value = self.relpath(param_value)
+            
+        return param_value == job_id or param_value.startswith(f'{job_id}/')
+         
     def _updateJobInputs(self, job, params):
         # Clear jobs inputs and add new ones
         job.clearInputs()
         for k, v in params.items():
             for job2 in self._wf.jobs():
-                if _param_references_job(v, job2.id):
+                if self._param_references_job(v, job2.id):
                     # In this case the saved job is taking an input from this job
                     data = job2.getOutput(v)
                     if data is None:
@@ -469,6 +487,15 @@ class ProjectManager(FolderManager):
 
         self._update_pipeline_star()
         return deleted
+
+    def showInfo(self, jobIdOrOutput):
+        """ Show info for a given job or output. """
+        jobIdOrOutput = Path.rmslash(jobIdOrOutput)
+
+        if self._hasJob(jobIdOrOutput):
+            print(self._data.getJobInfo(jobIdOrOutput))
+        else:
+            print(self._data.getOutputInfo(jobIdOrOutput))
 
     def _isActiveJob(self, job):
         return job['status'] in JOB_STATUS_ACTIVE
@@ -781,93 +808,9 @@ class ProjectManager(FolderManager):
 
     def loadJobOutputs(self, job):
         filesDict = {}
-        if jobInfo := self.loadJobInfo(job):
-            filesDict = {o['files'][0][0]: o for o in jobInfo['outputs'].values()}
+        # if jobInfo := self.loadJobInfo(job):
+        #     filesDict = {o['files'][0][0]: o for o in jobInfo['outputs'].values()}
         return filesDict
-
-    def register_output(self, file, type, info):
-        """
-        Register a FILE as an output of the job containing the file.
-        Paths are relative to project.
-        """
-        if not os.path.exists(file):
-            raise FileNotFoundError(f"File {file} not found.")
-
-        job_id = Path.rmslash(os.path.dirname(file))
-        if not self._hasJob(job_id):
-            raise Exception(f"Job folder {job_id} not found in project.")
-
-        job = self._getJob(job_id)
-        job.registerOutput(file, type=type, info=info)
-        self._update_pipeline_star()
-
-    def register_subset(self, original_set, subset):
-        """
-        Register a subset star file as an output of the job that contains original_set.
-        Assumes execution from project directory; original_set and subset are
-        relative paths. Both are expected to live in the same run (job) folder.
-        If info.json exists there, the output entry matching original_set is
-        copied and a new entry is added for the subset (same label/type/info,
-        only the path changed).
-        """
-        orig_path = self.join(original_set)
-        subset_path = self.join(subset)
-        job_folder = os.path.dirname(orig_path)
-        orig_basename = os.path.basename(orig_path)
-
-        info_path = os.path.join(job_folder, 'info.json')
-        if not os.path.isfile(info_path):
-            raise FileNotFoundError(
-                f"No info.json in job folder {job_folder}. "
-                "Subset registration requires an existing job with info.json."
-            )
-
-        with open(info_path) as f:
-            info = json.load(f)
-        outputs = info.get('outputs') or {}
-
-        # Find output whose file matches original_set (by basename; paths in info are relative to job folder)
-        orig_key = None
-        orig_entry = None
-        for k, o in outputs.items():
-            files = o.get('files') or []
-            if not files:
-                continue
-            if os.path.basename(files[0][0]) == orig_basename:
-                orig_key = k
-                orig_entry = o
-                break
-
-        if orig_key is None or orig_entry is None:
-            raise ValueError(
-                f"Original set '{original_set}' does not match any output in {info_path}. "
-                "Check the path (e.g. job_folder/tilt_series_ctf.star)."
-            )
-
-        # Subset path relative to job folder (both sets in same run folder)
-        subset_stored = os.path.relpath(subset_path, job_folder)
-        datatype = orig_entry['files'][0][1]
-
-        # New entry: same structure, new key, subset path
-        subset_entry = dict(orig_entry)
-        subset_entry['files'] = [[subset_stored, datatype]]
-        subset_key = orig_key + 'Subset'
-        if subset_key in outputs:
-            # Allow overwriting existing subset entry
-            pass
-        outputs[subset_key] = subset_entry
-        info['outputs'] = outputs
-
-        with open(info_path, 'w') as f:
-            json.dump(info, f, indent=4)
-        self.log(f"Registered subset: {subset_key} -> {subset_stored} in {info_path}")
-
-        # Register the subset in the job's outputs (workflow) and update pipeline star
-        job_id = Path.rmslash(os.path.relpath(job_folder, self.path).replace(os.sep, '/'))
-        job = self._getJob(job_id)
-        if not job.hasOutput(subset_stored):
-            job.registerOutput(subset_stored, datatype=datatype)
-        self._update_pipeline_star()
 
     @staticmethod
     def main():
@@ -923,15 +866,8 @@ class ProjectManager(FolderManager):
                        help='Check and/or kill processes related to this project.'
                             'Pass more than one -k to kill processes.')
 
-        g.add_argument('--subset', nargs=2,
-                       metavar=('ORIGINAL_SET', 'SUBSET'),
-                       help='Register SUBSET as an output of the job containing ORIGINAL_SET. '
-                            'Paths are relative to project; both files should be in the same run folder.')
-        g.add_argument('--output', '-o', nargs=3,
-                       metavar=('FILE', 'TYPE', 'INFO'),
-                       help='Register a FILE as an output of the job containing the file. '
-                            'Paths are relative to project.')
-
+        g.add_argument('--info', '-i', metavar='JOBID_OR_OUTPUT',
+                       help='Show info for a given job or output.')
 
         p.add_argument('--dry', action='store_true',
                        help="With --submit, print the run or queue submission "
@@ -1003,20 +939,11 @@ class ProjectManager(FolderManager):
         elif args.delete:
             pm.deleteJobs(args.delete)
 
+        elif args.info:
+            pm.showInfo(args.info)
+
         elif args.check > 0:
             kill = args.check > 1
             folderPath = os.path.abspath(pm.path)
             Process.checkChilds('emw', folderPath, kill=kill, verbose=True)
 
-        elif args.subset:
-            try:
-                pm.register_subset(args.subset[0], args.subset[1])
-            except (FileNotFoundError, ValueError) as e:
-                print(f"emw --subset: {e}", file=sys.stderr)
-                sys.exit(1)
-        elif args.output:
-            try:
-                pm.register_output(args.output[0], args.output[1], args.output[2])
-            except (FileNotFoundError, ValueError) as e:
-                print(f"emw --output: {e}", file=sys.stderr)
-                sys.exit(1)
