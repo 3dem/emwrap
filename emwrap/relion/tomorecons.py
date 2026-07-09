@@ -63,16 +63,8 @@ class RelionTomoRecons(RelionBasePipeline):
             args['--ctf'] = ''
 
         self.batch_execute('relion_reconstruct', batch, args)
-        self.outputs = {
-            'Volume': {
-                'label': 'Reconstructed Volume',
-                'type': 'Volume',
-                'info': f"box size: {box} px, {ps} Å/px",
-                'files': [
-                    [outVol, 'TomogramGroupMetadata.star.relion.volume']
-                ]
-            }
-        }
+        outputNodes = [[outVol, 'TomogramGroupMetadata.star.relion.volume']]
+        self.writeRelionOutputNodes(outputNodes)
         self.updateBatchInfo(batch)
 
 

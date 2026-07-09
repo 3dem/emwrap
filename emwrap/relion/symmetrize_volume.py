@@ -71,16 +71,8 @@ class RelionSymmetrizeVolume(RelionBasePipeline):
         except Exception:
             info = "Aligned volume"
 
-        self.outputs = {
-            'Volume': {
-                'label': 'Aligned Volume',
-                'type': 'Volume',
-                'info': info,
-                'files': [
-                    [outVol, 'TomogramGroupMetadata.star.relion.volume']
-                ]
-            }
-        }
+        outputNodes = [[outVol, 'TomogramGroupMetadata.star.relion.volume']]
+        self.writeRelionOutputNodes(outputNodes)
         self.updateBatchInfo(batch)
 
 

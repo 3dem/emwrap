@@ -96,24 +96,9 @@ class RelionTomoRefine(RelionBasePipeline):
 
         outVol = self.join('output', 'run_class001.mrc')
 
-        self.outputs = {
-            'TomogramParticles': {
-                'label': 'Refined Particles',
-                'type': 'TomogramParticles',
-                'info': f"{N} pts (size: {box} px, {ps} Å/px)",
-                'files': [
-                    [outStar, 'TomogramGroupMetadata.star.relion.tomo.particles']
-                ]
-            },
-            'Volume': {
-                'label': 'Refined Volume',
-                'type': 'Volume',
-                'info': f"box size: {box} px, {ps} Å/px",
-                'files': [
-                    [outVol, 'TomogramGroupMetadata.star.relion.volume']
-                ]
-            }
-        }
+        outputNodes = [[outStar, 'TomogramGroupMetadata.star.relion.tomo.particles']]
+        outputNodes.append([outVol, 'TomogramGroupMetadata.star.relion.volume'])
+        self.writeRelionOutputNodes(outputNodes)
         self.updateBatchInfo(batch)
 
 

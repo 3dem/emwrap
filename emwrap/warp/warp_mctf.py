@@ -112,18 +112,6 @@ class WarpMotionCtf(WarpBasePipeline):
 
         x, y, n = dims
 
-        # FIXME: Remove input information, it should be taken from the output of the previous step
-        self.inputs = {
-            'FrameSeries': {
-                'label': 'Frame Series',
-                'type': 'FrameSeries',
-                'info': f"{len(tsAllTable)} items, {x} x {y} x {n} x {N}, {ps:0.3f} Å/px",
-                'files': [
-                    [inputTsStar, 'TomogramGroupMetadata.star.relion.tomo.import']
-                ]
-            }
-        }
-
         if gain := self.acq.get('gain', None):
             self.log(f"{self.name}: Linking gain file: {gain}")
             self.link(gain)
@@ -225,8 +213,8 @@ class WarpMotionCtf(WarpBasePipeline):
         self.log("Registering output STAR files.")
         tsAllTable = StarFile.getTableFromFile('global', self.inputTs)
 
-        newTsStarFile = batch.join('tilt_series_ctf.star')
-        failedStarFile = batch.join('tilt_series_failed.star')
+        newTsStarFile = batch.join('tilt_series.star')
+        failedStarFile = batch.join('failed_tilt_series.star')
         newPs = None
         n = None
         dims = None
@@ -341,32 +329,12 @@ class WarpMotionCtf(WarpBasePipeline):
 
         # Write the corrected_tilt_series.star
         self.write_ts_table('global', newTsAllTable, newTsStarFile)
-        if dims is None:
-            x, y = 0, 0
-        else:
-            x, y = dims[0], dims[1]
+        x, y = (0, 0) if dims is None else (dims[0], dims[1])
 
-        outputNodes = [[newTsStarFile, 'TomogramGroupMetadata.star.emwrap.mctf']]
-        self.outputs = {
-            'TiltSeries': {
-                'label': 'Tilt Series',
-                'type': 'TiltSeries',
-                'info': f"{len(newTsAllTable)} items, {x} x {y} x {n}, {newPs:0.3f} Å/px",
-                'files':outputNodes
-            }
-        }
-        self.writeRelionOutputNodes(outputNodes)
+        self.writeRelionOutputNodes([[newTsStarFile, 'TomogramGroupMetadata.star.emwrap.mctf']])
 
         if len(failedTable) > 0:
             self.write_ts_table('global', failedTable, failedStarFile)
-            self.outputs['TiltSeriesFailed'] = {
-                'label': 'Tilt Series Failed',
-                'type': 'TiltSeriesFailed',
-                'info': f"{len(failedTable)} items",
-                'files': [
-                    [failedStarFile, 'TomogramGroupMetadata.star.emwrap.mctf-failed']
-                ]
-            }
 
         self.updateBatchInfo(batch)
 
