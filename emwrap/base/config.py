@@ -44,7 +44,7 @@ class ProcessingConfig:
 
     @classmethod
     def get_testdata(cls, name):
-        return cls._get_config('mockup', {}).get(name, {})
+        return cls._get_config('testdata', {}).get(name, {})
 
     @classmethod
     def get_testdata_path(cls, name):
