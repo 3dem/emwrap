@@ -27,7 +27,7 @@ from emwrap.base.config import ProcessingConfig
 
 
 class MockWarpApoF:
-    path = ProcessingConfig.get_mockup_data('WarpApoF')
+    path = ProcessingConfig.get_testdata_path('WarpApoF')
     fm = FolderManager(path)
 
     acquisition = Acquisition(
