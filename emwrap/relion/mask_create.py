@@ -107,16 +107,8 @@ class RelionMaskCreate(RelionBasePipeline):
         except Exception:
             info = "3D mask"
 
-        self.outputs = {
-            'VolumeMask': {
-                'label': 'Output Mask',
-                'type': 'VolumeMask',
-                'info': info,
-                'files': [
-                    [out_mask, 'TomogramGroupMetadata.star.relion.mask3d']
-                ]
-            }
-        }
+        outputNodes = [[out_mask, 'TomogramGroupMetadata.star.relion.mask3d']]
+        self.writeRelionOutputNodes(outputNodes)
         self.updateBatchInfo(batch)
 
 

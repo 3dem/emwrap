@@ -57,27 +57,10 @@ class PyTomCreateTemplate(ProcessingPipeline):
 
         batch.log("Storing outputs", flush=True)
         infoStr = f"{boxSize} x {boxSize} x {boxSize}, {outPs:0.3f} Å/px"
+        outputNodes = [[self.join(outputVol), 'TomogramGroupMetadata.star.relion.volume'],
+                       [self.join(outputMask), 'TomogramGroupMetadata.star.relion.mask3d']]
+        self.writeRelionOutputNodes(outputNodes)
 
-        self.outputs = {
-            'Volume': {
-                'label': 'Output Volume',
-                'type': 'Volume',
-                'info': infoStr,
-                'files': [
-                    [self.join(outputVol),
-                     'TomogramGroupMetadata.star.relion.volume']  # FIXME
-                ]
-            },
-            'VolumeMask': {
-                'label': 'Output Mask',
-                'type': 'VolumeMask',
-                'info': infoStr,
-                'files': [
-                    [self.join(outputMask),
-                     'TomogramGroupMetadata.star.relion.mask3d']  # FIXME
-                ]
-            }
-        }
         self.updateBatchInfo(batch)
 
     def prerun(self):

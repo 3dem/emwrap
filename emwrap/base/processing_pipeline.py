@@ -238,6 +238,14 @@ class ProcessingPipeline(Pipeline, FolderManager):
     def _get_launcher(self):
         ProcessingPipeline.get_launcher(self.PROGRAM)
 
+    def _register_output_only(self):
+        """ This will be used mainly for development, when we don't want to 
+        re-run the job, but we want to register the outputs. It might be also
+        useful in case that the users could make modifications the output files
+        and we want to update the results. 
+        """
+        return self._args.get('register_output_only', False)
+
     def run(self):
         try:
             signal.signal(signal.SIGINT, self.__abort)

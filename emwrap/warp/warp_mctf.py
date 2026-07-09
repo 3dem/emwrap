@@ -47,13 +47,13 @@ class WarpMotionCtf(WarpBasePipeline):
 
     def _find_mdoc_files(self, tsAllTable):
         """ Find the mdoc files for the tilt series if not present in the input star file.
-        Returning an empty dictionary if the rlnMdocFile is already present.
+        Returning an empty dictionary if the rlnTomoMdocFile is already present.
         """
         mdocsMapping = {}
 
-        # If the rlnMdocFile column is not present, try to find matching mdoc files.
-        if not tsAllTable.hasColumn('rlnMdocFile'):
-            self.log("No rlnMdocFile column found in the input tilt series...trying to find matching mdoc files.")
+        # If the rlnTomoMdocFile column is not present, try to find matching mdoc files.
+        if not tsAllTable.hasColumn('rlnTomoMdocFile'):
+            self.log("No rlnTomoMdocFile column found in the input tilt series...trying to find matching mdoc files.")
             self.log("Reading job.star from previous run to find matching mdoc glob pattern.")
             inputJobFolder = os.path.dirname(self.inputTs)
             jobStar = os.path.join(inputJobFolder, 'job.star')
@@ -73,7 +73,7 @@ class WarpMotionCtf(WarpBasePipeline):
                 raise Exception(f"No job.star file found in {inputJobFolder}...skipping.")
 
         else:
-            mdocsMapping = {row.rlnTomoName: row.rlnMdocFile for row in tsAllTable}
+            mdocsMapping = {row.rlnTomoName: row.rlnTomoMdocFile for row in tsAllTable}
 
         return mdocsMapping
 
@@ -111,18 +111,6 @@ class WarpMotionCtf(WarpBasePipeline):
                     dims = Image.get_dimensions(frameRow.rlnMicrographMovieName)
 
         x, y, n = dims
-
-        # FIXME: Remove input information, it should be taken from the output of the previous step
-        self.inputs = {
-            'FrameSeries': {
-                'label': 'Frame Series',
-                'type': 'FrameSeries',
-                'info': f"{len(tsAllTable)} items, {x} x {y} x {n} x {N}, {ps:0.3f} Å/px",
-                'files': [
-                    [inputTsStar, 'TomogramGroupMetadata.star.relion.tomo.import']
-                ]
-            }
-        }
 
         if gain := self.acq.get('gain', None):
             self.log(f"{self.name}: Linking gain file: {gain}")
@@ -225,8 +213,8 @@ class WarpMotionCtf(WarpBasePipeline):
         self.log("Registering output STAR files.")
         tsAllTable = StarFile.getTableFromFile('global', self.inputTs)
 
-        newTsStarFile = batch.join('tilt_series_ctf.star')
-        failedStarFile = batch.join('tilt_series_failed.star')
+        newTsStarFile = batch.join('tilt_series.star')
+        failedStarFile = batch.join('failed_tilt_series.star')
         newPs = None
         n = None
         dims = None
@@ -235,8 +223,8 @@ class WarpMotionCtf(WarpBasePipeline):
 
         newPsLabel = 'rlnTomoTiltSeriesPixelSize'
         new_cols = [newPsLabel]
-        if not tsAllTable.hasColumn('rlnMdocFile'):
-            new_cols.append('rlnMdocFile')
+        if not tsAllTable.hasColumn('rlnTomoMdocFile'):
+            new_cols.append('rlnTomoMdocFile')
         newTsAllTable = Table(tsAllTable.getColumnNames() + new_cols)
         failedTable = Table(newTsAllTable.getColumnNames())
 
@@ -278,7 +266,7 @@ class WarpMotionCtf(WarpBasePipeline):
             })
             dstMdocFile = mdocsFm.join(f'{tsName}.mdoc')
             shutil.copy(mdocFile, dstMdocFile)
-            tsDict['rlnMdocFile'] = dstMdocFile
+            tsDict['rlnTomoMdocFile'] = dstMdocFile
 
             if missing:
                 for moviePrefix, reason, path in missing:
@@ -341,32 +329,12 @@ class WarpMotionCtf(WarpBasePipeline):
 
         # Write the corrected_tilt_series.star
         self.write_ts_table('global', newTsAllTable, newTsStarFile)
-        if dims is None:
-            x, y = 0, 0
-        else:
-            x, y = dims[0], dims[1]
+        x, y = (0, 0) if dims is None else (dims[0], dims[1])
 
-        outputNodes = [[newTsStarFile, 'TomogramGroupMetadata.star.emwrap.mctf']]
-        self.outputs = {
-            'TiltSeries': {
-                'label': 'Tilt Series',
-                'type': 'TiltSeries',
-                'info': f"{len(newTsAllTable)} items, {x} x {y} x {n}, {newPs:0.3f} Å/px",
-                'files':outputNodes
-            }
-        }
-        self.writeRelionOutputNodes(outputNodes)
+        self.writeRelionOutputNodes([[newTsStarFile, 'TomogramGroupMetadata.star.emwrap.mctf']])
 
         if len(failedTable) > 0:
             self.write_ts_table('global', failedTable, failedStarFile)
-            self.outputs['TiltSeriesFailed'] = {
-                'label': 'Tilt Series Failed',
-                'type': 'TiltSeriesFailed',
-                'info': f"{len(failedTable)} items",
-                'files': [
-                    [failedStarFile, 'TomogramGroupMetadata.star.emwrap.mctf-failed']
-                ]
-            }
 
         self.updateBatchInfo(batch)
 

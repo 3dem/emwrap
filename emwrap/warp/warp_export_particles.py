@@ -58,17 +58,6 @@ class WarpExportParticles(WarpBasePipeline):
         self.log(f"Total input tomograms: {Color.green(N)}")
 
         self.log(f"Input number of particles: {Color.green(n)}")
-        # Register input in the info.json file
-        self.inputs = {
-            'TomogramCoordinates': {
-                'label': 'Tomogram Coordinates',
-                'type': 'TomogramCoordinates',
-                'info': f"{n} particles from {N} tomograms",
-                'files': [
-                    [inTomoStar, 'TomogramGroupMetadata.star.relion.tomo.tomocoordinates']
-                ]
-            }
-        }
         self.writeInfo()
         warpPath = self.project.join(firstRow.wrpTomostar)
         warpFolder = os.path.dirname(os.path.dirname(warpPath))
@@ -120,16 +109,8 @@ class WarpExportParticles(WarpBasePipeline):
         if os.path.exists(tomoPtsFn):
             self._fixPaths(tomoPtsFn, 'global', ['rlnTomoTiltSeriesName'])
 
-        self.outputs = {
-            'TomogramParticles': {
-                'label': 'Tomogram Particles',
-                'type': 'TomogramParticles',
-                'info': f"{total_pts} pts ({box} px, {ps} Å/px)",
-                'files': [
-                    [outFn, 'TomogramGroupMetadata.star.relion.tomo.particles']
-                ]
-            }
-        }
+        outputNodes = [[outFn, 'TomogramGroupMetadata.star.relion.tomo.particles']]
+        self.writeRelionOutputNodes(outputNodes)
         self.updateBatchInfo(batch)
 
     def _joinStarFiles(self, inTable):

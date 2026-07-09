@@ -170,27 +170,10 @@ class RelionTomoinitial(RelionBasePipeline):
             box = dims[0] if isinstance(dims, (list, tuple)) else dims
             ps = "?"
 
-        self.outputs = {
-            "Volume": {
-                "label": "Tomoinitial map",
-                "type": "Volume",
-                "info": f"box size: {box} px, {ps} Å/px",
-                "files": [
-                    [primary_vol, "TomogramGroupMetadata.star.relion.volume"]
-                ],
-            }
-        }
-
+        outputNodes = [[primary_vol, 'TomogramGroupMetadata.star.relion.volume']]
         if os.path.exists(out_star):
-            self.outputs["TomogramParticles"] = {
-                "label": "Tomoinitial particles",
-                "type": "TomogramParticles",
-                "info": f"{n_pts} pts (size: {box} px, {ps} Å/px)",
-                "files": [
-                    [out_star, "TomogramGroupMetadata.star.relion.tomo.particles"]
-                ],
-            }
-
+            outputNodes.append([out_star, 'TomogramGroupMetadata.star.relion.tomo.particles'])
+        self.writeRelionOutputNodes(outputNodes)
         self.updateBatchInfo(batch)
 
 

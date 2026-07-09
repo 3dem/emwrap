@@ -45,7 +45,7 @@ class ImportTsPipeline(ProcessingPipeline):
             'file_change': int(args.get('wait.file_change', 30)),
             'sleep': int(args.get('wait.sleep', 30)),
         }
-        self.outputStar = self.join('frame_series.star')
+        self.outputStar = self.join('tilt_series.star')
         self.tsFolder = args["tilt_images"]
         self.mdocPattern = args['mdoc_files']
         self.tiltAxisAngle = args['tilt_axis_angle']
@@ -106,7 +106,7 @@ class ImportTsPipeline(ProcessingPipeline):
                 'rlnMicrographOriginalPixelSize',
                 'rlnTomoHand',
                 'rlnOpticsGroupName',
-                'rlnMdocFile'
+                'rlnTomoMdocFile'
             ])
 
         ps = self.acq.pixel_size
@@ -119,24 +119,15 @@ class ImportTsPipeline(ProcessingPipeline):
             rlnMicrographOriginalPixelSize=ps,
             rlnTomoHand=-1,
             rlnOpticsGroupName='optics_group1',
-            rlnMdocFile=mdocFile
+            rlnTomoMdocFile=mdocFile
         )
 
         with StarFile(self.outputStar, 'w') as sfOut:
             sfOut.writeTable('global', self.allTsTable,
                              computeFormat="left",
-                             timeStamp=True)
-            self.outputs = {
-                'FrameSeries': {
-                    'label': 'Frame series',
-                    'type': 'FrameSeries',
-                    'info': f"{len(self.allTsTable)} items, {x} x {y} x {n} x {N}, {ps:0.3f} Å/px",
-                    'files': [
-                        [self.outputStar, 'TomogramGroupMetadata.star.relion.tomo.import']
-                    ]
-                }
-            }
-            self.writeInfo()
+                             timeStamp=True)  
+        self.writeRelionOutputNodes([[self.outputStar, 'TomogramGroupMetadata.star.emwrap.frameseries']])          
+        self.writeInfo()
 
     def prerun(self):
         previousTs = set()
