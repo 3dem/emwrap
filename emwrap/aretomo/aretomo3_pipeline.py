@@ -28,7 +28,7 @@ import csv
 from emtools.utils import Color, FolderManager
 from emtools.image import Image
 from emtools.jobs import Args, TsStarBatchManager
-from emtools.metadata import StarFile, RelionStar, Acquisition, Table
+from emtools.metadata import StarFile, RelionStar, Acquisition, Table, Mdoc
 
 from emwrap.base import ProcessingPipeline
 from .aretomo3 import AreTomo3
@@ -50,23 +50,14 @@ def _fix_mdoc_subframe_paths(mdocPath, destPath, relDir='.'):
             siblings in the same batch folder, or 'tmp_mdoc' if movies
             live in a subfolder relative to where AreTomo3 is invoked.
     """
-    subframeRe = re.compile(r'^\s*SubFramePath\s*=\s*(.*?)\s*$')
-    relDir = relDir.rstrip('/')
+    
+    mdoc = Mdoc.parse(mdocPath)
+    # Let's write a local MDOC file with fixed filenames
+    for _, section in mdoc.zvalues:
+        section['SubFramePath'] = f'./{Mdoc.getSubFrameBase(section)}' 
 
-    with open(mdocPath, 'r') as fin, open(destPath, 'w') as fout:
-        for line in fin:
-            m = subframeRe.match(line)
-            if m:
-                rawValue = m.group(1).strip()
-                baseName = ntpath.basename(rawValue).strip()
-                if not baseName:
-                    baseName = posixpath.basename(rawValue).strip()
-                baseName = baseName.lstrip('./ ').strip()
+    mdoc.write(destPath)
 
-                fullRelPath = f'{relDir}/{baseName}' if relDir != '.' else f'./{baseName}'
-                fout.write(f"SubFramePath = {fullRelPath}\n")
-            else:
-                fout.write(line)
 
 class AreTomo3Pipeline(ProcessingPipeline):
     """ Pipeline specific to AreTomo3 preprocessing. """
@@ -414,6 +405,8 @@ class AreTomo3Pipeline(ProcessingPipeline):
             if 'error' in result:
                 tsDict.update({
                     'rlnTiltSeriesAligned': 'None',
+                    'rlnTiltSeriesOdd': 'None',
+                    'rlnTiltSeriesEvn': 'None',
                     'rlnTomoAlignmentFile': 'None',
                     'rlnTomoCtfFile': 'None',
                     'rlnTomoMetadata': 'None',
@@ -425,6 +418,8 @@ class AreTomo3Pipeline(ProcessingPipeline):
             if tsAligned is None or not os.path.exists(tsAligned):
                 tsDict.update({
                     'rlnTiltSeriesAligned': 'None',
+                    'rlnTiltSeriesOdd': 'None',
+                    'rlnTiltSeriesEvn': 'None',
                     'rlnTomoAlignmentFile': 'None',
                     'rlnTomoCtfFile': 'None',
                     'rlnTomoMetadata': 'None',
