@@ -15,38 +15,14 @@
 # **************************************************************************
 
 import os
-import sys
-import shlex
 import json
-import subprocess
-import argparse
-import shutil
 from datetime import datetime
 
-from emtools.utils import FolderManager, Process, Color, Path, Timer, Pretty
-from emtools.jobs import BatchManager, Workflow
-from emtools.metadata import Table, StarFile, RelionStar
+from emtools.utils import FolderManager, Color, Pretty
+from emtools.metadata import StarFile, RelionStar
 
 from .config import ProcessingConfig
 from .processing_pipeline import ProcessingPipeline
-
-
-STATUS_LAUNCHED = 'Launched'
-STATUS_RUNNING = 'Running'
-STATUS_SUCCEEDED = 'Succeeded'
-STATUS_FAILED = 'Failed'
-STATUS_ABORTED = 'Aborted'
-STATUS_SAVED = 'Saved'
-
-JOB_STATUS_FILES = {
-    'RELION_JOB_RUNNING': STATUS_RUNNING,
-    'RELION_JOB_EXIT_SUCCESS': STATUS_SUCCEEDED,
-    'RELION_JOB_EXIT_FAILURE': STATUS_FAILED,
-    'RELION_JOB_EXIT_ABORTED': STATUS_ABORTED
-}
-
-
-JOB_STATUS_ACTIVE = [STATUS_LAUNCHED, STATUS_RUNNING]
 
 
 class ProjectData(FolderManager):
