@@ -47,20 +47,14 @@ class ProcessingConfig:
         return cls._get_config('testdata', {}).get(name, {})
 
     @classmethod
-    def get_testdata_path(cls, name):
-        return cls.get_testdata(name).get('path', '')
-
-    # @classmethod
-    # def get_cluster(cls):
-    #     return cls._get_config('cluster')
-
-    # @classmethod
-    # def get_cluster_template(cls):
-    #     return cls.get_cluster().get('template', None)
-
-    # @classmethod
-    # def get_cluster_submit(cls):
-    #     cls.get_cluster().get('submit', None)
+    def get_testdata_path(cls, name, validate=False):
+        data_path = cls.get_testdata(name).get('path', '')
+        if validate:
+            if not os.path.exists(data_path):
+                raise FileNotFoundError(f"Test data folder does not exist: {data_path}")
+            if not os.path.isdir(data_path):
+                raise NotADirectoryError(f"Test data folder is not a directory: {data_path}")
+        return data_path
 
     @classmethod
     def get_queues(cls):
