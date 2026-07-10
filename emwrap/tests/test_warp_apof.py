@@ -31,7 +31,7 @@ EMWRAP_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__
 WORKFLOW_TEMPLATE = os.path.join(
     EMWRAP_ROOT, 'config', 'workflows', 'apof-warp-tutorial-part1.json.template')
 
-DATA_ROOT = os.environ.get('EMWRAP_WARP_TUTORIAL', '')
+DATA_ROOT = ProcessingConfig.get_testdata_path('WarpApofTutorial')
 PROJECT_DIR = None
 TILT_SERIES = None
 
@@ -61,11 +61,12 @@ def _test_ngpus():
 def _load_workflow_jobs():
     with open(WORKFLOW_TEMPLATE) as f:
         workflow = json.load(f)
-    jobs = [j for j in workflow['jobs'] if j['jobtype'] in JOB_TYPES]
-    if len(jobs) != len(JOB_TYPES):
-        missing = set(JOB_TYPES) - {j['jobtype'] for j in jobs}
+    jobs_by_type = {
+        j['jobtype']: j for j in workflow['jobs'] if j['jobtype'] in JOB_TYPES}
+    if len(jobs_by_type) != len(JOB_TYPES):
+        missing = set(JOB_TYPES) - set(jobs_by_type)
         raise ValueError(f"Workflow template is missing jobs: {missing}")
-    return jobs
+    return [jobs_by_type[job_type] for job_type in JOB_TYPES]
 
 
 def _patch_workflow_params(jobs, ngpus, ts_name=None):
@@ -108,39 +109,36 @@ def _link_data(project_dir, data_root):
 
 
 @contextmanager
-def _project_dir(test_name):
+def _project_manager(test_name, project_dir=None):
     """Use a persistent project folder or a temporary one."""
-    if PROJECT_DIR:
-        project_dir = os.path.abspath(PROJECT_DIR)
-        os.makedirs(project_dir, exist_ok=True)
-        cwd = os.getcwd()
-        os.chdir(project_dir)
-        try:
-            print(Color.warn(f"Using project dir: {project_dir}"))
-            yield project_dir
-        finally:
-            os.chdir(cwd)
-        print(Color.warn(f"Project kept at: {project_dir}"))
+    if project_dir:
+        project_path = os.path.abspath(project_dir)
+        os.makedirs(project_path, exist_ok=True)
+        pipeline_star = os.path.join(project_path, 'default_pipeline.star')
+        if os.path.exists(pipeline_star):
+            pm = ProjectManager(project_path)
+            pm.clean()
+        else:
+            pm = ProjectManager(project_path, create=True)
+        yield pm
+
+        print(Color.warn(f"Project kept at: {project_path}"))
     else:
-        with Path.tmpDir(prefix=f"{test_name}__", chdir=True) as project_dir:
-            yield project_dir
+        with Path.tmpDir(prefix=f"{test_name}__", chdir=True) as project_path:
+            yield ProjectManager(project_path, create=True)
 
 
-def _create_project(project_dir):
-    pipeline_star = os.path.join(project_dir, 'default_pipeline.star')
-    if os.path.exists(pipeline_star):
-        pm = ProjectManager(project_dir)
-        pm.clean()
-    else:
-        pm = ProjectManager(project_dir, create=True)
-    return pm
-
-
-@unittest.skipUnless(DATA_ROOT and os.path.isdir(DATA_ROOT),
-                     'EMWRAP_WARP_TUTORIAL must point to an existing folder')
-@unittest.skipUnless(_emwrap_configured(),
-                     'EMWRAP_CONFIG is not configured (source emwrap.bashrc)')
 class TestWarpApoF(unittest.TestCase):
+
+    def _validate_environment(self):
+        if not _emwrap_configured():
+            self.fail('EMWRAP_CONFIG is not configured (source emwrap.bashrc)')
+        if not DATA_ROOT:
+            self.fail(
+                'Test data path for WarpApofTutorial is not configured in '
+                'EMWRAP_CONFIG')
+        if not os.path.isdir(DATA_ROOT):
+            self.fail(f'Test data folder does not exist: {DATA_ROOT}')
 
     def _assert_job_succeeded(self, pm, job_id, output_star):
         self.assertTrue(
@@ -154,6 +152,7 @@ class TestWarpApoF(unittest.TestCase):
         self.assertEqual(job['status'], 'Succeeded')
 
     def _run_workflow(self):
+        self._validate_environment()
         caller_name = inspect.currentframe().f_back.f_code.co_name
         test_name = f"{self.__class__.__name__}.{caller_name}"
         print(Color.warn(f"\n============= Running test: {test_name} ============="))
@@ -164,17 +163,11 @@ class TestWarpApoF(unittest.TestCase):
             _load_workflow_jobs(), _test_ngpus(), ts_name=TILT_SERIES)
         workflow = {'jobs': jobs}
 
-        with _project_dir(test_name) as project_dir:
-            _link_data(project_dir, DATA_ROOT)
-            pm = _create_project(project_dir)
+        with _project_manager(test_name, project_dir=PROJECT_DIR) as pm:
+            pm.link(DATA_ROOT, 'data')
+            _link_data(pm.path, DATA_ROOT)
             id_map = pm.loadWorkflow(workflow=workflow)
-
-            job_ids = []
-            for job_type in JOB_TYPES:
-                job_id = next(
-                    new_id for old_id, new_id in id_map.items()
-                    if pm._getJob(new_id)['jobtype'] == job_type)
-                job_ids.append(job_id)
+            job_ids = [id_map[job['jobid']] for job in jobs]
 
             for job_type, job_id in zip(JOB_TYPES, job_ids):
                 pm.runJob(job_id, wait=True)
