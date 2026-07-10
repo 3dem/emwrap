@@ -21,32 +21,28 @@ from emwrap.base import ProjectManager
 from .test_apof import TestApoF
 
 
-class TestApoFWarp(TestApoF):
+class TestApoFWarpOtf(TestApoF):
     emwrap_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     workflow_template = os.path.join(
-        emwrap_root, 'config', 'workflows', 'apof-warp-tutorial-part1.json.template')
+        emwrap_root, 'config', 'workflows', 'apof-warp-tutorial-otf.json.template')
 
     job_types = [
         'emw-import-ts',
-        'emw-warp-mctf',
-        'emw-warp-aretomo',
-        'emw-warp-ctfrec',
+        'emw-warp-mctf'
     ]
 
     expected_outputs = {
         'emw-import-ts': 'tilt_series.star',
         'emw-warp-mctf': 'tilt_series.star',
-        'emw-warp-aretomo': 'aligned_tilt_series.star',
-        'emw-warp-ctfrec': 'tomograms.star',
     }
 
-    def test_apof_warp(self):
+    def test_apof_warp_otf(self):
         self._run_workflow()
 
 
 if __name__ == '__main__':
-    args = TestApoFWarp.get_args()
-    TestApoFWarp.configure(project_dir=args.project, tilt_series=args.ts, ngpus=args.gpus, dry=args.dry)
+    args = TestApoFWarpOtf.get_args()
+    TestApoFWarpOtf.configure(project_dir=args.project, tilt_series=args.ts, ngpus=args.gpus, dry=args.dry)
     verbosity = min(2, args.verbose) if args.verbose else 1
-    result = TestApoFWarp(methodName='test_apof_warp').run()
+    result = TestApoFWarpOtf(methodName='test_apof_warp_otf').run()
     sys.exit(0 if result.wasSuccessful() else 1)
