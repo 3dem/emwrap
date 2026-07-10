@@ -50,20 +50,14 @@ class ProjectData(FolderManager):
 
         self._jobs = self._data.get('jobs', {})
         self._outputs = self._data.get('outputs', {})
+
+    def _debug(self, message, **kwargs):
+        self._project._print(f">>> ProjectData:: {message}", level=2)
         
     def _computeOutputTypeInfo(self, output_id, outputFiles):
-        """"
-        _rlnCtfFigureOfMerit
-_rlnCtfMaxResolution
-_rlnCtfIceRingDensity
-_rlnTomoXTilt
-_rlnTomoYTilt
-_rlnTomoZRot
-_rlnTomoXShiftAngst
-_rlnTomoYShiftAngst
-        """
         filepath = outputFiles[0]
-        print(f">>>>>> {Color.warn('OUTPUT')}: {Color.red('Computing')} info for {Color.bold(filepath)}")
+        self._debug(f"{Color.warn('OUTPUT')}: {Color.red('Computing')} info for {Color.bold(filepath)}")
+
         if filepath.endswith('.star'):
             if '_series' in filepath:
                 try:
@@ -89,7 +83,9 @@ _rlnTomoYShiftAngst
                         'info': f'{len(global_table)} items'
                 }
                 except Exception as e:
-                    print(f"Error computing {Color.warn('OUTPUT')} info for {Color.bold(filepath)}: {e}")
+                    self._debug(
+                        f"Error computing {Color.warn('OUTPUT')} info for "
+                        f"{Color.bold(filepath)}: {e}")
             elif 'tomograms' in filepath:
                 datatype = 'Tomograms'
                 return {
@@ -103,7 +99,7 @@ _rlnTomoYShiftAngst
 
     def _computeJobInfo(self, jobId, jobFiles):
         jobStarFile = jobFiles[0]
-        print(f">>>>>> {Color.cyan('JOB')}: {Color.red('Computing')} info for {Color.bold(jobStarFile)}")
+        self._debug(f"{Color.cyan('JOB')}: {Color.red('Computing')} info for {Color.bold(jobStarFile)}")
 
         params = RelionStar.read_jobstar(jobStarFile)
         job = self._wf.getJob(jobId)
@@ -135,7 +131,7 @@ _rlnTomoYShiftAngst
         #         break
 
         if os.path.exists(outputsStarFile):
-            print(f">>>>>> {Color.cyan('JOB')}: {Color.red('Reading')} star from {Color.bold(outputsStarFile)}")
+            self._debug(f"{Color.cyan('JOB')}: {Color.red('Reading')} star from {Color.bold(outputsStarFile)}")
             output_table = StarFile.getTableFromFile('pipeline_nodes', outputsStarFile)
             for row in output_table:
                 if row.rlnPipeLineNodeName not in outputs:
@@ -148,7 +144,7 @@ _rlnTomoYShiftAngst
 
     def _set_info(self, info_dict, item_id, info):
         info['ts'] = datetime.now().timestamp()
-        print(f"Setting info for {item_id}, ts: {Pretty.timestamp(info['ts'])}")
+        self._debug(f"Setting info for {item_id}, ts: {Pretty.timestamp(info['ts'])}")
         info_dict[item_id] = info
 
     def _get_info(self, info_dict, item_id, info_files, compute_info_func):
@@ -201,7 +197,7 @@ _rlnTomoYShiftAngst
             self._updateJob(job, info)
 
     def getJobInfo(self, job_id):
-        print(f">>>>>> {Color.cyan('JOB')}: Getting info for {Color.bold(job_id)}")
+        self._debug(f"{Color.cyan('JOB')}: Getting info for {Color.bold(job_id)}")
         jobFiles = [self.join(job_id, fn) for fn in ['job.star', 'RELION_OUTPUT_NODES.star']]
         return self._get_info(self._jobs, job_id, jobFiles, self._computeJobInfo)
 
@@ -209,7 +205,7 @@ _rlnTomoYShiftAngst
         self._set_info(self._jobs, job_id, job_info)
 
     def getOutputInfo(self, output_id):
-        print(f">>>>>> {Color.warn('OUTPUT')}: Getting info for {Color.bold(output_id)}")
+        self._debug(f"{Color.warn('OUTPUT')}: Getting info for {Color.bold(output_id)}")
         outputFiles = [self.join(output_id)]
         return self._get_info(self._outputs, output_id, outputFiles, self._computeOutputTypeInfo)
 

@@ -52,9 +52,10 @@ JOB_STATUS_ACTIVE = [STATUS_LAUNCHED, STATUS_RUNNING]
 class ProjectManager(FolderManager):
     """ Class to manipulate information about a Relion project. """
 
-    def __init__(self, path, create=False):
+    def __init__(self, path, create=False, verbose=1):
         FolderManager.__init__(self, path)
         apath = os.path.abspath(path)
+        self._verbose = verbose
 
         if not self.exists():
             raise Exception(f"Project path '{apath}' does not exist")
@@ -70,7 +71,11 @@ class ProjectManager(FolderManager):
         else:
             raise Exception(f"'{self.pipeline_star} does not exist")
 
-        self._data = ProjectData(self)        
+        self._data = ProjectData(self)  
+
+    def _print(self, message, level=1):
+        if self._verbose >= level:
+            print(f"{Pretty.now()}: {message}", flush=True)
 
     def get_workflow(self):
         return self._wf
@@ -869,6 +874,9 @@ class ProjectManager(FolderManager):
         g.add_argument('--info', '-i', metavar='JOBID_OR_OUTPUT',
                        help='Show info for a given job or output.')
 
+        p.add_argument('-v', '--verbose', action='count', default=0,
+                       help='Increase verbosity (-v or -vv).')
+
         p.add_argument('--dry', action='store_true',
                        help="With --submit, print the run or queue submission "
                             "commands without writing files or executing.")
@@ -893,10 +901,10 @@ class ProjectManager(FolderManager):
         else:
             if n == 2 and args.clean:
                 # Only clean option, clean and create project
-                pm = ProjectManager(args.path, create=True)
+                pm = ProjectManager(args.path, create=True, verbose=args.verbose)
             else:
                 # Just try to load the existing project
-                pm = ProjectManager(args.path)
+                pm = ProjectManager(args.path, verbose=args.verbose)
 
         def _params(params, i):
             n = len(params)
