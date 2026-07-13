@@ -18,7 +18,7 @@
                 "acq.gain": "data/gain_ref.mrc",                                                                                                                                                                          
                 "acq.pixel_size": "0.789",
                 "acq.total_dose": "2.64",
-                "acq.amplitude_constrast": "0.1",
+                "acq.amplitude_constrast": "0.1"
             }
         },
         {
