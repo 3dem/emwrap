@@ -384,7 +384,7 @@ def run_preprocessing():
     # Create a single configuration file
     argsJson = {
         "acquisition": acquisition,
-        "emw-warp-preprocessing": {
+        "emw-warp-otf": {
             "gpu": gpus,
             "mdocs": "data/mdocs/Position_*[0-9].mdoc"
         }

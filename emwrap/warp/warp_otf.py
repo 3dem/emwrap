@@ -32,14 +32,13 @@ from .warp_aretomo import WarpAreTomo
 from .warp_ctfrec import WarpCtfReconstruct
 
 
-class WarpPreprocessing(WarpBasePipeline):
+class WarpOTF(WarpBasePipeline):
     """ Warp wrapper to the following steps in streaming:
         - warp_mctf
         - warp_aretomo
         - warp_ctfrec
     """
-    name = 'emw-warp-preprocessing'
-    input_name = 'in_movies'
+    name = 'emw-warp-otf'
 
     def get_preprocessing_proc(self, gpu):
 
@@ -132,9 +131,5 @@ class WarpPreprocessing(WarpBasePipeline):
         self.addProcessor(outputQueue, self._output)
 
 
-def main():
-    WarpPreprocessing.main()
-
-
 if __name__ == '__main__':
-    main()
+    WarpOTF.main()
