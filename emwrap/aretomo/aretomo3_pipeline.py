@@ -78,7 +78,7 @@ class AreTomo3Pipeline(ProcessingPipeline):
         self.inputGain = self.acq.get('gain', None)
         self._allResults = {}  # tsName -> result dict, accumulated by _output
         self.inputTs = None  # set in prerun via _getInputTsTable
-        self.registerOnly = self._is_register_only() # DEBUG flag
+        self.registerOnly = self._register_output_only() # DEBUG flag
 
     def get_aretomo3_proc(self, gpu):
         def _aretomo3(batch):
@@ -128,10 +128,6 @@ class AreTomo3Pipeline(ProcessingPipeline):
             return batch
 
         return _aretomo3
-
-    def _is_register_only(self):
-        """ DEBUG: if True, don't run AreTomo3, just rebuild outputs from the final job folders. """
-        return self._args.get('register_output_only', False)
 
     def _collect_existing_final_result(self, tsName):
         tsFolder = self._getOutputTsFolder(tsName)

@@ -57,7 +57,7 @@
                         {
                             "name": "aretomo3.McPatch",
                             "label": "Patches (XxY):",
-                            "default": "1x1",
+                            "default": "1 1",
                             "paramClass": "StringParam",
                             "help": "(--McPatch) More patches capture more local motion. 5 5 works well for cryo-ET; 1 1 = full-frame alignment only."
                         },

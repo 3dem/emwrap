@@ -1,0 +1,10 @@
+#!/bin/bash
+
+# Get the directory of the current script
+DIR="$(dirname "$(readlink -f "$0")")"
+
+# Source the other script using the determined directory
+
+. "${DIR}/../emwrap.bashrc"
+
+python -m emwrap.tests.test_aretomo3_apof "$@"
