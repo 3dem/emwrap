@@ -124,8 +124,7 @@ class TestApoF(unittest.TestCase):
         job_ids = [id_map[job['jobid']] for job in jobs]
         for job_type, job_id in zip(self.job_types, job_ids):
             if self.dry:
-                print(Color.warn(f"Dry run: would run job {job_id} for {job_type}"))
-                pm.saveJob(job_id)
+                print(Color.warn(f"Dry run: would run job {job_id} for {job_type}"), flush=True)
             else:
                 pm.runJob(job_id, wait=True)
                 pm.update()
