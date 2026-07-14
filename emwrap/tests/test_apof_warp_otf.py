@@ -17,7 +17,6 @@
 import os
 import sys
 
-from emwrap.base import ProjectManager
 from .test_apof import TestApoF
 
 
@@ -36,13 +35,6 @@ class TestApoFWarpOtf(TestApoF):
         'emw-warp-mctf': 'tilt_series.star',
     }
 
-    def test_apof_warp_otf(self):
-        self._run_workflow()
-
 
 if __name__ == '__main__':
-    args = TestApoFWarpOtf.get_args()
-    TestApoFWarpOtf.configure(project_dir=args.project, tilt_series=args.ts, ngpus=args.gpus, dry=args.dry)
-    verbosity = min(2, args.verbose) if args.verbose else 1
-    result = TestApoFWarpOtf(methodName='test_apof_warp_otf').run()
-    sys.exit(0 if result.wasSuccessful() else 1)
+    TestApoFWarpOtf.run_tests()
