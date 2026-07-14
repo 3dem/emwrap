@@ -20,6 +20,7 @@ from datetime import datetime
 
 from emtools.utils import FolderManager, Color, Pretty
 from emtools.metadata import StarFile, RelionStar
+from emtools.image import Image
 
 from .config import ProcessingConfig
 from .processing_pipeline import ProcessingPipeline
@@ -92,6 +93,20 @@ class ProjectData(FolderManager):
                     'type': datatype,
                     'info': 'No-info'
                 }
+        elif filepath.endswith('.mrc'):
+            try:
+                dims = Image.get_dimensions(filepath)
+                if (isinstance(dims, (list, tuple)) and len(dims) >= 3
+                        and dims[0] == dims[1] == dims[2]):
+                    return {
+                        'type': 'Volume',
+                        'info': f'{dims[0]} x {dims[1]} x {dims[2]} px'
+                    }
+            except Exception as e:
+                self._debug(
+                    f"Error computing {Color.warn('OUTPUT')} info for "
+                    f"{Color.bold(filepath)}: {e}")
+
         return {
             'type': 'File',
             'info': 'No-info'
