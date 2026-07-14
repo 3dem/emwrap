@@ -72,7 +72,7 @@ class WarpExportParticles(WarpBasePipeline):
 
         box = subargs['--box']
         ps = subargs['--output_angpix']
-        outStar = "warp_particles.star"
+        outStar = "particles.star"
         args = Args({
             'WarpTools': "ts_export_particles",
             "--settings": self.TSS,
@@ -90,9 +90,9 @@ class WarpExportParticles(WarpBasePipeline):
 
         self.batch_execute('ts_export_particles', batch, args)
 
-        iosFn = self.join('warp_particles_optimisation_set.star')
-        ptsFn = self.join('warp_particles.star')
-        tomoPtsFn = self.join('warp_particles_tomograms.star')
+        iosFn = self.join('optimisation_set.star')
+        ptsFn = self.join('particles.star')
+        tomoPtsFn = self.join('tomograms.star')
 
         outFn = ptsFn
 
