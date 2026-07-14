@@ -200,8 +200,8 @@ class WarpBasePipeline(ProcessingPipeline):
     def _get_launcher(self):
         return self.get_launcher_arg('launcher_warp', 'WARP')
     
-    def get_subargs(self, key, extra_name=None):
-        subargs = self._args.subset(key, '--', filters=['remove_false', 'remove_empty'])
+    def get_subargs(self, key, extra_name=None, prefix='--'):
+        subargs = self._args.subset(key, prefix, filters=['remove_false', 'remove_empty'])
         if extra_name:
             extra = Args.fromString(self._args.get(extra_name, ''))
             subargs.update(extra)
