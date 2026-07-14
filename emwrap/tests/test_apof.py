@@ -20,15 +20,15 @@ import json
 import os
 import sys
 import unittest
-from contextlib import contextmanager
 import tempfile
-from emtools.utils import Color, Path
+from emtools.utils import Color
 
 from emwrap.base import ProjectManager
 from emwrap.base.config import ProcessingConfig
 
 
 class TestApoF(unittest.TestCase):
+    EMWRAP_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     project_path = None
     project_temporary = False
 
@@ -37,22 +37,25 @@ class TestApoF(unittest.TestCase):
     ngpus = 1
     dry = False
     
+    @classmethod
+    def get_workflow_template(cls, workflow_name):
+        return os.path.join(cls.EMWRAP_ROOT, 'config', 'workflows', f'{workflow_name}.json.template')
 
     @classmethod
-    def configure(cls, project_dir=None, tilt_series=None, ngpus=None, dry=False):
+    def configure(cls, args):
         """Set class-level options before running tests."""
-        if project_dir is None:
+        if args.project is None:
             cls.project_temporary = True
             tmpdir = tempfile.TemporaryDirectory(prefix=f"{cls.__name__}__")
             cls.addClassCleanup(tmpdir.cleanup)
             cls.project_path = tmpdir.name
         else:
             cls.project_temporary = False
-            cls.project_path = project_dir
+            cls.project_path = args.project
             
-        cls.tilt_series = tilt_series or '*'
-        cls.ngpus = ngpus or int(os.environ.get('EMWRAP_TEST_GPUS', 1))
-        cls.dry = dry
+        cls.tilt_series = args.ts or '*'
+        cls.ngpus = args.gpus or int(os.environ.get('EMWRAP_TEST_GPUS', 1))
+        cls.dry = args.dry
         cls.data_root = ProcessingConfig.get_testdata_path('WarpApofTutorial', validate=True)
 
     @classmethod
@@ -121,21 +124,25 @@ class TestApoF(unittest.TestCase):
         job_ids = [id_map[job['jobid']] for job in jobs]
         for job_type, job_id in zip(self.job_types, job_ids):
             if self.dry:
-                print(Color.warn(f"Dry run: would run job {job_id} for {job_type}"))
-                pm.saveJob
-                continue
+                print(Color.warn(f"Dry run: would run job {job_id} for {job_type}"), flush=True)
             else:
                 pm.runJob(job_id, wait=True)
                 pm.update()
                 self._assert_job_succeeded(pm, job_id, self.expected_outputs[job_type])
 
-    @classmethod
-    def run_tests(cls, verbosity=2):
-        suite = unittest.TestLoader().loadTestsFromTestCase(cls)
-        return unittest.TextTestRunner(verbosity=verbosity).run(suite)
+    def test_apof(self):
+        self._run_workflow()
 
     @classmethod
-    def get_args(cls):
+    def run_tests(cls):
+        args = cls.get_args()
+        cls.configure(args)
+        cls.verbosity = min(2, args.verbose) if args.verbose else 1
+        result = cls(methodName='test_apof').run()
+        sys.exit(0 if result.wasSuccessful() else 1)
+
+    @classmethod
+    def get_parser(cls):
         parser = argparse.ArgumentParser(
         description='Run Warp ApoF integration tests.')
         parser.add_argument(
@@ -153,6 +160,10 @@ class TestApoF(unittest.TestCase):
         parser.add_argument(
             '--dry', action='store_true',
             help='Dry run: do not actually run the jobs, just print what would be done.')
-        args = parser.parse_args()
 
-        return args
+        return parser
+
+    @classmethod
+    def get_args(cls):
+        parser = cls.get_parser()
+        return parser.parse_args()

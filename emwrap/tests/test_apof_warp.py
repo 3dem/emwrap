@@ -22,9 +22,8 @@ from .test_apof import TestApoF
 
 
 class TestApoFWarp(TestApoF):
-    emwrap_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    workflow_template = os.path.join(
-        emwrap_root, 'config', 'workflows', 'apof-warp-tutorial-part1.json.template')
+    workflow_template = TestApoF.get_workflow_template('apof-warp-tutorial-part1')
+    workflow_template_full = TestApoF.get_workflow_template('apof-warp-tutorial-full')
 
     job_types = [
         'emw-import-ts',
@@ -40,13 +39,14 @@ class TestApoFWarp(TestApoF):
         'emw-warp-ctfrec': 'tomograms.star',
     }
 
-    def test_apof_warp(self):
-        self._run_workflow()
+    @classmethod
+    def get_parser(cls):
+        parser = super().get_parser()
+        parser.add_argument(
+            '--workflow', '-w', choices=['small', 'medium', 'full'], default='small',
+            help='Workflow size: small (preprocessing), medium (part1), or full.')
+        return parser
 
 
 if __name__ == '__main__':
-    args = TestApoFWarp.get_args()
-    TestApoFWarp.configure(project_dir=args.project, tilt_series=args.ts, ngpus=args.gpus, dry=args.dry)
-    verbosity = min(2, args.verbose) if args.verbose else 1
-    result = TestApoFWarp(methodName='test_apof_warp').run()
-    sys.exit(0 if result.wasSuccessful() else 1)
+    TestApoFWarp.run_tests()
