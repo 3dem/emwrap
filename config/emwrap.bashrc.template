@@ -44,6 +44,11 @@ export EMWRAP_CONFIG=$(cat <<EOF
             "label": "PyTom Template Matching",
             "output": "PyTom"
         },
+        "emw-aretomo3": {
+            "launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.aretomo.aretomo3_pipeline",
+            "label": "Aretomo3",
+            "output": "Aretomo3"
+        },
         "emw-warp-aretomo": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_aretomo"},
         "emw-warp-etomo_patches": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_etomo_patches"},
         "emw-warp-ctfrec": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_ctfrec"},
