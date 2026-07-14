@@ -125,8 +125,7 @@ class TestApoF(unittest.TestCase):
         for job_type, job_id in zip(self.job_types, job_ids):
             if self.dry:
                 print(Color.warn(f"Dry run: would run job {job_id} for {job_type}"))
-                pm.saveJob
-                continue
+                pm.saveJob(job_id)
             else:
                 pm.runJob(job_id, wait=True)
                 pm.update()
