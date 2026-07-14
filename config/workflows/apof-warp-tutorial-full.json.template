@@ -43,7 +43,7 @@
                 "fs_motion_and_ctf.perdevice": "2",
                 "gpus": "4",
                 "input_tiltseries": "External/job002/tilt_series.star",
-                "launcher_warp": "",
+                "launcher_warp": ""
             }
         },
         {

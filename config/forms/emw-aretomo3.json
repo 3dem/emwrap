@@ -1,0 +1,269 @@
+{
+    "name": "emw-aretomo3",
+    "help": "Wrapper to run aretomo3 automated reconstruction. \n\n*REFERENCES*:\n[[https://github.com/czimaginginstitute/AreTomo3/][AreTomo3]]",
+    "sections": [
+        {
+            "label": "Motion correction",
+            "params": [
+                {
+                    "label": "Input",
+                    "paramClass": "Group",
+                    "params": [
+                        {
+                            "name": "input_tiltseries",
+                            "label": "Input tilt series:",
+                            "pattern": "",
+                            "help": "STAR file with input tilt-series",
+                            "paramClass": "PathParam",
+                            "pointerClass": "FrameSeries"
+                        }
+                    ]
+                },
+                {
+                    "label": "EER specifics",
+                    "paramClass": "Group",
+                    "params": [
+                        {
+                            "name": "aretomo3.FmInt",
+                            "label": "Frames per MC interval",
+                            "paramClass": "IntParam",
+                            "help": "(--FmInt) E.g. 12 means groups of 12 EER frames are summed before alignment. Required for EER data — do not use for TIFF."
+                        },
+                        {
+                            "name": "aretomo3.EerSampling",
+                            "label": "EER upsampling factor",
+                            "paramClass": "EnumParam",
+                            "choices": {
+                                "1": "Native (~4k × 4k)",
+                                "2": "Half (2k × 2k)",
+                                "3": "Quarter (1k × 1k)"
+                            },
+                            "default": "1",
+                            "help": "(--EerSampling) Directly determines the maximum achievable resolution."
+                        }
+                    ]
+                },
+                {
+                    "label": "Patch alignment",
+                    "paramClass": "Group",
+                    "params": [
+                        {
+                            "name": "aretomo3.McBin",
+                            "label": "Fourier-space binning during MC",
+                            "paramClass": "IntParam",
+                            "default": 1,
+                            "help": "(--McBin) Use 2 for EER data with EerSampling=2 to reduce memory. Higher values reduce precision."
+                        },
+                        {
+                            "name": "aretomo3.McPatch",
+                            "label": "Patches (XxY):",
+                            "default": "1 1",
+                            "paramClass": "StringParam",
+                            "help": "(--McPatch) More patches capture more local motion. 5 5 works well for cryo-ET; 1 1 = full-frame alignment only."
+                        },
+                        {
+                            "name": "aretomo3.McGroup",
+                            "label": "Frame grouping (global x patch):",
+                            "default": "",
+                            "paramClass": "StringParam",
+                            "help": "(--Group) First number = global alignment grouping, second = patch alignment grouping, e.g. '1 3'. Empty = no grouping."
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "label": "Tilt-Series Alignment and Reconstruction",
+            "params": [
+                {
+                    "label": "Tilt series alignment",
+                    "paramClass": "Group",
+                    "params": [
+                        {
+                            "name": "aretomo3.AlignZ",
+                            "label": "Volume height for alignment",
+                            "paramClass": "IntParam",
+                            "default": 800,
+                            "help": "(--AlignZ) Internal volume height used during tilt series alignment. Should be ~1.5–2× expected sample thickness in voxels at the alignment binning. Does not affect final tomogram Z."
+                        },
+                        {    
+                            "name": "aretomo3.TiltAxis",
+                            "label": "Tilt axis angle (deg)",
+                            "paramClass": "StringParam",
+                            "help": "(--TiltAxis) 1st value known tilt axis angle in degrees. 2nd value Controls refinement range around the provided angle. Only relevant when an angle is provided. 0 = refine ±10°, any positive value = refine ±3°, any negative value = use angle as-is with no refinement. Leave empty to let AreTomo3 search the full range automatically."
+                        },
+                        {
+                            "name": "aretomo3.AtPatch",
+                            "label": "Local alignment patches (XxY):",
+                            "default": "",
+                            "paramClass": "StringParam",
+                            "help": "(--AtPatch) e.g. '4 4'. Improves alignment for samples with local thickness variation. Empty = global alignment only."
+                        },
+                        {
+                            "name": "aretomo3.DarkTol",
+                            "label": "Dark image tolerance",
+                            "paramClass": "FloatParam",
+                            "default": 0.7,
+                            "help": "(--DarkTol) Threshold (0–1) for discarding dark/empty tilt images. Higher = more aggressive. Set to 0 to disable (recommended when debugging)."
+                        }
+                    ]
+                },
+                {
+                    "label": "CTF estimation and correction",
+                    "paramClass": "Group",
+                    "params": [
+                        {
+                            "name": "aretomo3.AmpContrast",
+                            "label": "Amplitude contrast",
+                            "paramClass": "FloatParam",
+                            "default": 0.07,
+                            "help": "(--AmpContrast) Typically 0.07–0.10 for cryo-ET. Affects CTF fit quality."
+                        },
+                        {
+                            "name": "aretomo3.CorrCTF",
+                            "label": "Enable local CTF correction",
+                            "paramClass": "BooleanParam",
+                            "default": true,
+                            "help": "(--CorrCTF) Apply local CTF correction on the raw tilt series before reconstruction. Leave on by default; disable only if data is pre-corrected."
+                        }
+                    ]
+                },
+                {
+                    "label": "Tomogram reconstruction",
+                    "paramClass": "Group",
+                    "params": [
+                        {
+                            "name": "aretomo3.VolZ",
+                            "label": "Volume Z height",
+                            "paramClass": "IntParam",
+                            "default": -1,
+                            "help": "(--VolZ) Must be > 0 to produce a tomogram. 0 = aligned tilt series only (no reconstruction). -1 = auto-estimate thickness."
+                        },
+                        {
+                            "name": "aretomo3.ExtZ",
+                            "label": "Extra volume Z padding",
+                            "paramClass": "IntParam",
+                            "default": 0,
+                            "help": "(--ExtZ) Extra space added to the estimated sample thickness for final reconstruction. Only relevant when Volume Z height = -1."
+                        },
+                        {
+                            "name": "aretomo3.AtBin",
+                            "label": "Tomogram binning",
+                            "default": "1 0",
+                            "paramClass": "StringParam",
+                            "help": "(--AtBin) 1st value primary tomogram binning relative to motion-corrected tilt series. 2nd value optional for second resolution tomogram. Leave empty to disable."
+                        },
+                        {
+                            "name": "aretomo3.Wbp",
+                            "label": "Use weighted back-projection (WBP)",
+                            "paramClass": "BooleanParam",
+                            "default": true,
+                            "help": "(--Wbp) Recommended over SART for most cryo-ET. When disabled, SART is used instead (see below)."
+                        },
+                        {   
+                            "name": "aretomo3.Sart",
+                            "label": "SART (used only if WBP disabled)",
+                            "default": "15 5",
+                            "paramClass": "StringParam",
+                             "help": "(--Sart) 1st value number of SART iterations. 2nd value number of projections per update."
+                        },
+                        {
+                            "name": "aretomo3.TiltCor",
+                            "label": "Tilt angle offset correction",
+                            "paramClass": "EnumParam",
+                            "choices": {
+                                "-1": "Skip — do not measure or apply",
+                                "0": "Measure only — used for alignment, not applied to reconstruction",
+                                "1": "Measure and apply — also corrects final reconstruction"
+                            },
+                            "default": "0",
+                            "help": "(--TiltCor) Controls whether the tilt angle offset is measured, and whether that correction is carried through to the reconstructed volume. It is not recommended to enable this option (-TiltCor 1) when subtomogram average is part of your workflow since this option rotates the volume around its tilt axis. The z coordinates of particles picked from the rotated tomogram would be different from the coordinates in the sample."
+                        },
+                        {
+                            "name": "aretomo3.ReconRange",
+                            "label": "Reconstruction tilt range",
+                            "default": "-60 60",
+                            "paramClass": "StringParam",
+                            "help": "(--ReconRange) 1st value minimum tilt angle (deg) included in reconstruction. 2nd value maximum tilt angle (deg) included in reconstruction."
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "label": "Output",
+            "params": [
+                {
+                    "name": "aretomo3.FlipVol",
+                    "label": "Save volume as XYZ",
+                    "paramClass": "BooleanParam",
+                    "default": true,
+                    "help": "(--FlipVol) Save the tomogram in XYZ order instead of default XZY. Enable for compatibility with IMOD, Relion, and WARP."
+                },
+                {
+                    "name": "aretomo3.OutImod",
+                    "label": "IMOD output format",
+                    "paramClass": "EnumParam",
+                    "choices": {
+                        "0": "None",
+                        "1": "Relion 4 (subtomogram averaging)",
+                        "2": "WARP (subtomogram averaging)",
+                        "3": "Aligned tilt series as input for Relion4/WARP"
+                    },
+                    "default": "3",
+                    "help": "(--OutImod) Generates IMOD-compatible files needed for downstream subtomogram averaging, saved in a subfolder named after the output MRC file."
+                },
+                {
+                    "name": "aretomo3.SplitSum",
+                    "label": "Generate odd/even sums",
+                    "paramClass": "BooleanParam",
+                    "default": true,
+                    "help": "(--SplitSum) When enabled, 3 tilt series and 3 tomograms are generated. Odd/even outputs are appended _ODD and _EVN."
+                },
+                {
+                    "name": "aretomo3.ExtraArgs",
+                    "label": "AreTomo3 extra arguments",
+                    "paramClass": "StringParam",
+                    "help": "Extra arguments to pass to AreTomo3"
+                }
+            ]
+        },
+        {
+            "label": "Compute",
+            "params": [
+                {
+                    "name": "gpus",
+                    "label": "GPUs",
+                    "help": "If a single number (N), it represents the total number of GPUs (0..N-1). If multiple values, these are specific GPU IDs."
+                },
+                {
+                    "name": "cpus",
+                    "label": "CPUs",
+                    "default": "",
+                    "help": "If empty, the program will use the number of GPUs * 10 CPUs."
+                }, 
+                {
+                    "name": "register_output_only",
+                    "label": "Register output only",
+                    "paramClass": "BooleanParam",
+                    "default": false,
+                    "help": "If enabled, the job will only register the output files, but not run the program."
+                },
+                {
+                    "label": "Launchers",
+                    "paramClass": "Group",
+                    "help": "Launchers to use for the different programs",
+                    "collapsed": true,
+                    "params": [
+                        {
+                            "name": "launcher_aretomo3",
+                            "label": "AreTomo3",
+                            "paramClass": "StringParam",
+                            "help": "Launcher to use for AreTomo3"
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}

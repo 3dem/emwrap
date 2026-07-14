@@ -28,6 +28,10 @@ from emwrap.base.config import ProcessingConfig
 
 
 class TestApoF(unittest.TestCase):
+    workflow_template = None   # subclasses must set: path to json.template
+    job_types = None           # subclasses must set: ordered list of job types
+    expected_outputs = None    # subclasses must set: {job_type: output_star(s)}
+    
     EMWRAP_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     project_path = None
     project_temporary = False
@@ -52,6 +56,7 @@ class TestApoF(unittest.TestCase):
         else:
             cls.project_temporary = False
             cls.project_path = args.project
+            os.makedirs(cls.project_path, exist_ok=True)
             
         cls.tilt_series = args.ts or '*'
         cls.ngpus = args.gpus or int(os.environ.get('EMWRAP_TEST_GPUS', 1))
@@ -78,10 +83,17 @@ class TestApoF(unittest.TestCase):
                 params['mdoc_files'] = f'data/mdoc/{self.tilt_series}.mrc.mdoc'
             if 'gpus' in params:
                 params['gpus'] = str(self.ngpus)
+            if 'queue.name' in params:
+                params['queue.name'] = 'NO-QUEUE'
+            
             patched.append({**job, 'params': params})
         return patched
 
     def _validate_environment(self):
+        for attr in ('workflow_template', 'job_types', 'expected_outputs'):
+            if getattr(self, attr, None) is None:
+                self.fail(f'{self.__class__.__name__}.{attr} must be defined by subclass')
+        
         emwrap_configured = bool(ProcessingConfig.get_jobs())
         if not emwrap_configured:
             self.fail('EMWRAP_CONFIG is not configured (source emwrap.bashrc)')
@@ -100,15 +112,21 @@ class TestApoF(unittest.TestCase):
             os.remove(data_dst)
         os.symlink(data_src, data_dst)
 
-    def _assert_job_succeeded(self, pm, job_id, output_star):
+    def _assert_job_succeeded(self, pm, job_id, output_stars):
         self.assertTrue(
             pm.exists(job_id, 'RELION_JOB_EXIT_SUCCESS'),
             f"Job {job_id} did not finish successfully")
-        self.assertTrue(
-            pm.exists(job_id, output_star),
-            f"Job {job_id} is missing expected output: {output_star}")
-        job = pm._getJob(job_id)
+        
+        if isinstance(output_stars, str):
+            output_stars = [output_stars]
+
+        for output_star in output_stars:
+            self.assertTrue(
+                pm.exists(job_id, output_star),
+                f"Job {job_id} is missing expected output: {output_star}")
+        
         pm.update()
+        job = pm._getJob(job_id)
         self.assertEqual(job['status'], 'Succeeded')
 
     def _run_workflow(self):
@@ -120,7 +138,7 @@ class TestApoF(unittest.TestCase):
         workflow = {'jobs': self.patch_workflow_params(jobs)}
         pm = ProjectManager(self.project_path, create=True)
         self._link_data()
-        id_map =pm.loadWorkflow(workflow=workflow)
+        id_map = pm.loadWorkflow(workflow=workflow)
         job_ids = [id_map[job['jobid']] for job in jobs]
         for job_type, job_id in zip(self.job_types, job_ids):
             if self.dry:
@@ -138,8 +156,9 @@ class TestApoF(unittest.TestCase):
         args = cls.get_args()
         cls.configure(args)
         cls.verbosity = min(2, args.verbose) if args.verbose else 1
-        result = cls(methodName='test_apof').run()
-        sys.exit(0 if result.wasSuccessful() else 1)
+        suite = unittest.TestLoader().loadTestsFromTestCase(cls) #any test_* method on the subclass gets picked up
+        result = unittest.TextTestRunner(verbosity=cls.verbosity).run(suite)
+        sys.exit(0 if result.wasSuccessful() else 1) 
 
     @classmethod
     def get_parser(cls):
