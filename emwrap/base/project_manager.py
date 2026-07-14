@@ -53,6 +53,13 @@ class ProjectManager(FolderManager):
     """ Class to manipulate information about a Relion project. """
 
     def __init__(self, path, create=False, verbose=1):
+        """ Create a ProjectManager in that path.
+
+        Args:
+            path: Path to the project directory.
+            create: Create a new project if it does not exist.
+            verbose: Verbosity level.
+        """
         FolderManager.__init__(self, path)
         apath = os.path.abspath(path)
         self._verbose = verbose

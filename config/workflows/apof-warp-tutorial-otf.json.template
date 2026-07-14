@@ -1,0 +1,49 @@
+{
+    "name": "ApoF - Warp OTF",
+    "description": "Same Warp Apoferritin tutorial, but using Warp in OTF mode.",
+    "jobs": [
+        {
+            "jobid": "External/job002",
+            "jobtype": "emw-import-ts",
+            "params": {
+                "acq.amplitude_constrast": "0.1",
+                "acq.cs": "2.7",
+                "acq.gain": "data/gain_ref.mrc",
+                "acq.pixel_size": "0.789",
+                "acq.total_dose": "2.64",
+                "acq.voltage": "300",
+                "mdoc_files": "data/mdoc/*.mdoc",
+                "tilt_axis_angle": "-85.6",
+                "tilt_images": "data/frames/",
+                "wait.file_change": "1",
+                "wait.sleep": "1",
+                "wait.timeout": "1"
+            }
+        },
+        {
+            "jobid": "External/job004",
+            "jobtype": "emw-warp-mctf",
+            "params": {
+                "create_settings.bin_angpix": "",
+                "create_settings.eer_ngroups": "",
+                "extra_create_settings": "--gain_flip_y",
+                "fs_motion_and_ctf.c_defocus_max": "8",
+                "fs_motion_and_ctf.c_defocus_min": "0.5",
+                "fs_motion_and_ctf.c_grid": "2x2",
+                "fs_motion_and_ctf.c_range_max": "7",
+                "fs_motion_and_ctf.c_range_min": "30",
+                "fs_motion_and_ctf.c_use_sum": true,
+                "fs_motion_and_ctf.c_window": "512",
+                "fs_motion_and_ctf.m_bfac": "-500",
+                "fs_motion_and_ctf.m_grid": "1x1",
+                "fs_motion_and_ctf.m_range_max": "10",
+                "fs_motion_and_ctf.m_range_min": "500",
+                "fs_motion_and_ctf.out_average_halves": true,
+                "fs_motion_and_ctf.perdevice": "2",
+                "gpus": "4",
+                "input_tiltseries": "External/job002/tilt_series.star",
+                "launcher_warp": ""
+            }
+        }
+    ]
+}
