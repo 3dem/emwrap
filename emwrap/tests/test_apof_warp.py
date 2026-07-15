@@ -47,6 +47,26 @@ class TestApoFWarp(TestApoF):
             help='Workflow size: small (preprocessing), medium (part1), or full.')
         return parser
 
+    def _run_workflow(self):
+        """Modify job_types and expected_outputs based on the workflow size."""
+
+        if self.args.workflow == 'medium':
+            self.job_types.extend([
+                'emw-pytom',
+                'emw-warp-export_particles',
+                'emw-relion-tomoinitial'
+            ])
+            self.expected_outputs.update({
+                'emw-pytom': 'tomograms_coords.star',
+                'emw-warp-export_particles': 'optimisation_set.star',
+                'emw-relion-tomoinitial': 'output/initial_model.mrc',
+            })
+        elif self.args.workflow == 'full':
+            self.workflow_template = self.get_workflow_template('apof-warp-tutorial-full')
+            raise ValueError('Full workflow is not implemented yet.')
+
+        super()._run_workflow()
+
 
 if __name__ == '__main__':
     TestApoFWarp.run_tests()

@@ -230,7 +230,7 @@ class PyTomPipeline(ProcessingPipeline):
         tomoCoordsTable = StarFile.getTableFromFile('global', self.join('tomograms_coords.star'))
 
         def _output(key):
-            return self.join(f'pytom_{key}.star')
+            return self.join(f'{key}.star')
 
         optsetFn = _output('optimisation_set')
         tomogramsFn = _output('tomograms')

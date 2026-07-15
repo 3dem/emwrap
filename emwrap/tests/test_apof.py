@@ -48,6 +48,8 @@ class TestApoF(unittest.TestCase):
     @classmethod
     def configure(cls, args):
         """Set class-level options before running tests."""
+        cls.args = args
+        
         if args.project is None:
             cls.project_temporary = True
             tmpdir = tempfile.TemporaryDirectory(prefix=f"{cls.__name__}__")

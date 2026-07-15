@@ -99,6 +99,12 @@
                     "help": "(--perdevice in ts_export_particles)"
                 },
                 {
+                    "name": "register_output_only",
+                    "label": "Register output only",
+                    "paramClass": "BooleanParam",
+                    "help": "Register output only, without running the job. Output files (e.g. STAR files) will be re-generated, but the the underlying programs will not be executed."
+                },
+                {
                     "label": "Launchers",
                     "paramClass": "Group",
                     "help": "Launchers to use for the different programs",
