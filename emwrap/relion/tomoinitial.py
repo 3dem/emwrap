@@ -74,8 +74,9 @@ class RelionTomoinitial(RelionBasePipeline):
         if not os.path.exists(ios):
             raise Exception(f"Input optimisation set '{ios}' does not exist.")
 
-        gpus = int(self._args.get("gpus", 1))
-        mpis = gpus + 1
+        gpus = int(self._args.get('gpus', 1) or 1)
+        cpus = int(self._args.get('cpus', 1) or 1)
+        threads = max(cpus, gpus * 10) # 10 threads per GPU
 
         inverted_booleans = [
             "dont_combine_weights_via_disc",
@@ -100,7 +101,7 @@ class RelionTomoinitial(RelionBasePipeline):
                 "--offset_step": 2,
                 "--auto_sampling": "",
                 "--zero_mask": "",
-                "--j": mpis,
+                "--j": threads,
                 "--gpu": "",
             }
         )
