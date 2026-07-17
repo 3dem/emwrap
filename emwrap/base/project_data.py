@@ -43,11 +43,14 @@ class ProjectData(FolderManager):
         self._project_json_path = self.join('project.json')
         self._wf = project.get_workflow()  # FIXME: It might be the other way around, i.e. the project has the workflow and the data manager has the project
 
+        self._data = {'jobs': {}, 'outputs': {}}
+
         if os.path.exists(self._project_json_path):
-            with open(self._project_json_path, 'r') as f:
-                self._data = json.load(f)
-        else:
-            self._data = {'jobs': {}, 'outputs': {}}
+            try:
+                with open(self._project_json_path, 'r') as f:
+                    self._data = json.load(f)
+            except Exception as e:
+                self._debug(f"Error loading project data from {Color.bold(self._project_json_path)}: {e}")
 
         self._jobs = self._data.get('jobs', {})
         self._outputs = self._data.get('outputs', {})
