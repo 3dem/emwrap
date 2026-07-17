@@ -15,17 +15,14 @@
 # **************************************************************************
 
 import os
-import shlex
 
 from emtools.utils import Color, Timer, Path
 from emtools.jobs import Args
-from emtools.metadata import Table, StarFile
 
 from emwrap.base import ProcessingPipeline
 
 
 # TODO: 
-# - Fix sampling size
 # - 'rlnTiltSeriesAligned' is not aligned is the normal tilt series unaligned
 
 class AreTomo3:
@@ -52,14 +49,6 @@ class AreTomo3:
         
         return subargs
 
-    # @property
-    # def bin(self):
-    #     return self.args.get('-McBin', 1.0)
-
-    # @property
-    # def at_bin(self):
-    #     return self.args.get('-AtBin', '1.0')
-
     @property
     def reconstruct(self):
         # VolZ must be > 0 (or -1 for auto-estimate) to produce a tomogram.
@@ -80,15 +69,34 @@ class AreTomo3:
     def split_sum(self):
         return str(self.args.get('-SplitSum', 1)) != '0'
 
+    def argsFromAcq(self, acq):
+        """ Define arguments from a given acquisition """
+        args = Args({
+            '-PixSize': acq.pixel_size,
+            '-kV': acq.voltage,
+            '-Cs': acq.cs,
+            '-AmpContrast': acq.amplitude_contrast
+        })
+        if gain := acq.get('gain', None):
+            args['-Gain'] = gain
+        if dose := acq.get('total_dose', None):
+            args['-FmDose'] = dose
+
+        return args
+    
     def _get_launcher(self):
         return self.launcher_aretomo3 or ProcessingPipeline.get_launcher('ARETOMO3')
+    
+    def __expect(self, fileName):
+        if not os.path.exists(fileName):
+            raise Exception(f"Missing expected output: {fileName}")
     
     def process_batch(self, batch, **kwargs):
         gpu = kwargs['gpu']
 
-        outputDir = batch.mkdir('output')
-        logDir = batch.mkdir('log')
-        tmpDir = batch.mkdir('tmp')
+        batch.mkdir('output')
+        batch.mkdir('tmp')
+        # batch.mkdir('log')
 
         items = batch['items']
         mdoc = batch['tsMdoc']
@@ -129,11 +137,16 @@ class AreTomo3:
             self.__expect(outTiltSeriesMrc)
             batch['outputs'].append(outTiltSeriesMrc)
             result['rlnTiltSeriesAligned'] = outTiltSeriesMrc
+
+            # Mapping file Mic index vs Tilt Angle
+            outTiltSeriesMapping = batch.join('output', f'{tsName}_TLT.txt')
+            self.__expect(outTiltSeriesMapping)
+            result['at3MappingFile'] = outTiltSeriesMapping
+
             # Alignment file (.aln) is always produced alongside it.
             alnFile = batch.join('output', f'{tsName}.aln')
-            if os.path.exists(alnFile):
-                batch['outputs'].append(alnFile)
-                result['rlnTomoAlignmentFile'] = alnFile
+            self.__expect(alnFile)
+            result['at3TomoAlignmentFile'] = alnFile
 
             suffix = ''
             if self.reconstruct:
@@ -141,29 +154,29 @@ class AreTomo3:
                 outTomogramMrc = batch.join('output', f'{tsName}{suffix}.mrc')
                 self.__expect(outTomogramMrc)
                 batch['outputs'].append(outTomogramMrc)
-                result['rlnTomogram'] = outTomogramMrc
+                result['rlnTomoReconstructedTomogram'] = outTomogramMrc
 
                 if self.auto_estimate_thickness:
                     thickMrc = batch.join('tmp', f'{tsName}_Thick.mrc')
                     if os.path.exists(thickMrc):
                         batch['outputs'].append(thickMrc)
-                        result['aretomo3ThicknessMrc'] = thickMrc
+                        result['at3ThicknessMrc'] = thickMrc
 
                     thickCsv = batch.join('tmp', f'{tsName}_Thick_CC.csv')
                     if os.path.exists(thickCsv):
                         batch['outputs'].append(thickCsv)
-                        result['aretomo3ThicknessCsv'] = thickCsv
+                        result['at3ThicknessCsv'] = thickCsv
 
             if self.ctf_estimation:
                 ctfFileTxt = batch.join('output', f'{tsName}_CTF.txt')
                 self.__expect(ctfFileTxt)
                 batch['outputs'].append(ctfFileTxt)
-                result['rlnTomoCtfFile'] = ctfFileTxt
+                result['at3TomoCtfFile'] = ctfFileTxt
 
                 ctfFileMrc = batch.join('output', f'{tsName}_CTF.mrc')
                 if os.path.exists(ctfFileMrc):
                     batch['outputs'].append(ctfFileMrc)
-                    result['rlnTomoCtfMrc'] = ctfFileMrc
+                    result['rlnCtfImage'] = ctfFileMrc
     
             if self.split_sum:
                 # Tomogram
@@ -175,8 +188,8 @@ class AreTomo3:
                     result[key] = splitName
                 # Tilt series
                 suffix = ''
-                for tag, key in (('_ODD', 'rlnTiltSeriesOdd'),
-                                  ('_EVN', 'rlnTiltSeriesEvn')):
+                for tag, key in (('_ODD', 'rlnTiltSeriesAlignedOdd'),
+                                  ('_EVN', 'rlnTiltSeriesAlignedEvn')):
                     splitName = batch.join('output', f'{tsName}{tag}{suffix}.mrc')
                     self.__expect(splitName)
                     batch['outputs'].append(splitName)
@@ -185,19 +198,14 @@ class AreTomo3:
             metricsCsv = batch.join('output', 'TiltSeries_Metrics.csv')
             if os.path.exists(metricsCsv):
                 batch['outputs'].append(metricsCsv)
-                result['aretomo3MetricsCsv'] = metricsCsv
+                result['at3MetricsCsv'] = metricsCsv
 
             timestampCsv = batch.join('output', 'TiltSeries_TimeStamp.csv')
             if os.path.exists(timestampCsv):
                 batch['outputs'].append(timestampCsv)
-                result['aretomo3TimeStampCsv'] = timestampCsv
+                result['at3TimeStampCsv'] = timestampCsv
             
-            # EMHub-internal metadata star file, distinct from any files
-            # AreTomo3 itself writes to 'output/'.
-            tomoStar = batch.join('output', f'{tsName}.star')
-            self.__write_tomo_star(mdoc, result, tomoStar)
-            result['rlnTomoMetadata'] = tomoStar
-            batch['outputs'].append(tomoStar)
+            result['rlnTomoMdocFile'] = mdoc
             total += 1
 
         except Exception as e:
@@ -207,59 +215,5 @@ class AreTomo3:
         batch['results'].append(result)
 
         batch.info.update({
-            'aretomo_output': total
+            'aretomo3_output': total
         })
-
-    def __expect(self, fileName):
-        if not os.path.exists(fileName):
-            raise Exception(f"Missing expected output: {fileName}")
-
-    def __write_tomo_star(self, mdoc, result, tomoStar):
-        """ Write an EMHub-internal star file summarizing this tilt series'
-        AreTomo3 outputs, using whatever keys process_batch collected into
-        `result` (only the ones that actually exist for this run, since
-        reconstruction/CTF/split-sum are all optional). """
-        columns = ['rlnTomoName', 'rlnTomoTiltSeriesMdocFile',
-                'rlnVoltage', 'rlnSphericalAberration',
-                'rlnAmplitudeContrast', 'rlnTomoTiltSeriesPixelSize']
-        values = [result.get('rlnTomoName', ''), mdoc,
-                self.acq.voltage, self.acq.cs,
-                self.acq.amplitude_contrast, self.acq.pixel_size]
-
-        # Append only the optional fields that were actually populated.
-        optionalFields = [
-            ('rlnTiltSeriesAligned', result.get('rlnTiltSeriesAligned')),
-            ('rlnTiltSeriesOdd', result.get('rlnTiltSeriesOdd')),
-            ('rlnTiltSeriesEvn', result.get('rlnTiltSeriesEvn')),
-            ('rlnTomoAlignmentFile', result.get('rlnTomoAlignmentFile')),
-            ('rlnTomogram', result.get('rlnTomogram')),
-            ('rlnTomoCtfFile', result.get('rlnTomoCtfFile')),
-            ('rlnTomoNameOdd', result.get('rlnTomoNameOdd')),
-            ('rlnTomoNameEvn', result.get('rlnTomoNameEvn')),
-        ]
-        for colName, value in optionalFields:
-            if value is not None:
-                columns.append(colName)
-                values.append(value)
-
-        tGeneral = Table(columns)
-        tGeneral.addRowValues(*values)
-
-        with StarFile(tomoStar, 'w') as sf:
-            sf.writeTimeStamp()
-            sf.writeTable('general', tGeneral, singleRow=True)
-
-    def argsFromAcq(self, acq):
-        """ Define arguments from a given acquisition """
-        args = Args({
-            '-PixSize': acq.pixel_size,
-            '-kV': acq.voltage,
-            '-Cs': acq.cs,
-            '-AmpContrast': acq.amplitude_contrast
-        })
-        if gain := acq.get('gain', None):
-            args['-Gain'] = gain
-        if dose := acq.get('total_dose', None):
-            args['-FmDose'] = dose
-
-        return args
