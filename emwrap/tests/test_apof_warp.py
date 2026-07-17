@@ -43,8 +43,8 @@ class TestApoFWarp(TestApoF):
     def get_parser(cls):
         parser = super().get_parser()
         parser.add_argument(
-            '--workflow', '-w', choices=['small', 'medium', 'full'], default='small',
-            help='Workflow size: small (preprocessing), medium (part1), or full.')
+            '--workflow', '-w', choices=['small', 'medium', 'full', 'otf'], default='small',
+            help='Workflow size: small (preprocessing), medium (part1), full (part1+part2), or otf (preprocessing in OTF mode).')
         return parser
 
     def _run_workflow(self):
@@ -64,6 +64,17 @@ class TestApoFWarp(TestApoF):
         elif self.args.workflow == 'full':
             self.workflow_template = self.get_workflow_template('apof-warp-tutorial-full')
             raise ValueError('Full workflow is not implemented yet.')
+
+        elif self.args.workflow == 'otf':
+            self.workflow_template = self.get_workflow_template('apof-warp-tutorial-otf')
+            self.job_types = [
+                'emw-import-ts',
+                'emw-warp-otf',
+            ]
+            self.expected_outputs = {
+                'emw-import-ts': 'tilt_series.star',
+                'emw-warp-otf': ['aligned_tilt_series.star', 'tomograms.star']
+            }
 
         super()._run_workflow()
 
