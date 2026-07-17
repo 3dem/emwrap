@@ -15,13 +15,10 @@
 # **************************************************************************
 
 import os
-from glob import glob
-from datetime import datetime
 
-from emtools.utils import Color, FolderManager, Path, Process
-from emtools.jobs import Batch, Args
-from emtools.metadata import StarFile, Table, WarpXml
-from emtools.image import Image
+from emtools.utils import FolderManager
+from emtools.jobs import Args
+from emtools.metadata import StarFile, Table
 
 from .warp import WarpBasePipeline
 
@@ -33,13 +30,14 @@ class WarpCtfReconstruct(WarpBasePipeline):
 
     def runBatch(self, batch, **kwargs):
         inputTs = kwargs['inputTs']
-        inputFolder = FolderManager(os.path.dirname(inputTs))
         tsAllTable = StarFile.getTableFromFile('global', inputTs)
-        N = len(tsAllTable)
-        ps = tsAllTable[0].rlnTomoTiltSeriesPixelSize
-        x, y, n = Image.get_dimensions(tsAllTable[0].rlnTiltSeriesAligned)
+        # N = len(tsAllTable)
+        # ps = tsAllTable[0].rlnTomoTiltSeriesPixelSize
+        # # FIXME: Avoid use of rlnTiltSeriesAligned, since it might not be availabe and it is not part of the data model
+        # x, y, n = Image.get_dimensions(tsAllTable[0].rlnTiltSeriesAligned)
 
         if kwargs.get('importInputs', True):
+            inputFolder = FolderManager(os.path.dirname(inputTs))
             self._importInputs(inputFolder)
 
         # Run ts_ctf
@@ -68,16 +66,8 @@ class WarpCtfReconstruct(WarpBasePipeline):
         self.batch_execute('ts_reconstruct', batch, args)
         self.updateBatchInfo(batch)
 
-    def _only_output(self):
-        return False
-        return '--emwrap_output_only' in 'xxx'
-
     def _output(self, batch):
         """ Register output STAR files. """
-
-        def _float(v):
-            return round(float(v), 3)
-
         self.log("Registering output STAR files.")
         tsAllTable = StarFile.getTableFromFile('global', self.inputTs)
 
@@ -94,60 +84,16 @@ class WarpCtfReconstruct(WarpBasePipeline):
             'rlnTomoReconstructedTomogramHalf2',
             'wrpTomostar'
         ]
-        recpath = self.join(self.TS, 'reconstruction')
-        newPs = _float(self._args["ts_reconstruct.angpix"])
-
-        def _rec(*p):
-            return os.path.join(recpath, *p)
-
-        tomoDict = {}
-        for tfn in glob(_rec('*.mrc')):
-            base = os.path.basename(tfn)
-            suffix = '_' + base.split('_')[-1]
-            tsName = base.replace(suffix, '')
-            tomoDict[tsName] = base
-
+        newPs = self.reconstructPs()
         newTsAllTable = Table(tsAllTable.getColumnNames() + extraLabels)
         dims = None
-        bin = None
         for tsRow in tsAllTable:
-            tsName = tsRow.rlnTomoName
             tsDict = tsRow._asdict()
-
-            # FIXME: validate for missing tomograms
-            if tomoFile := tomoDict.get(tsName, ''):
-                t, te, to = _rec(tomoFile), _rec('even', tomoFile), _rec('odd', tomoFile)
-                if dims is None:
-                    dims = Image.get_dimensions(t)
-                    bin = _float(newPs / tsDict['rlnTomoTiltSeriesPixelSize'])
-            else:
-                t, te, to = '', '', ''
-            xmlFile = self.join(self.TS, tsName + '.xml')
-            if os.path.exists(xmlFile):
-                # self.log(f"Reading {movieXml}")
-                ctf = WarpXml(xmlFile).getDict('TiltSeries', 'CTF', 'Param')
-                defocus = _float(ctf['Defocus'])
-            else:
-                defocus = 999
-
-            # FIXME: validate for missing tomostar files
-            tomostar = self.join(self.TM, tsName + '.tomostar')
-            # For Relion tomomagram.star, we need the original tomogram dimensions
-            wxml = WarpXml(self.join(self.TSS))
-            d = wxml.getDict('Settings', 'Tomo', 'Param')
-            # {'DimensionsX': '4400', 'DimensionsY': '6000', 'DimensionsZ': '1000'}
-
-            tsDict.update({
-                'rlnTomoReconstructedTomogram': t,
-                'rlnTomoTomogramBinning': bin,
-                'rlnDefocus': defocus,
-                'rlnTomoSizeX': d['DimensionsX'],
-                'rlnTomoSizeY': d['DimensionsY'],
-                'rlnTomoSizeZ': d['DimensionsZ'],
-                'rlnTomoReconstructedTomogramHalf1': te,
-                'rlnTomoReconstructedTomogramHalf2': to,
-                'wrpTomostar': tomostar
-            })
+            ok, tsDims = self.updateCtfRecTsDict(tsDict, newPs)
+            if tsDims is not None:
+                dims = tsDims
+            if not ok:
+                self.log(f"WARNING: Missing reconstructed tomogram for TS {tsDict['rlnTomoName']}")
             newTsAllTable.addRowValues(**tsDict)
 
         # Write the corrected_tilt_series.star
@@ -155,7 +101,7 @@ class WarpCtfReconstruct(WarpBasePipeline):
 
         N = len(newTsAllTable)
         x, y, n = dims
-        outputNodes = [[newTsStarFile, 'TomogramGroupMetadata.star.relion.tomo.tomograms']]
+        outputNodes = [[newTsStarFile, 'TomogramGroupMetadata.star.relion.tomo.Tomograms']]
         self.writeRelionOutputNodes(outputNodes)
         self.updateBatchInfo(batch)
 

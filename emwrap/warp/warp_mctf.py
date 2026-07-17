@@ -16,9 +16,6 @@
 
 import os
 from glob import glob
-from datetime import datetime
-from collections import defaultdict
-import shutil
 
 from emtools.utils import FolderManager, Path
 from emtools.jobs import Args
@@ -40,10 +37,6 @@ class WarpMotionCtf(WarpBasePipeline):
         if v := self._args.get(key, None):
             return float(v)
         return defaultValue
-
-    def targetPs(self, inputPs):
-        v = self._args.get('create_settings.bin_angpix', '') or 0
-        return float(v) or inputPs
 
     def _find_mdoc_files(self, tsAllTable):
         """ Find the mdoc files for the tilt series if not present in the input star file.
@@ -176,8 +169,6 @@ class WarpMotionCtf(WarpBasePipeline):
         args = Args({
             'WarpTools': 'fs_motion_and_ctf',
             '--settings': self.FSS,
-            #'--m_grid': f'1x1x{ngroups}',  # FIXME: Read m_grid from params
-            #'--c_grid': '2x2x1',  # FIXME: Read c_grid option
             '--c_voltage': int(self.acq.voltage),
             '--c_cs': self.acq.cs,
             '--c_amplitude': self.acq.amplitude_contrast,
@@ -205,133 +196,45 @@ class WarpMotionCtf(WarpBasePipeline):
 
     def _output(self, batch):
         """ Register output STAR files. """
-
-        def _float(v):
-            return round(float(v), 2)
-
         batch.mkdir('tilt_series')
         self.log("Registering output STAR files.")
         tsAllTable = StarFile.getTableFromFile('global', self.inputTs)
 
         newTsStarFile = batch.join('tilt_series.star')
         failedStarFile = batch.join('failed_tilt_series.star')
-        newPs = None
-        n = None
         dims = None
         mdocsFm = FolderManager(batch.join('mdocs'))
         mdocsFm.create()
 
-        newPsLabel = 'rlnTomoTiltSeriesPixelSize'
-        new_cols = [newPsLabel]
+        new_cols = ['rlnTomoTiltSeriesPixelSize']
         if not tsAllTable.hasColumn('rlnTomoMdocFile'):
             new_cols.append('rlnTomoMdocFile')
         newTsAllTable = Table(tsAllTable.getColumnNames() + new_cols)
         failedTable = Table(newTsAllTable.getColumnNames())
 
         mdocsMapping = self._find_mdoc_files(tsAllTable)
-    
+
         for tsRow in tsAllTable:
-            tsName = tsRow.rlnTomoName
-            tsStarFile = self.join('tilt_series', tsName + '.star')
-            ps = tsRow.rlnMicrographOriginalPixelSize
-            if newPs is None:
-                newPs = self.targetPs(ps)
-
-            mdocFile = mdocsMapping.get(tsName, '')
-            if not mdocFile or not os.path.exists(mdocFile):
-                self.log(f"Mdoc {mdocFile} not found for TS {tsName}, skipping...")
-                failedTable.addRowValues(**tsRow._asdict())
-                continue
-
-            tsTable = StarFile.getTableFromFile(tsName, tsRow.rlnTomoTiltSeriesStarFile)
-            n = len(tsTable)
-
-            # Each input movie must have xml + average mrc (same idea as WarpAreTomo
-            # requiring aligned stack per TS). Collect missing before building output.
-            missing = []
-            for frameRow in tsTable:
-                moviePrefix = Path.removeBaseExt(frameRow.rlnMicrographMovieName)
-                movieMrc = moviePrefix + '.mrc'
-                movieXml = batch.join(self.FS, moviePrefix + '.xml')
-                movieAvgMrc = batch.join(self.FS, 'average', movieMrc)
-                if not os.path.exists(movieXml):
-                    missing.append((moviePrefix, 'xml', movieXml))
-                if not os.path.exists(movieAvgMrc):
-                    missing.append((moviePrefix, 'average mrc', movieAvgMrc))
-
             tsDict = tsRow._asdict()
-            tsDict.update({
-                newPsLabel: newPs,
-                'rlnTomoTiltSeriesStarFile': tsStarFile
-            })
-            dstMdocFile = mdocsFm.join(f'{tsName}.mdoc')
-            shutil.copy(mdocFile, dstMdocFile)
-            tsDict['rlnTomoMdocFile'] = dstMdocFile
+            tsName = tsRow.rlnTomoName
 
-            if missing:
-                for moviePrefix, reason, path in missing:
-                    self.log(f"ERROR: Missing {reason} for movie {moviePrefix}: {path}")
-                tsDict['rlnTomoTiltSeriesStarFile'] = "None"
+            ok, newTsTable, tsDims = self.updateMctfTsDict(
+                tsDict, mdocsMapping.get(tsName, ''), mdocsFm
+            )
+            if tsDims is not None:
+                dims = tsDims
+            if not ok:
                 failedTable.addRowValues(**tsDict)
                 continue
 
-            # FIXME: Do not add even/odd when this option is not selected
-            extra_cols = [
-                'rlnCtfPowerSpectrum', 'rlnMicrographName', 'rlnMicrographMetadata',
-                'rlnAccumMotionTotal', 'rlnAccumMotionEarly', 'rlnAccumMotionLate',
-                'rlnMicrographNameEven', 'rlnMicrographNameOdd', 'rlnCtfImage',
-                'rlnDefocusU', 'rlnDefocusV', 'rlnCtfAstigmatism', 'rlnDefocusAngle',
-                'rlnCtfFigureOfMerit', 'rlnCtfMaxResolution', 'rlnCtfIceRingDensity',
-            ]
-
-            filesMap = {
-                'rlnMicrographName': 'average',
-                'rlnCtfPowerSpectrum': 'powerspectrum',
-                'rlnCtfImage': 'powerspectrum',
-                'rlnMicrographNameEven': 'average/even',
-                'rlnMicrographNameOdd': 'average/odd'
-            }
-            newTsTable = Table(tsTable.getColumnNames() + extra_cols)
-            for frameRow in tsTable:
-                moviePrefix = Path.removeBaseExt(frameRow.rlnMicrographMovieName)
-                movieMrc = moviePrefix + '.mrc'
-                frameDict = frameRow._asdict()
-                for k, v in filesMap.items():
-                    frameDict[k] = batch.join(self.FS, v, movieMrc)
-                frameDict['rlnMicrographMetadata'] = "None"
-
-                avgMrcPath = frameDict['rlnMicrographName']
-                if dims is None and os.path.exists(avgMrcPath):
-                    dims = Image.get_dimensions(avgMrcPath)
-
-                movieXml = batch.join(self.FS, moviePrefix + '.xml')
-                defocusDict = defaultdict(lambda: 0)
-
-                # xml and average mrc already validated for whole TS above
-                ctf = WarpXml(movieXml).getDict('Movie', 'CTF', 'Param')
-                
-                defocusDict['rlnDefocusU'] = _float(float(ctf['Defocus']) * 10000)  # Convert to Angstroms
-                defocusDict['rlnCtfAstigmatism'] = _float(float(ctf['DefocusDelta']) * 10000)  # Convert to Angstroms
-                defocusDict['rlnDefocusV'] = _float(defocusDict['rlnDefocusU'] + defocusDict['rlnCtfAstigmatism'])
-                defocusDict['rlnDefocusAngle'] = _float(ctf['DefocusAngle'])
-
-                for k in extra_cols:
-                    if k.startswith('rlnAccumMotion'):
-                        # FIXME: Parse the movie values
-                        frameDict[k] = 0
-                    elif k.startswith('rlnDefocus') or k.startswith('rlnCtf') and k not in frameDict:
-                        frameDict[k] = defocusDict[k]
-
-                newTsTable.addRowValues(**frameDict)
-            # Write the new ts.star file
-            self.write_ts_table(tsName, newTsTable, tsStarFile)
+            self.write_ts_table(tsName, newTsTable, tsDict['rlnTomoTiltSeriesStarFile'])
             newTsAllTable.addRowValues(**tsDict)
 
         # Write the corrected_tilt_series.star
         self.write_ts_table('global', newTsAllTable, newTsStarFile)
         x, y = (0, 0) if dims is None else (dims[0], dims[1])
 
-        self.writeRelionOutputNodes([[newTsStarFile, 'TomogramGroupMetadata.star.emwrap.mctf']])
+        self.writeRelionOutputNodes([[newTsStarFile, 'TomogramGroupMetadata.star.emwrap.TiltSeriesAligned']])
 
         if len(failedTable) > 0:
             self.write_ts_table('global', failedTable, failedStarFile)
