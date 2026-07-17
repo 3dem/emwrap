@@ -151,13 +151,20 @@
                     "label": "Processes per device",
                     "default": 2,
                     "paramClass": "IntParam",
-                    "help": "(--per_device in fs_motion_and_ctf)"
+                    "help": "(--perdevice in fs_motion_and_ctf)"
                 },
                 {
                     "label": "Launchers",
                     "paramClass": "Group",
                     "help": "Launchers to use for the different programs",
+                    "collapsed": true,
                     "params": [
+                        {
+                            "name": "register_output_only",
+                            "label": "Register output only",
+                            "paramClass": "BooleanParam",
+                            "help": "Register output only, without running the job. Output files (e.g. STAR files) will be re-generated, but the the underlying programs will not be executed."
+                        },
                         {
                             "name": "launcher_warp",
                             "label": "WARP",

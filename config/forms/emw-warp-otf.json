@@ -8,7 +8,7 @@
             "params": [
                 {
                     "name": "input_tiltseries",
-                    "label": "Input tilt series:",
+                    "label": "Input tilt series (frames):",
                     "pattern": "",
                     "help": "STAR file with input tilt-series",
                     "paramClass": "PathParam",
@@ -19,14 +19,14 @@
                     "label": "Resolution range:",
                     "params": [
                         {
-                            "name": "fs_motion_and_ctf.m_range_min",
+                            "name": "mctf.fs_motion_and_ctf.m_range_min",
                             "label": "min",
                             "default": 500,
                             "paramClass": "FloatParam",
                             "help": "(--m_range_min) Default: 500. Minimum resolution in Angstrom to consider in fit"
                         },
                         {
-                            "name": "fs_motion_and_ctf.m_range_max",
+                            "name": "mctf.fs_motion_and_ctf.m_range_max",
                             "label": "max",
                             "default": 10,
                             "paramClass": "FloatParam",
@@ -35,21 +35,21 @@
                     ]
                 },
                 {
-                    "name": "fs_motion_and_ctf.m_bfac",
-                    "label": "Bfactor (Aˆ2)",
+                    "name": "mctf.fs_motion_and_ctf.m_bfac",
+                    "label": "Bfactor (A\u02c62)",
                     "default": -500,
                     "paramClass": "FloatParam",
                     "help": "(--m_bfac)  Default: -500. Downweight higher spatial frequencies using a B-factor, in Angstrom^2"
                 },
                 {
-                    "name": "fs_motion_and_ctf.m_grid",
+                    "name": "mctf.fs_motion_and_ctf.m_grid",
                     "label": "Grid (XxYxN):",
                     "default": "5x5",
                     "paramClass": "StringParam",
                     "help": "(--m_grid) Default: 5x5xN. Resolution of the motion model grid in X, Y, and temporal dimensions, separated by 'x': e.g. 5x5x40; empty = auto"
                 },
                 {
-                    "name": "extra_create_settings",
+                    "name": "mctf.extra_create_settings",
                     "label": "create_settings extra arguments",
                     "paramClass": "StringParam",
                     "help": "Extra arguments to pass to create_settings.\n\n--bin_angpix: Choose the binning exponent automatically to match this target pixel size in Angstrom. 0 = No binning, 1 = Bin 2x, etc.\n\n--eer_ngroups: Default: 40. Number of groups to combine raw EER frames into, i.e. number of 'virtual' frames in resulting stack; use negative value to specify the number of frames per virtual frame instead."
@@ -64,14 +64,14 @@
                     "label": "Resolution range:",
                     "params": [
                         {
-                            "name": "fs_motion_and_ctf.c_range_min",
+                            "name": "mctf.fs_motion_and_ctf.c_range_min",
                             "label": "min",
                             "default": 30,
                             "paramClass": "FloatParam",
                             "help": "(--c_range_min: Minimum resolution in Angstrom to consider in fit. Default: 500."
                         },
                         {
-                            "name": "fs_motion_and_ctf.c_range_max",
+                            "name": "mctf.fs_motion_and_ctf.c_range_max",
                             "label": "max",
                             "default": 4,
                             "paramClass": "FloatParam",
@@ -84,14 +84,14 @@
                     "label": "Defocus range:",
                     "params": [
                         {
-                            "name": "fs_motion_and_ctf.c_defocus_min",
+                            "name": "mctf.fs_motion_and_ctf.c_defocus_min",
                             "label": "min",
                             "default": 0.5,
                             "paramClass": "FloatParam",
                             "help": "(--c_defocus_min: Minimum resolution in Angstrom to consider in fit. Default: 500."
                         },
                         {
-                            "name": "fs_motion_and_ctf.c_defocus_max",
+                            "name": "mctf.fs_motion_and_ctf.c_defocus_max",
                             "label": "max",
                             "default": 5,
                             "paramClass": "FloatParam",
@@ -100,27 +100,27 @@
                     ]
                 },
                 {
-                    "name": "fs_motion_and_ctf.c_window",
+                    "name": "mctf.fs_motion_and_ctf.c_window",
                     "label": "Window (px)",
                     "default": 512,
                     "paramClass": "FloatParam",
                     "help": "(--c_window: Patch size for CTF estimation in binned pixels. Default: 512."
                 },
                 {
-                    "name": "fs_motion_and_ctf.c_grid",
+                    "name": "mctf.fs_motion_and_ctf.c_grid",
                     "label": "Grid (XxYxN):",
                     "default": "2x2x1",
                     "paramClass": "StringParam",
                     "help": "(--c_grid) Resolution of the defocus model grid in X, Y, and temporal dimensions, separated by 'x': e.g. 2x2x1; empty = auto; Z > 1 is purely experimental"
                 },
                 {
-                    "name": "fs_motion_and_ctf.c_use_sum",
+                    "name": "mctf.fs_motion_and_ctf.c_use_sum",
                     "label": "Use sum",
                     "paramClass": "BooleanParam",
                     "help": "(--c_use_sum) Use the movie average spectrum instead of the average of individual frames' spectra. Can help in the absence of an energy filter, or when signal is low."
                 },
                 {
-                    "name": "fs_motion_and_ctf.out_average_halves",
+                    "name": "mctf.fs_motion_and_ctf.out_average_halves",
                     "label": "Output averages halves",
                     "paramClass": "BooleanParam",
                     "help": "--out_average_halves: Export aligned averages of odd and even frames separately, e.g. for denoiser training."
@@ -131,7 +131,7 @@
             "label": "Alignment / Reconstruction",
             "params": [
                 {
-                    "name": "extra_ts_import",
+                    "name": "wat.extra_ts_import",
                     "label": "ts_import extra arguments",
                     "paramClass": "StringParam",
                     "help": "Extra arguments to pass to ts_import. For example:\n--min_ntilts       Default: 1. Only import tilt series that have at least this many tilts after all the other filters have been applied."
@@ -141,37 +141,37 @@
                     "paramClass": "Group",
                     "params": [
                         {
-                            "name": "create_settings.tomo_dimensions",
+                            "name": "wat.create_settings.tomo_dimensions",
                             "label": "Tomogram dimensions:",
                             "default": "4096x4096x2000",
                             "help": ""
                         },
                         {
-                            "name": "ts_aretomo.angpix",
+                            "name": "wat.ts_aretomo.angpix",
                             "label": "Output pixel size (A/pix)",
                             "paramClass": "FloatParam",
-                            "help": "Rescale tilt images to this pixel size; normally 10–15 A for cryo data; leave out to keep the original pixel size."
+                            "help": "Rescale tilt images to this pixel size; normally 10\u201315 A for cryo data; leave out to keep the original pixel size."
                         },
                         {
-                            "name": "ts_aretomo.alignz",
-                            "label": "Align Z (px)",
+                            "name": "wat.ts_aretomo.alignz",
+                            "label": "Align Z (A)",
                             "default": 1800,
                             "paramClass": "FloatParam",
-                            "help": ""
+                            "help": "REQUIRED Value for AreTomo's AlignZ parameter in Angstroms (will be auto-converted to binned pixels), i.e. the thickness of the reconstructed tomogram used for alignments."
                         },
                         {
                             "label": "Tilt axis refinment",
                             "paramClass": "Line",
                             "params": [
                                 {
-                                    "name": "ts_aretomo.axis_iter",
+                                    "name": "wat.ts_aretomo.axis_iter",
                                     "label": "Iter",
                                     "default": 0,
                                     "paramClass": "FloatParam",
                                     "help": "Default: 0. Number of tilt axis angle refinement iterations; each iteration will be started with median value from previous iteration, final iteration will use fixed angle."
                                 },
                                 {
-                                    "name": "ts_aretomo.axis_batch",
+                                    "name": "wat.ts_aretomo.axis_batch",
                                     "label": "Batch",
                                     "default": 0,
                                     "paramClass": "FloatParam",
@@ -180,10 +180,10 @@
                             ]
                         },
                         {
-                            "name": "ts_aretomo.patches",
+                            "name": "wat.ts_aretomo.patches",
                             "label": "Patches",
-                            "default": "1x1",
-                            "help": "Number of patches for local alignments in X, Y, separated by 'x': e.g. 6x4. Increases processing time."
+                            "default": "",
+                            "help": "Number of patches for local alignments in X, Y, separated by 'x': e.g. 6x4. By default (empty, or 0x0 or 1x1) only global alignment is performed. More patches increase the processing time."                      
                         }
                     ]
                 },
@@ -192,13 +192,13 @@
                     "paramClass": "Group",
                     "params": [
                         {
-                            "name": "ts_reconstruct.angpix",
+                            "name": "ctfrec.ts_reconstruct.angpix",
                             "label": "Reconstruction Voxel size (A/pix)",
                             "paramClass": "FloatParam",
                             "help": ""
                         },
                         {
-                            "name": "ts_reconstruct.halfmap_frames",
+                            "name": "ctfrec.ts_reconstruct.halfmap_frames",
                             "label": "Output half-tomograms from frames",
                             "paramClass": "BooleanParam",
                             "help": "Also produce two half-tomograms, each reconstructed from half of the frames (requires running align_frameseries with --average_halves previously)"
@@ -206,7 +206,7 @@
                     ]
                 }
             ]
-        },        
+        },
         {
             "label": "Compute",
             "params": [
@@ -220,8 +220,8 @@
                     "label": "Processes per device",
                     "default": 2,
                     "paramClass": "IntParam",
-                    "help": "(--per_device in fs_motion_and_ctf, ts_reconstruct)"
-                },
+                    "help": "(--perdevice in fs_motion_and_ctf, ts_reconstruct)"
+                },                
                 {
                     "label": "Launchers",
                     "paramClass": "Group",
@@ -229,13 +229,19 @@
                     "collapsed": true,
                     "params": [
                         {
+                            "name": "register_output_only",
+                            "label": "Register output only",
+                            "paramClass": "BooleanParam",
+                            "help": "Register output only, without running the job. Output files (e.g. STAR files) will be re-generated, but the the underlying programs will not be executed."
+                        },
+                        {
                             "name": "launcher_warp",
                             "label": "WARP",
                             "paramClass": "StringParam",
                             "help": "Launcher to use for Warp"
                         },
                         {
-                            "name": "launcher_aretomo",
+                            "name": "wat.launcher_aretomo",
                             "label": "ARETOMO",
                             "paramClass": "StringParam",
                             "help": "Launcher to use for Aretomo"
