@@ -48,6 +48,8 @@ class TestApoF(unittest.TestCase):
     @classmethod
     def configure(cls, args):
         """Set class-level options before running tests."""
+        cls.args = args
+        
         if args.project is None:
             cls.project_temporary = True
             tmpdir = tempfile.TemporaryDirectory(prefix=f"{cls.__name__}__")
@@ -63,16 +65,17 @@ class TestApoF(unittest.TestCase):
         cls.dry = args.dry
         cls.data_root = ProcessingConfig.get_testdata_path('WarpApofTutorial', validate=True)
 
-    @classmethod
-    def load_workflow_jobs(cls):
-        with open(cls.workflow_template) as f:
+    def load_workflow_jobs(self):
+        print(f"Loading workflow template: {Color.warn(self.workflow_template)}")
+        with open(self.workflow_template) as f:
             workflow = json.load(f)
+            
         jobs_by_type = {
-            j['jobtype']: j for j in workflow['jobs'] if j['jobtype'] in cls.job_types}
-        if len(jobs_by_type) != len(cls.job_types):
-            missing = set(cls.job_types) - set(jobs_by_type)
+            j['jobtype']: j for j in workflow['jobs'] if j['jobtype'] in self.job_types}
+        if len(jobs_by_type) != len(self.job_types):
+            missing = set(self.job_types) - set(jobs_by_type)
             raise ValueError(f"Workflow template is missing jobs: {missing}")
-        return [jobs_by_type[job_type] for job_type in cls.job_types]
+        return [jobs_by_type[job_type] for job_type in self.job_types]
 
     def patch_workflow_params(self, jobs):
         """Adjust workflow params for the local test environment."""

@@ -38,6 +38,14 @@ class WarpExportParticles(WarpBasePipeline):
     name = 'emw-warp-export'
 
     def prerun(self):
+        if not self._register_output_only():
+            self._export()
+        else:
+            self.log(f"Registering output only, skipping job execution.")
+
+        self._output()
+            
+    def _export(self):
         inTomoStar = self._args['input_tomograms']
 
         inTable = StarFile.getTableFromFile('global', inTomoStar)
@@ -72,7 +80,7 @@ class WarpExportParticles(WarpBasePipeline):
 
         box = subargs['--box']
         ps = subargs['--output_angpix']
-        outStar = "warp_particles.star"
+        outStar = "particles.star"
         args = Args({
             'WarpTools': "ts_export_particles",
             "--settings": self.TSS,
@@ -88,11 +96,24 @@ class WarpExportParticles(WarpBasePipeline):
         if self.gpuList:
             args['--device_list'] = self.gpuList
 
+        self.log(f"Running ts_export_particles.")
         self.batch_execute('ts_export_particles', batch, args)
 
-        iosFn = self.join('warp_particles_optimisation_set.star')
-        ptsFn = self.join('warp_particles.star')
-        tomoPtsFn = self.join('warp_particles_tomograms.star')
+    def _output(self):
+        """ Output the results. """
+        self.log(f"Generating output files.")
+        batch = Batch(id=self.name, path=self.path)
+
+        # FIXME: We need to review the particles.star and tomograms.star to be compatible with Relion data model.
+        # For now, let's rename the output files to remove the particles_ prefix
+        for suffix in ['optimisation_set', 'particles', 'tomograms']:
+            fn = self.join(f'particles_{suffix}.star')
+            if os.path.exists(fn):
+                os.rename(fn, fn.replace('particles_', ''))
+
+        iosFn = self.join('optimisation_set.star')
+        ptsFn = self.join('particles.star')
+        tomoPtsFn = self.join('tomograms.star')
 
         outFn = ptsFn
 
@@ -101,7 +122,12 @@ class WarpExportParticles(WarpBasePipeline):
         if os.path.exists(iosFn):
             outFn = iosFn
             ptsTableName = 'particles'
-            self._fixPaths(iosFn, '', ['rlnTomoParticlesFile', 'rlnTomoTomogramsFile'])
+            # Let's re-write the optimisation_set.star file to fix particles.star and tomograms.star paths
+            with StarFile(iosFn, 'w') as sf:
+                sf.writeTable('', Table.fromDict({
+                    'rlnTomoParticlesFile': ptsFn,
+                    'rlnTomoTomogramsFile': tomoPtsFn,
+                }))
 
         if os.path.exists(ptsFn):
             self._fixPaths(ptsFn, ptsTableName, ['rlnImageName', 'rlnCtfImage'])

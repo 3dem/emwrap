@@ -88,7 +88,7 @@
                     "label": "Processes per device",
                     "default": 1,
                     "paramClass": "IntParam",
-                    "help": "(--per_device in ts_etomo_patches)"
+                    "help": "(--perdevice in ts_etomo_patches)"
                 }
             ]
         }

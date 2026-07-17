@@ -34,6 +34,11 @@ export EMWRAP_CONFIG=$(cat <<EOF
             "label": "Warp CTF and Reconstruction",
             "output": "WarpCtfRec"
         },
+        "emw-warp-otf": {
+            "launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_otf",
+            "label": "Warp OTF Preprocessing",
+            "output": "WarpOtf"
+        },
         "emw-pytom-create_template": {
             "launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.pytom.pytom_create_template",
             "label": "PyTom Create Template",

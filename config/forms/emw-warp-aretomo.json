@@ -22,7 +22,7 @@
                 },
                 {
                     "name": "ts_import.override_axis",
-                    "label": "Angle for Tilt Axis (deg)",
+                    "label": "Angle for Tilt Axis (REMOVE)",
                     "default": 85,
                     "paramClass": "FloatParam",
                     "help": ""
@@ -52,10 +52,10 @@
                 },
                 {
                     "name": "ts_aretomo.alignz",
-                    "label": "Align Z (px)",
+                    "label": "Align Z (A)",
                     "default": 1800,
                     "paramClass": "FloatParam",
-                    "help": ""
+                    "help": "REQUIRED Value for AreTomo's AlignZ parameter in Angstroms (will be auto-converted to binned pixels), i.e. the thickness of the reconstructed tomogram used for alignments."
                 },
                 {
                     "name": "ts_aretomo.axis_iter",
@@ -74,8 +74,8 @@
                 {
                     "name": "ts_aretomo.patches",
                     "label": "Patches",
-                    "default": "1x1",
-                    "help": "Number of patches for local alignments in X, Y, separated by 'x': e.g. 6x4. Increases processing time."                      
+                    "default": "",
+                    "help": "Number of patches for local alignments in X, Y, separated by 'x': e.g. 6x4. By default (empty, or 0x0 or 1x1) only global alignment is performed. More patches increase the processing time."                      
                 }
             ]
         },
@@ -92,7 +92,7 @@
                     "label": "Processes per device",
                     "default": 2,
                     "paramClass": "IntParam",
-                    "help": "(--per_device in ts_aretomo)"
+                    "help": "(--perdevice in ts_aretomo)"
                 },
                 {
                     "label": "Launchers",

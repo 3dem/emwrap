@@ -339,6 +339,20 @@ class ProcessingPipeline(Pipeline, FolderManager):
         return self.addGenerator(batchMgr.generate,
                                  queueMaxSize=queueMaxSize)
 
+    def addGpuProcessors(self, generator, getProcessingFunc, outputFunc):
+        """ Add processors that will process the batches in parallel using the GPUs. """
+        outputQueue = None
+
+        self.log(f"Creating {len(self.gpuList)} processing threads.", flush=True)
+
+        for gpu in self.gpuList:
+            p = self.addProcessor(generator.outputQueue,
+                                  getProcessingFunc(gpu),
+                                  outputQueue=outputQueue)
+            outputQueue = p.outputQueue
+
+        self.addProcessor(outputQueue, outputFunc)
+
     def updateBatchInfo(self, batch):
         """ Update general info with this batch and write json file. """
         self.info['batches'][batch.id] = batch.info
