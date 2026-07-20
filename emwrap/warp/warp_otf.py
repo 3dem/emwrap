@@ -147,11 +147,11 @@ class WarpOTF(WarpBasePipeline):
         tsName = tsDict['rlnTomoName']
 
         def _append_global_star(starFile, rowDict):
-            if os.path.exists(starFile):
+            if create or not os.path.exists(starFile):
+                table = Table.fromDict(rowDict)
+            else:
                 table = StarFile.getTableFromFile('global', starFile)
                 table.addRowValues(**rowDict)
-            else:
-                table = Table.fromDict(rowDict)
             self.write_ts_table('global', table, starFile)
 
         alignedStar = self.join('aligned_tilt_series.star')

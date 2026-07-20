@@ -15,10 +15,14 @@
 # **************************************************************************
 
 
+def getTomoBinning(row):
+    return float(getattr(row, 'rlnTomoTomogramBinning', 1))
+
+
 def getTomoPixelSize(row):
     """ Compute the tomogram pixel size in the row by multiplying the TS pixel size by the binning.
     """
-    return float(row.rlnTomoTiltSeriesPixelSize) * float(row.rlnTomoTomogramBinning)
+    return float(getattr(row, 'rlnTomoTiltSeriesPixelSize', 0)) * getTomoBinning(row)
 
 
 def getTomogram(row):

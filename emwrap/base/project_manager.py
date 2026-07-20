@@ -111,13 +111,118 @@ class ProjectManager(FolderManager):
         cmd += f" --output {jobId}"
         self._runCmd(cmd, jobId, wait=wait)
 
-    def listJobDetails(self, jobId):
-        job = None
-        if self._hasJob(jobId):
-            job = self._getJob(jobId)
+    def listJobDetails(self, job, update=True, tail_lines=10):
+        """ Print status, inputs, outputs and run logs for a single job. """
+        if isinstance(job, str):
+            job = self._getJob(job)
 
-        if job is None:
-            raise Exception(f"There is no job with jobId: {jobId}.")
+        if update:
+            self.update()
+
+        print(f"JOB:     {job.id}")
+        print(f"TYPE:    {job['jobtype']}")
+        print(f"STATUS:  {job['status']}")
+        print()
+
+        print("INPUTS:")
+        if job.inputs:
+            for i in job.inputs:
+                info = self._data.getOutputInfo(i.id)
+                print(f"  {i.id:<45} {info['type']:<20} {info['info']}")
+        else:
+            print("  (none)")
+        print()
+
+        print("OUTPUTS:")
+        if job.outputs:
+            for o in job.outputs:
+                info = self._data.getOutputInfo(o.id)
+                print(f"  {o.id:<45} {info['type']:<20} {info['info']}")
+        else:
+            print("  (none)")
+        print()
+
+        self._printRunLogs(job.id, tail_lines=tail_lines)
+
+    def listOutputDetails(self, output, update=True):
+        """ Print details for a single workflow output/data node. """
+        if isinstance(output, str):
+            output_id = Path.rmslash(output)
+            if not self._wf.hasData(output_id):
+                raise Exception(f"There is no output with id: {output_id}.")
+            output = self._wf.getData(output_id)
+
+        if update:
+            self.update()
+
+        job = output.parent
+        info = self._data.getOutputInfo(output.id)
+        file_path = self.join(output.id)
+
+        print(f"OUTPUT:  {output.id}")
+        print(f"TYPE:    {info['type']}")
+        print(f"INFO:    {info['info']}")
+        print()
+        print(f"JOB:     {job.id}")
+        print(f"         {job['jobtype']}, {job['status']}")
+        print()
+
+        print("FILE:")
+        if os.path.exists(file_path):
+            s = os.stat(file_path)
+            print(f"  {output.id}")
+            print(f"  {Pretty.size(s.st_size)}, {Pretty.elapsed(s.st_mtime)}")
+        else:
+            print(f"  {Color.red('missing')}: {output.id}")
+        print()
+
+        print("USED BY:")
+        if output.childs:
+            for child in output.childs:
+                print(f"  {child.id:<25} {child['jobtype']:<20} {child['status']}")
+        else:
+            print("  (none)")
+
+    def _projectPath(self, *parts):
+        """ Return a path relative to the project root. """
+        if len(parts) == 1 and not os.path.isabs(parts[0]):
+            return Path.rmslash(parts[0])
+        return Path.rmslash(self.relpath(self.join(*parts)))
+
+    def _printRunLogs(self, jobId, tail_lines=10):
+        """ Print run.err summary and last lines of run.out. """
+        err_path = self.join(jobId, 'run.err')
+        out_path = self.join(jobId, 'run.out')
+        err_rel = self._projectPath(jobId, 'run.err')
+        out_rel = self._projectPath(jobId, 'run.out')
+
+        print("RUN LOGS:")
+
+        if os.path.exists(err_path):
+            s = os.stat(err_path)
+            if s.st_size > 0:
+                print(f"  {err_rel}: {Color.red(Pretty.size(s.st_size))}, "
+                      f"{Pretty.elapsed(s.st_mtime)}")
+                with open(err_path) as f:
+                    err_lines = f.readlines()
+                for line in err_lines[-min(5, len(err_lines)):]:
+                    print(f"    {Color.red(line.rstrip())}")
+            else:
+                print(f"  {err_rel}: empty")
+        else:
+            print(f"  {err_rel}: missing")
+
+        if os.path.exists(out_path):
+            s = os.stat(out_path)
+            print(f"  {out_rel}: {Pretty.size(s.st_size)}, "
+                  f"{Pretty.elapsed(s.st_mtime)}")
+            if s.st_size > 0:
+                with open(out_path) as f:
+                    lines = f.readlines()
+                for line in lines[-tail_lines:]:
+                    print(f"    {line.rstrip()}")
+        else:
+            print(f"  {out_rel}: missing")
 
     def listJobs(self, update=True):
         """ List current jobs. """
@@ -144,7 +249,7 @@ class ProjectManager(FolderManager):
             for i in range(1, max_length):
                 input = _output(job.id, _data_id(inputs, i))
                 output = _output(job.id, _data_id(outputs, i))
-                print(format.format('', '', '', input, output))
+                print(format.format('', '', '', output, input))
 
     def listOutputs(self):
         """ List current jobs. """
@@ -495,19 +600,10 @@ class ProjectManager(FolderManager):
                 self._wf.deleteJob(job)
                 deleted.append(jobId)
             else:
-                raise Exception(f"{jobTypeOrId} is not an existing jobId or job type.")
+                raise Exception(f"{jobId} is not an existing jobId.")
 
         self._update_pipeline_star()
         return deleted
-
-    def showInfo(self, jobIdOrOutput):
-        """ Show info for a given job or output. """
-        jobIdOrOutput = Path.rmslash(jobIdOrOutput)
-
-        if self._hasJob(jobIdOrOutput):
-            print(self._data.getJobInfo(jobIdOrOutput))
-        else:
-            print(self._data.getOutputInfo(jobIdOrOutput))
 
     def _isActiveJob(self, job):
         return job['status'] in JOB_STATUS_ACTIVE
@@ -878,9 +974,6 @@ class ProjectManager(FolderManager):
                        help='Check and/or kill processes related to this project.'
                             'Pass more than one -k to kill processes.')
 
-        g.add_argument('--info', '-i', metavar='JOBID_OR_OUTPUT',
-                       help='Show info for a given job or output.')
-
         p.add_argument('-v', '--verbose', action='count', default=0,
                        help='Increase verbosity (-v or -vv).')
 
@@ -921,8 +1014,12 @@ class ProjectManager(FolderManager):
             pm.update()
 
         elif args.list is not None:  # only when -l / --list is on the command line
-            if jobId := args.list:  # it can be empty string when no value is passed
-                pm.listJobDetails(jobId)
+            if inputId := args.list:  # it can be empty string when no value is passed
+                w = pm.get_workflow()
+                if job := w.getJob(inputId):
+                    pm.listJobDetails(job)
+                elif w.hasData(Path.rmslash(inputId)):
+                    pm.listOutputDetails(w.getData(Path.rmslash(inputId)))
             else:
                 pm.listJobs()
 
@@ -953,9 +1050,6 @@ class ProjectManager(FolderManager):
 
         elif args.delete:
             pm.deleteJobs(args.delete)
-
-        elif args.info:
-            pm.showInfo(args.info)
 
         elif args.check > 0:
             kill = args.check > 1

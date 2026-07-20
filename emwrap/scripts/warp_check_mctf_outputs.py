@@ -40,7 +40,7 @@ def _input_ts_from_info(job_folder):
     with open(info_path) as f:
         info = json.load(f)
     inputs = info.get('inputs') or {}
-    for key in ('FrameSeries', 'TiltSeries'):
+    for key in ('TiltSeriesMovies', 'FrameSeries', 'TiltSeries'):
         block = inputs.get(key)
         if not block:
             continue

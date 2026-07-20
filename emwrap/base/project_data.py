@@ -24,6 +24,7 @@ from emtools.image import Image
 
 from .config import ProcessingConfig
 from .processing_pipeline import ProcessingPipeline
+from .data import getTomoPixelSize, getTomoBinning
 
 
 class ProjectData(FolderManager):
@@ -65,7 +66,7 @@ class ProjectData(FolderManager):
         if filepath.endswith('.star'):
             if '_series' in filepath:
                 try:
-                    datatype = 'FramesSeries'
+                    datatype = 'TiltSeriesMovies'
                     global_table = StarFile.getTableFromFile('global', filepath)
                     first = global_table[0]
                     ts_table = StarFile.getTableFromFile(first.rlnTomoName, self.join(first.rlnTomoTiltSeriesStarFile))
@@ -90,11 +91,16 @@ class ProjectData(FolderManager):
                     self._debug(
                         f"Error computing {Color.warn('OUTPUT')} info for "
                         f"{Color.bold(filepath)}: {e}")
-            elif 'tomograms' in filepath:
+            elif filepath.endswith('tomograms.star'):
+                global_table = StarFile.getTableFromFile('global', filepath)
+                first = global_table[0]
                 datatype = 'Tomograms'
+                n = len(global_table)
+                ps = getTomoPixelSize(first)
+                binning = getTomoBinning(first)
                 return {
                     'type': datatype,
-                    'info': 'No-info'
+                    'info': f'{n} items, {ps:0.1f} Å/px, bin: {binning:0.1f}'
                 }
         elif filepath.endswith('.mrc'):
             try:
