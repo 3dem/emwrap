@@ -1,0 +1,22 @@
+#!/bin/bash
+
+module purge && module load -s relion/v5.0
+
+INPUT=""
+OUTPUT=""
+while getopts ":i:o:" opt; do
+    case "$opt" in
+        i) INPUT="$OPTARG" ;;
+        o) OUTPUT="$OPTARG" ;;
+        *) echo "Usage: $0 -i file -o folder [-- program args...]" >&2; exit 1 ;;
+    esac
+done
+
+# Make sure the job id always have a trailing slash
+JOBID="${OUTPUT%/}/"
+
+echo "$(date '+%Y-%m-%d %H:%M:%S') emwrap: Using relion_pipeliner to run job: ${JOBID}"
+
+rm -rf .relion_lock
+relion_pipeliner --version
+relion_pipeliner --RunJobs ${JOBID}
