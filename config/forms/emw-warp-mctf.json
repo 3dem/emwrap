@@ -12,7 +12,7 @@
                     "pattern": "",
                     "help": "STAR file with input tilt-series",
                     "paramClass": "PathParam",
-                    "pointerClass": "FrameSeries"
+                    "pointerClass": "TiltSeriesMovies"
                 },
                 {
                     "name": "create_settings.bin_angpix",
