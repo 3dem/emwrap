@@ -30,7 +30,9 @@ from emtools.metadata import StarFile, Acquisition, Table, Mdoc
 from emwrap.base import ProcessingPipeline
 from .aretomo3 import AreTomo3
 
-# TODO: 'rlnTiltSeriesAligned' is not aligned is the normal tilt series unaligned
+from .utils import read_imod_alignment, stack_entry, create_dummy_edf_file
+
+# 'rlnTiltSeriesAligned' is not aligned is the normal tilt series unaligned
 
 def _fix_mdoc_subframe_paths(mdocPath, destPath, relDir='.'):
     """
@@ -103,17 +105,27 @@ class AreTomo3Pipeline(ProcessingPipeline):
             'rlnCtfFigureOfMerit',
             'rlnCtfMaxResolution',
             'rlnCtfIceRingDensity',
-            # Tilt-series alignment
+            # Tilt-series alignment 
             'rlnTomoXTilt',
             'rlnTomoYTilt',
             'rlnTomoZRot',
             'rlnTomoXShiftAngst',
             'rlnTomoYShiftAngst',
             'rlnCtfScalefactor',
+            # AreTomo3 provenance/debug labels
+            'at3OriginalNominalStageTiltAngle',
+            'at3OriginalNominalTiltAxisAngle',
+            'at3CorrectedTiltAngle',
+            'at3RefinedTiltAxisAngle',
         ]
 
     def _tomogram_extra_cols(self):
         return [
+            # Extra columns since we are copying from the import .star
+            'rlnTomoTiltSeriesPixelSize',
+            'rlnTomoTiltSeriesStarFile',
+            'rlnEtomoDirectiveFile',
+            # Tomo specific columns
             'rlnTomoReconstructedTomogram',
             'rlnTomoTomogramBinning',
             'rlnTomoSizeX',
@@ -154,7 +166,9 @@ class AreTomo3Pipeline(ProcessingPipeline):
         tomBinning = self._get_first_binning_value(self._args.get('aretomo3.AtBin', ''))
         newPx = tsPs * tomBinning if tomBinning > 0 else tsPs
         return newPx
-    
+
+    def newTargetTomBinning(self):
+        return self._get_first_binning_value(self._args.get('aretomo3.AtBin', ''))
     
     # ----- Input/output folder helpers --------
     def _getInputTsTable(self):
@@ -178,9 +192,9 @@ class AreTomo3Pipeline(ProcessingPipeline):
         if not mdocFile or not os.path.exists(mdocFile):
             return None
 
-        mdocsFm = FolderManager(self.join('mdocs'))
-        mdocsFm.create()
-        dstMdocFile = mdocsFm.join(f'{tsName}.mdoc')
+        mdocsDir = self.join('mdocs')
+        os.makedirs(mdocsDir, exist_ok=True)
+        dstMdocFile = os.path.join(mdocsDir, f'{tsName}.mdoc')
 
         if os.path.abspath(mdocFile) != os.path.abspath(dstMdocFile):
             shutil.copy2(mdocFile, dstMdocFile)
@@ -447,9 +461,27 @@ class AreTomo3Pipeline(ProcessingPipeline):
 
         return alignment
 
+    def _get_refined_tilt_axis_angle(self, alignmentByIndex):
+        """Return the refined AreTomo3 tilt-axis angle from .aln ROT.
+        AreTomo3 stores ROT in the global alignment rows. Since this value
+        represents the refined tilt-axis angle for the tilt series, use the
+        first valid value.
+        """
+        globalAlignment = alignmentByIndex.get('global', {})
+
+        for sec in sorted(globalAlignment):
+            rot = globalAlignment[sec].get('rot', '')
+
+            if rot not in ('', None):
+                return rot
+
+        return ''
+
     
     # ----- Relion metadata conversion helpers -----------
-    def _setAretomo3Params(self, tiltDict, result, micrographIndex=None, tiltAnglesByIndex=None, ctfByIndex=None,  alignmentByIndex=None):
+    def _setAretomo3Params(self, tiltDict, result, 
+        micrographIndex=None, tiltAnglesByIndex=None, ctfByIndex=None,  
+        alignmentByIndex=None, imodAlignmentByIndex=None,  refinedTiltAxisAngle=None):
         """Convert AreTomo3 per-tilt-series outputs into Relion per-tilt labels.
         This function is the central place for parsing AreTomo3 outputs such as:
         - *_TLT.txt
@@ -463,6 +495,8 @@ class AreTomo3Pipeline(ProcessingPipeline):
 
         tiltAnglesByIndex = tiltAnglesByIndex or {}
         ctfByIndex = ctfByIndex or {}
+        imodAlignmentByIndex = imodAlignmentByIndex or {}
+
         alignmentByIndex = alignmentByIndex or {
             'alphaOffset': '',
             'betaOffset': '',
@@ -471,13 +505,15 @@ class AreTomo3Pipeline(ProcessingPipeline):
             'local': {},
         }
 
+        refinedTiltAxisAngle = '' if refinedTiltAxisAngle is None else refinedTiltAxisAngle
+
         def setMotionCorrectionLabels():
             # TODO: parse motion-correction outputs when available.
             tiltDict.update({
                 'rlnCtfPowerSpectrum':'',
-                'rlnMicrographNameEven': '',
-                'rlnMicrographNameOdd': '',
-                'rlnMicrographName': '',
+                'rlnMicrographNameEven': stack_entry(result.get('rlnTiltSeriesAlignedEvn', ''), micrographIndex, zero_pad=True),
+                'rlnMicrographNameOdd': stack_entry(result.get('rlnTiltSeriesAlignedOdd', ''), micrographIndex, zero_pad=True),
+                'rlnMicrographName': stack_entry(result.get('rlnTiltSeriesAligned', ''), micrographIndex),
                 'rlnMicrographMetadata': '',
                 'rlnAccumMotionTotal': '',
                 'rlnAccumMotionEarly': '',
@@ -487,7 +523,7 @@ class AreTomo3Pipeline(ProcessingPipeline):
         def setCTFEstimationLabels():
             ctfValues = ctfByIndex.get(micrographIndex, {})
             tiltDict.update({
-                'rlnCtfImage': result.get('rlnCtfImage', ''),
+                'rlnCtfImage': stack_entry(result.get('rlnCtfImage', ''), micrographIndex),
                 'rlnDefocusU': ctfValues.get('rlnDefocusU', ''),
                 'rlnDefocusV': ctfValues.get('rlnDefocusV', ''),
                 'rlnCtfAstigmatism': ctfValues.get('rlnCtfAstigmatism', ''),
@@ -498,21 +534,39 @@ class AreTomo3Pipeline(ProcessingPipeline):
             })
 
         def setTiltSeriesAlignmentLabels():
+            imodValues = imodAlignmentByIndex.get(micrographIndex, {})
             alnValues = alignmentByIndex.get('global', {}).get(micrographIndex, {})
+            correctedTilt = imodValues.get('tilt', alnValues.get('tilt', ''))
+            
+            originalNominalStageTilt = tiltDict.get('rlnTomoNominalStageTiltAngle', '')
+            originalNominalTiltAxis = tiltDict.get('rlnTomoNominalTiltAxisAngle', '')
+
+            # RELION-facing stage tilt should match the geometry AreTomo3 used.
+            stageTilt = correctedTilt if correctedTilt != '' else originalNominalStageTilt
+            
+            # Tilt-axis angle should come from AreTomo3 refined ROT, not AlphaOffset.
+            tiltAxisAngle = (refinedTiltAxisAngle if refinedTiltAxisAngle != '' else originalNominalTiltAxis)
+
             tiltDict.update({
-            # Convention note:
-            # AreTomo3 .aln has one TILT value per projection.
-            # In many RELION tomo tables this corresponds to rlnTomoXTilt,
-            # while rlnTomoYTilt is often empty/0 unless a separate Y tilt
-            # estimate is available.
-            'rlnTomoXTilt': alnValues.get('tilt', ''), #TODO: I am not sure this is the correct interpretation
-            'rlnTomoYTilt': '',
-            'rlnTomoZRot': alnValues.get('rot', ''),
-            # AreTomo3 TX/TY are pixels; converted to Angstroms in parser.
-            'rlnTomoXShiftAngst': alnValues.get('txAngst', ''),
-            'rlnTomoYShiftAngst': alnValues.get('tyAngst', ''),
-            'rlnCtfScalefactor': '' # alnValues.get('scale', ''), TODO: Not sure this is from here, I think this should be introduced by tomogram reconstruction
-        })
+                 # Corrected nominal geometry
+                'rlnTomoNominalStageTiltAngle': stageTilt,
+                'rlnTomoNominalTiltAxisAngle': tiltAxisAngle,
+                 # Per-image alignment geometry
+                'rlnTomoXTilt': imodValues.get('rlnTomoXTilt', 0.0 if stageTilt != '' else ''),
+                'rlnTomoYTilt': imodValues.get('rlnTomoYTilt', stageTilt),
+                 # This is per-image in-plane transform from IMOD .xf,
+                # not the global tilt-axis angle.
+                'rlnTomoZRot': imodValues.get('rlnTomoZRot', ''),
+                'rlnTomoXShiftAngst': imodValues.get('rlnTomoXShiftAngst', alnValues.get('txAngst', '')),
+                'rlnTomoYShiftAngst': imodValues.get('rlnTomoYShiftAngst', alnValues.get('tyAngst', '')),
+                'rlnCtfScalefactor': imodValues.get('rlnCtfScalefactor', ''),
+                
+                # Provenance/debug labels
+                'at3OriginalNominalStageTiltAngle': originalNominalStageTilt,
+                'at3OriginalNominalTiltAxisAngle': originalNominalTiltAxis,
+                'at3CorrectedTiltAngle': correctedTilt,
+                'at3RefinedTiltAxisAngle': tiltAxisAngle,
+            })
 
         setMotionCorrectionLabels()
         setCTFEstimationLabels()
@@ -531,6 +585,7 @@ class AreTomo3Pipeline(ProcessingPipeline):
         ]
 
         newIdvTsTable = Table(outputCols)
+
         tiltAnglesByIndex = self._read_tilt_angle_mapping(
             result.get('at3MappingFile', None))
 
@@ -538,9 +593,12 @@ class AreTomo3Pipeline(ProcessingPipeline):
             result.get('at3TomoCtfFile', None))
 
         alignmentByIndex = self._read_aretomo3_alignment_file(
-            result.get('at3TomoAlignmentFile', None),
-            newTsPs
-        )
+            result.get('at3TomoAlignmentFile', None), newTsPs)
+
+        imodAlignmentByIndex = read_imod_alignment(
+            result.get('at3ImodFolder', None), tsName, newTsPs)
+
+        refinedTiltAxisAngle = self._get_refined_tilt_axis_angle(alignmentByIndex)
 
         # Checks rejection of tilt images
         if tiltAnglesByIndex and len(tiltAnglesByIndex) != len(idvTsTable):
@@ -558,7 +616,9 @@ class AreTomo3Pipeline(ProcessingPipeline):
                 micrographIndex=micrographIndex,
                 tiltAnglesByIndex=tiltAnglesByIndex,
                 ctfByIndex=ctfByIndex, 
-                alignmentByIndex=alignmentByIndex
+                alignmentByIndex=alignmentByIndex,
+                imodAlignmentByIndex=imodAlignmentByIndex, 
+                refinedTiltAxisAngle=refinedTiltAxisAngle,
                 )
 
             newIdvTsTable.addRowValues(**tiltDict)
@@ -581,22 +641,22 @@ class AreTomo3Pipeline(ProcessingPipeline):
 
         return tsDict
 
-    def _build_tomogram_row(self, tsRow, result, tomDims):
-        tomBinning = self._get_first_binning_value(
-            self._args.get('aretomo3.AtBin', '')
-        )
+    def _build_tomogram_row(self, tsRow, result, newTsPs, idvTsStarFile, edfFile, tomDims):
         tomDict = tsRow._asdict()
 
         tomDict.update({
+            'rlnTomoTiltSeriesPixelSize': newTsPs,
+            'rlnTomoTiltSeriesStarFile': idvTsStarFile,
+            'rlnEtomoDirectiveFile': edfFile or '',
             'rlnTomoReconstructedTomogram': result.get('rlnTomoReconstructedTomogram', ''),
-            'rlnTomoTomogramBinning': tomBinning,
+            'rlnTomoTomogramBinning': self.newTargetTomBinning(),
             'rlnTomoSizeX': tomDims[0],
             'rlnTomoSizeY': tomDims[1],
             'rlnTomoSizeZ': tomDims[2],
             # In your result dict these are currently named rlnTomoNameOdd/Evn,
             # but the tomograms.star columns you chose are Half1/Half2.
-            'rlnTomoReconstructedTomogramHalf1': result.get('rlnTomoNameOdd', ''),
-            'rlnTomoReconstructedTomogramHalf2': result.get('rlnTomoNameEvn', ''),
+            'rlnTomoReconstructedTomogramHalf1': result.get('rlnTomoNameEvn', ''),
+            'rlnTomoReconstructedTomogramHalf2': result.get('rlnTomoNameOdd', ''),
         })
 
         return tomDict
@@ -663,15 +723,39 @@ class AreTomo3Pipeline(ProcessingPipeline):
                 return path
             return None
 
+        def _add_folder_if_exists(key, folder, dirname):
+            path = folder.join(dirname)
+            if os.path.isdir(path):
+                result[key] = path
+                return path
+            return None
+
+        def _add_stack_if_exists(key, folder, basename):
+            mrcsPath = folder.join(f'{basename}.mrcs')
+            mrcPath = folder.join(f'{basename}.mrc')
+
+            if os.path.exists(mrcsPath):
+                result[key] = mrcsPath
+                return mrcsPath
+
+            if os.path.exists(mrcPath):
+                result[key] = mrcPath
+                return mrcPath
+
+            return None
+        
         # Files expected in jobX/tiltseries/<tsName>/
-        _add_if_exists('rlnTiltSeriesAligned', tsFolder, f'{tsName}.mrc')
-        _add_if_exists('rlnTiltSeriesAlignedOdd', tsFolder, f'{tsName}_ODD.mrc')
-        _add_if_exists('rlnTiltSeriesAlignedEvn', tsFolder, f'{tsName}_EVN.mrc')
+        _add_stack_if_exists('rlnTiltSeriesAligned', tsFolder, tsName)
+        _add_stack_if_exists('rlnTiltSeriesAlignedOdd', tsFolder, f'{tsName}_ODD')
+        _add_stack_if_exists('rlnTiltSeriesAlignedEvn', tsFolder, f'{tsName}_EVN')
+        _add_stack_if_exists('rlnCtfImage', tsFolder, f'{tsName}_CTF')
+
         _add_if_exists('at3TomoAlignmentFile', tsFolder, f'{tsName}.aln')
         _add_if_exists('at3MappingFile', tsFolder, f'{tsName}_TLT.txt')
         _add_if_exists('at3TomoCtfFile', tsFolder, f'{tsName}_CTF.txt')
-        _add_if_exists('rlnCtfImage', tsFolder, f'{tsName}_CTF.mrc')
+        
         _add_if_exists('rlnTomoMdocFile', FolderManager(self.join('mdocs')), f'{tsName}.mdoc')
+        _add_folder_if_exists('at3ImodFolder', tsFolder, f'{tsName}_Imod')
 
         _add_if_exists('at3MetricsCsv', tsFolder, 'TiltSeries_Metrics.csv')
         _add_if_exists('at3TimeStampCsv', tsFolder, 'TiltSeries_TimeStamp.csv')
@@ -816,9 +900,16 @@ class AreTomo3Pipeline(ProcessingPipeline):
                 if tomDims is None:
                     tomDims = tomDimsThis
 
+                tomFolderDir = self.join(self.outputTomDir, tsName)
+                edfFile = create_dummy_edf_file(tomFolderDir, tsName)
+                result['rlnEtomoDirectiveFile'] = edfFile
+                
                 tomRow = self._build_tomogram_row(
                     tsRow,
                     result,
+                    newTsPs,
+                    idvTsStarFile,
+                    edfFile,
                     tomDimsThis
                 )
 
@@ -926,6 +1017,56 @@ class AreTomo3Pipeline(ProcessingPipeline):
                 result[srcKey] = dst
                 return dst
 
+            def _copy_folder(srcKey, destFolder):
+                """Copy the folder at result[srcKey] into destFolder, update result[srcKey].
+                Returns the copied folder path, or None if srcKey is missing.
+                """
+                src = result.get(srcKey, None)
+                if src is None or not os.path.isdir(src):
+                    return None
+
+                dst = destFolder.join(os.path.basename(src))
+
+                if os.path.abspath(src) != os.path.abspath(dst):
+                    if os.path.exists(dst):
+                        shutil.rmtree(dst)
+                    shutil.copytree(src, dst)
+
+                result[srcKey] = dst
+                return dst
+            
+            def _link_mrc_stack_as_mrcs(srcKey):
+                """Create a .mrcs symlink for an MRC stack and update result[srcKey].
+
+                RELION expects stacks of 2D images to have extension .mrcs.
+                AreTomo3 writes them as .mrc, so we keep the original .mrc file and
+                create a sibling .mrcs symlink pointing to it.
+                """
+                src = result.get(srcKey, None)
+
+                if src is None or not os.path.exists(src):
+                    return None
+
+                root, ext = os.path.splitext(src)
+
+                if ext.lower() != '.mrc':
+                    return src
+
+                dst = root + '.mrcs'
+
+                if os.path.abspath(src) == os.path.abspath(dst):
+                    result[srcKey] = dst
+                    return dst
+
+                if os.path.lexists(dst):
+                    os.remove(dst)
+
+                # Relative symlink keeps the output folder movable.
+                os.symlink(os.path.basename(src), dst)
+
+                result[srcKey] = dst
+                return dst            
+
             # --- Aligned tilt series outputs -> outputTsDir
             _copy('rlnTiltSeriesAligned', tsFolder)
             _copy('rlnTiltSeriesAlignedOdd', tsFolder)
@@ -936,6 +1077,15 @@ class AreTomo3Pipeline(ProcessingPipeline):
             _copy('rlnCtfImage', tsFolder)
             _copy('at3MetricsCsv', tsFolder)
             _copy('at3TimeStampCsv', tsFolder)
+
+            # RELION expects image stacks to use .mrcs extension.
+            _link_mrc_stack_as_mrcs('rlnTiltSeriesAligned')
+            _link_mrc_stack_as_mrcs('rlnTiltSeriesAlignedOdd')
+            _link_mrc_stack_as_mrcs('rlnTiltSeriesAlignedEvn')
+            _link_mrc_stack_as_mrcs('rlnCtfImage')
+
+            # --- IMOD folder -> outputTsDir/TS_NAME/
+            _copy_folder('at3ImodFolder', tsFolder)
 
             # --- Tomogram outputs (only present if reconstruction was enabled) -> outputTomDir
             if result.get('rlnTomoReconstructedTomogram', None) is not None:
@@ -975,27 +1125,18 @@ class AreTomo3Pipeline(ProcessingPipeline):
         self.inputTsTable = self._getInputTsTable()
         self.inputTs =  self._args['input_tiltseries']
         print(f"Input tilt-series: {len(self.inputTsTable)}")  
-        
-        self.mkdir(self.outputTsDir)
-        self.mkdir(self.outputTomDir)
-
 
         if self.registerOnly:
             self._register_existing_final_outputs()
             return
         
+        self.mkdir(self.outputTsDir)
+        self.mkdir(self.outputTomDir)
+        
         batchMgr = TsStarBatchManager(self.inputTsTable, self.tmpDir)
         g = self.addGenerator(batchMgr.generate)
-        outputQueue = None
         
-        print(f"Creating {len(self.gpuList)} processing threads.")
-        for gpu in self.gpuList:
-            p = self.addProcessor(g.outputQueue,
-                                  self.get_aretomo3_proc(gpu),
-                                  outputQueue=outputQueue)
-            outputQueue = p.outputQueue
-
-        self.addProcessor(outputQueue, self._output)
+        self.addGpuProcessors(g, self.get_aretomo3_proc, self._output)
 
 
 if __name__ == '__main__':
