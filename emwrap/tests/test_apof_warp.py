@@ -68,7 +68,7 @@ class TestApoFWarp(TestApoF):
         elif self.args.workflow == 'otf':
             self.workflow_template = self.get_workflow_template('apof-warp-tutorial-otf')
             self.job_types = [
-                'emw-import-ts',
+                'emw-import-ts',    
                 'emw-warp-otf',
             ]
             self.expected_outputs = {

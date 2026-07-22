@@ -74,16 +74,23 @@ class WarpOTF(WarpBasePipeline):
             with StarFile(inputTs, 'w') as sf:
                 sf.writeTable('global', table, timeStamp=True)
 
+            def _subargs(key):
+                """ Special subargs to remove the first prefix only. """ 
+                return self._args.subset(key, '')
+
             # 1. Run Motion Correction and CTF Estimation
-            mctf_args = self.get_subargs('mctf', prefix='')
-           # mctf_args['input_tiltseries'] = inputTs
+            mctf_args = _subargs('mctf')
+            
+            # mctf_args['input_tiltseries'] = inputTs
+
+            self.log(f"OTF - MCTF arguments: {mctf_args}")
             
             mctf_args['fs_motion_and_ctf.perdevice'] = self._args['perdevice']
             _run(WarpMotionCtf, mctf_args, inputTs=inputTs)
 
             # 2. Run Alignment
 
-            wat_args = self.get_subargs('wat', prefix='')
+            wat_args = _subargs('wat')
             wat_args['ts_import.override_axis'] = tsTable[0].rlnTomoNominalTiltAxisAngle
 
             #mctf_args['input_tiltseries'] = inputTs
@@ -91,7 +98,7 @@ class WarpOTF(WarpBasePipeline):
 
             # 3. Run CTF Reconstruction
             # Update some CTF parameters from MCTF
-            ctf_args = self.get_subargs('ctfrec', prefix='')
+            ctf_args = _subargs('ctfrec')
             key_map_exceptions = {
                 'range_low': 'range_min',
                 'range_high': 'range_max',

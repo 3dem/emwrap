@@ -16,6 +16,7 @@
 
 import os
 import shutil
+import numpy as np
 from collections import defaultdict
 from glob import glob
 
@@ -252,13 +253,12 @@ class WarpBasePipeline(ProcessingPipeline):
             tsDict['rlnTomoTiltSeriesStarFile'] = "None"
             return False, None, None
 
-        # FIXME: Do not add even/odd when this option is not selected
         extra_cols = [
             'rlnCtfPowerSpectrum', 'rlnMicrographName', 'rlnMicrographMetadata',
             'rlnAccumMotionTotal', 'rlnAccumMotionEarly', 'rlnAccumMotionLate',
-            'rlnMicrographNameEven', 'rlnMicrographNameOdd', 'rlnCtfImage',
-            'rlnDefocusU', 'rlnDefocusV', 'rlnCtfAstigmatism', 'rlnDefocusAngle',
+            'rlnCtfImage', 'rlnDefocusU', 'rlnDefocusV', 'rlnCtfAstigmatism', 'rlnDefocusAngle',
             'rlnCtfFigureOfMerit', 'rlnCtfMaxResolution', 'rlnCtfIceRingDensity',
+            'rlnMicrographNameEven', 'rlnMicrographNameOdd'
         ]
 
         filesMap = {
@@ -268,6 +268,16 @@ class WarpBasePipeline(ProcessingPipeline):
             'rlnMicrographNameEven': 'average/even',
             'rlnMicrographNameOdd': 'average/odd'
         }
+        
+        filesMapExtra = {
+            'rlnMicrographNameEven': 'average/even',
+            'rlnMicrographNameOdd': 'average/odd'
+        }
+
+        if all(os.path.exists(self.join(self.FS, v)) for v in filesMapExtra.values()):
+            filesMap.update(filesMapExtra)
+            extra_cols.extend(filesMapExtra.keys())
+            
         newTsTable = Table(tsTable.getColumnNames() + extra_cols)
         dims = None
         for frameRow in tsTable:
@@ -275,7 +285,8 @@ class WarpBasePipeline(ProcessingPipeline):
             movieMrc = moviePrefix + '.mrc'
             frameDict = frameRow._asdict()
             for k, v in filesMap.items():
-                frameDict[k] = self.join(self.FS, v, movieMrc)
+                movieFn = self.join(self.FS, v, movieMrc)
+                frameDict[k] = movieFn if os.path.exists(movieFn) else ""
             frameDict['rlnMicrographMetadata'] = "None"
 
             avgMrcPath = frameDict['rlnMicrographName']
@@ -311,24 +322,82 @@ class WarpBasePipeline(ProcessingPipeline):
              self._args.get('wat.ts_aretomo.angpix', '') or 0)
         return float(v)
 
-    def parseAlignmentParams(self, tsName, ps):
+    def parseAlignmentParams(self, tsDict, ps):
         """ Parse AreTomo alignment parameters from .st.aln into Relion convention. """
+        tsName = tsDict['rlnTomoName']
         self.log(f"Parsing alignments for tomo: {tsName}")
         alnFile = self.join(self.TS, 'tiltstack', tsName, f'{tsName}.st.aln')
         alignments = []
         # Despite Warp's Aretomo wrapper writes the angles from positive to negative
         # Aretomo always write the alignment back from negative to positive order,
         # So we don't need to reverse it when parsing to the STAR file
-        for line in TextFile.stripLines(alnFile):
-            parts = line.split()
+        
+        # self.log(f"Parsing alignments from: {alnFile}, pixel size: {ps}")
+
+        # for line in TextFile.stripLines(alnFile):
+        #     parts = line.split()
+        #     values = {
+        #         'rlnTomoXTilt': 0,
+        #         'rlnTomoYTilt': float(parts[-1]),
+        #         "rlnTomoZRot": float(parts[1]),
+        #         'rlnTomoXShiftAngst': float(parts[3]) * ps,
+        #         'rlnTomoYShiftAngst': float(parts[4]) * ps,
+        #     }
+        #     alignments.append(values)
+
+        # /Users/jdela80/coescb/public/tests/WarpTutorialTest3/WarpOtf/job030/warp_tiltseries/tiltstack/TS_11/TS_11_Imod
+        xfFile = self.join(self.TS, 'tiltstack', tsName, f'{tsName}_Imod/{tsName}_st.xf')
+        tltFile = self.join(self.TS, 'tiltstack', tsName, f'{tsName}_Imod/{tsName}_st.tlt')
+
+        self.log(f"Parsing alignments from: {xfFile}, pixel size: {ps}")
+
+
+
+        xf_lines = list(TextFile.stripLines(xfFile))
+        xf_lines.reverse()
+        tlt_lines = list(TextFile.stripLines(tltFile))
+        tlt_lines.reverse()
+
+        import math
+
+        for xf_line, tilt_angle in zip(xf_lines, tlt_lines):
+            a11, a12, a21, a22, dx, dy = map(float, xf_line.split())
+            A = np.array([[a11, a12], [a21, a22]])
+
+            # Compute in-plane shifts            
+            # image_shifts = np.linalg.inv(A) @ np.array([dx, dy])
+            # dx, dy = -image_shifts * ps # Convert shifts to Angstroms            
+
+            # # Compute z-rotation angle in degrees
+            # zrot = math.degrees(math.acos(a11))
+
+            # TODO: Check if the tilt angle is flipped
+
+            # TODO: Check if there is tilt angle offset and subtract it from tilt_angle
+            tilt_angle_offset = 0.0
+
+            # Checking from https://github.com/Phaips/aretomo3torelion5/blob/main/aretomo3torelion5.py#L211
+            # Build the full 3x3 transformation matrix
+            T = np.array([[a11, a12, dx],
+                          [a21, a22, dy],
+                          [0.0, 0.0, 1.0]])
+            # Note: np.arctan2(A12, A11) gives the proper sign.
+            zrot = np.degrees(np.arctan2(a12, a11))
+            
+            # Invert the full transformation matrix to get the corrected translation
+            T_inv = np.linalg.inv(T)
+            # The translation (shift) is given by the third column of the inverted matrix
+            x_shift_angst = T_inv[0, 2] * ps
+            y_shift_angst = T_inv[1, 2] * ps
+
             values = {
-                'rlnTomoXTilt': 0,
-                'rlnTomoYTilt': float(parts[-1]),
-                "rlnTomoZRot": float(parts[1]),
-                'rlnTomoXShiftAngst': float(parts[3]) * ps,
-                'rlnTomoYShiftAngst': float(parts[4]) * ps,
+                'rlnTomoXTilt': 0.0,
+                'rlnTomoYTilt': float(tilt_angle) - tilt_angle_offset,
+                "rlnTomoZRot": zrot,
+                'rlnTomoXShiftAngst': dx,
+                'rlnTomoYShiftAngst': dy,
             }
-            alignments.append({k: float(values[k]) for k in values})
+            alignments.append(values)
 
         return alignments
 
@@ -369,7 +438,7 @@ class WarpBasePipeline(ProcessingPipeline):
 
         # Generate the proper metadata star file for this row
         tsTable = StarFile.getTableFromFile(tsName, inputTsStar)
-        alignments = self.parseAlignmentParams(tsName, newPs)
+        alignments = self.parseAlignmentParams(tsDict, newPs)
         newTsTable = Table(tsTable.getColumnNames() + RelionStar.TOMO_ALIGNMENT_COLUMNS)
         # Alignments from AreTomo are sorted from negative to positive tilt angle
         # so we need to sort the TS metadata to match that order
