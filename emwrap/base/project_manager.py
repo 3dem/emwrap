@@ -32,22 +32,6 @@ from .processing_pipeline import ProcessingPipeline
 from .project_data import ProjectData
 
 
-STATUS_LAUNCHED = 'Launched'
-STATUS_RUNNING = 'Running'
-STATUS_SUCCEEDED = 'Succeeded'
-STATUS_FAILED = 'Failed'
-STATUS_ABORTED = 'Aborted'
-STATUS_SAVED = 'Saved'
-
-JOB_STATUS_FILES = {
-    'RELION_JOB_RUNNING': STATUS_RUNNING,
-    'RELION_JOB_EXIT_SUCCESS': STATUS_SUCCEEDED,
-    'RELION_JOB_EXIT_FAILURE': STATUS_FAILED,
-    'RELION_JOB_EXIT_ABORTED': STATUS_ABORTED
-}
-
-JOB_STATUS_ACTIVE = [STATUS_LAUNCHED, STATUS_RUNNING]
-
 
 class ProjectManager(FolderManager):
     """ Class to manipulate information about a Relion project. """
@@ -290,33 +274,16 @@ class ProjectManager(FolderManager):
                     if not job.hasInput(v):
                         job.addInputs([self._wf.getData(v)])
 
-        self._update_pipeline_star()
+        self._save_workflow_data()
 
 
     def update(self):
         """ Update status of the running jobs. """
         self.log("ProjectManager::: Updating project.")
-        self._data.updateWorkflow()
-        self._data.save()
-
         t = Timer()
-        update = False
-        for job in self._wf.jobs():
-            if self._isActiveJob(job):
-                for statusFile, status in JOB_STATUS_FILES.items():
-                    if self.exists(job.id, statusFile):
-                        job['status'] = status
-                        update = True
-
-                if jobInfo := self.loadJobInfo(job):
-                    for k, o in jobInfo['outputs'].items():
-                        for fn, datatype in o['files']:
-                            if not job.hasOutput(fn):
-                                job.registerOutput(fn, datatype=datatype)
-                                update = True
-
-        if update:
-            self._update_pipeline_star()
+        updated = self._data.updateWorkflow()
+        if updated:
+            self._save_workflow_data()
 
         self.log(t.getToc(f"{Color.cyan('Update took')}"))
 
@@ -375,9 +342,9 @@ class ProjectManager(FolderManager):
         if job is None:
             raise Exception(f"{jobTypeOrId} is not an existing jobId or job type.")
 
-        job['status'] = STATUS_SAVED
+        self._data.setJobStatus(job.id, ProjectData.STATUS_SAVED)
         self._updateJobInputs(job, params)
-        self._update_pipeline_star()
+        self._save_workflow_data()
 
         return job
 
@@ -505,7 +472,7 @@ class ProjectManager(FolderManager):
             jobStar = os.path.join(job.id, 'job.star')
             jobType = job['jobtype']
 
-            if self._isActiveJob(job):
+            if self._data.isActiveJob(job):
                 raise Exception("Can not re-run running or launched jobs.")
 
             job_params = self._readJobParams(job, extraParams=params)
@@ -538,19 +505,18 @@ class ProjectManager(FolderManager):
 
         self._runCmd(f"{launcher} -i {jobStar} -o {job.id}", job.id,
                      wait=wait, job_params=job_params)
-        job['status'] = STATUS_LAUNCHED
-        self._update_pipeline_star()
+        self._data.setJobStatus(job.id, ProjectData.STATUS_LAUNCHED)
+        self._save_workflow_data()
 
         return job
 
     def stopJob(self, jobId):
         """ Stop a job. """
         job = self._getJob(jobId)
-        if not self._isActiveJob(job):
+        if not self._data.isActiveJob(job):
             raise Exception("Can not stop non-running jobs.")
 
-        
-        job['status'] = STATUS_ABORTED
+        self._data.setJobStatus(jobId, ProjectData.STATUS_ABORTED)
         if self.exists(jobId, 'job.id'):
             with open(self.join(jobId, 'job.id')) as f:
                 job_id = f.readline().strip()
@@ -565,18 +531,19 @@ class ProjectManager(FolderManager):
             else:
                 raise Exception(f"Queue {qname} not found in config for stopping job {jobId}.")
 
+            scriptLog = self.join(jobId, 'job.log')
             try:
-                subprocess.run(shlex.split(cancelCmd), check=True, capture_output=True, text=True)
-                scriptLog = self.join(jobId, 'job.log')
+                subprocess.run(shlex.split(cancelCmd), check=True, capture_output=True, text=True)                
                 self._log(f"Stopping CLUSTER job, {cancelCmd}", jobFile=scriptLog, flush=True)
             except subprocess.CalledProcessError as e:
                 self._log("ERROR: Stopping CLUSTER job failed", jobFile=scriptLog)
                 self._log(f"  Error: '{e.stderr.rstrip()}'", jobFile=scriptLog)
-        self._update_pipeline_star()
+        self._data.setJobStatus(jobId, ProjectData.STATUS_ABORTED)
+        self._save_workflow_data()
         return job
 
     def _deleteJobFolder(self, job, validate=True):
-        if validate and self._isActiveJob(job):
+        if validate and self._data.isActiveJob(job):
             raise Exception("Can not delete launched or running jobs, stop them first.")
 
         if not self.exists('.Trash'):
@@ -602,11 +569,8 @@ class ProjectManager(FolderManager):
             else:
                 raise Exception(f"{jobId} is not an existing jobId.")
 
-        self._update_pipeline_star()
+        self._save_workflow_data()
         return deleted
-
-    def _isActiveJob(self, job):
-        return job['status'] in JOB_STATUS_ACTIVE
 
     def _create(self):
         """ Create a new project in the given path. """
@@ -621,8 +585,9 @@ class ProjectManager(FolderManager):
 
         RelionStar.write_pipeline(self.pipeline_star)
 
-    def _update_pipeline_star(self):
+    def _save_workflow_data(self):
         self.log(f"Updating {self.pipeline_star}")
+        self._data.save()
         RelionStar.workflow_to_pipeline(self._wf, self.pipeline_star)
 
     def _saveCmd(self, cmd, jobId):
@@ -692,17 +657,22 @@ class ProjectManager(FolderManager):
         script_log = os.path.join(folder_path, 'job.log')
         gpus = int(job_params.get('gpus', 0))   # FIXME Get gpu list and take the length
 
-        if gpus > 0:
-            if cpus := job_params.get('cpus', ''):
-                if 'x' in cpus:
-                    mpi, threads = cpus.split('x')
-                    cpus = int(mpi) * int(threads)
+        def _load_cpus(gpus):
+            mpi, threads = 1, 1
+            if 'nr_mpi' in job_params or 'nr_threads' in job_params:
+                mpi = int(job_params.get('nr_mpi', 1))
+                threads = int(job_params.get('nr_threads', 1))
+            elif cpus_str := job_params.get('cpus', ''):
+                if 'x' in cpus_str:
+                    mpi, threads = map(int, cpus_str.split('x'))
                 else:
-                    cpus = int(cpus)
-            else:
-                cpus = gpus * 10
-        else:
-            cpus = int(job_params.get('cpus', 1))
+                    mpi, threads = int(cpus_str), 1
+            return mpi * threads
+
+        cpus = _load_cpus(gpus)
+
+        if gpus > 0:
+            cpus = max(cpus, gpus * 10)
 
         if cpus == 0:
             raise Exception("Neither CPUs nor GPUs are set. Please set at least one of them.")
@@ -880,15 +850,16 @@ class ProjectManager(FolderManager):
         # Register the new job in the workflow dict
         # and write updated pipeline_star
         job = self._wf.registerJob(jobId,
-                                   status=STATUS_SAVED,
-                                   alias='None',    
+                                   status=ProjectData.STATUS_SAVED,
+                                   alias='None',
                                    jobtype=jobType)
 
         # Write job.star file
         self._writeJobParams(job, params)
 
         if update:
-            self._update_pipeline_star()
+            self._data.setJobStatus(job.id, ProjectData.STATUS_SAVED)
+            self._save_workflow_data()
 
         return job
 

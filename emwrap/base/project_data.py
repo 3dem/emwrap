@@ -37,6 +37,22 @@ class ProjectData(FolderManager):
     The simplest implementation will use a project.json file to store the additional information,
     but later we might want to use a database (e.g. Redis) to store the information.
     """
+    STATUS_LAUNCHED = 'Launched'
+    STATUS_RUNNING = 'Running'
+    STATUS_SUCCEEDED = 'Succeeded'
+    STATUS_FAILED = 'Failed'
+    STATUS_ABORTED = 'Aborted'
+    STATUS_SAVED = 'Saved'
+    STATUS_SCHEDULED = 'Scheduled'
+
+    JOB_STATUS_FILES = {
+        'RELION_JOB_RUNNING': STATUS_RUNNING,
+        'RELION_JOB_EXIT_SUCCESS': STATUS_SUCCEEDED,
+        'RELION_JOB_EXIT_FAILURE': STATUS_FAILED,
+        'RELION_JOB_EXIT_ABORTED': STATUS_ABORTED
+    }
+
+    JOB_STATUS_ACTIVE = [STATUS_LAUNCHED, STATUS_RUNNING, STATUS_SCHEDULED]
 
     def __init__(self, project):
         FolderManager.__init__(self, project.path)
@@ -55,6 +71,42 @@ class ProjectData(FolderManager):
 
         self._jobs = self._data.get('jobs', {})
         self._outputs = self._data.get('outputs', {})
+        self.restoreJobStatuses()
+
+    def _statusFromRelionFiles(self, job_id):
+        for statusFile, status in self.JOB_STATUS_FILES.items():
+            if self.exists(job_id, statusFile):
+                return status
+        return None
+
+    def _resolveJobStatus(self, job):
+        """ Resolve canonical status: RELION files > project.json > pipeline.star."""
+        relion_status = self._statusFromRelionFiles(job.id)
+        if relion_status:
+            return relion_status
+
+        pipeline_status = job['status']
+        cached_status = self._jobs.get(job.id, {}).get('status')
+
+        # default_pipeline.star maps Saved/Launched to Scheduled; recover from cache
+        if pipeline_status == self.STATUS_SCHEDULED and cached_status:
+            return cached_status
+
+        return pipeline_status
+
+    def setJobStatus(self, job_id, status):
+        """ Persist status in project.json and the in-memory workflow."""
+        job = self._wf.getJob(job_id, None)
+        if job:
+            job['status'] = status
+        info = dict(self._jobs.get(job_id, {}))
+        info['status'] = status
+        self._set_info(self._jobs, job_id, info)
+
+    def restoreJobStatuses(self):
+        """ Apply statuses from project.json after loading the Relion pipeline."""
+        for job in self._wf.jobs():
+            job['status'] = self._resolveJobStatus(job)
 
     def _debug(self, message, **kwargs):
         self._project._print(f">>> ProjectData:: {message}", level=2)
@@ -64,44 +116,49 @@ class ProjectData(FolderManager):
         self._debug(f"{Color.warn('OUTPUT')}: {Color.red('Computing')} info for {Color.bold(filepath)}")
 
         if filepath.endswith('.star'):
-            if '_series' in filepath:
-                try:
-                    datatype = 'TiltSeriesMovies'
+            info = 'No-info'
+            try:
+                if '_series' in filepath:
+                    
+                        datatype = 'TiltSeriesMovies'
+                        global_table = StarFile.getTableFromFile('global', filepath)
+                        first = global_table[0]
+                        ts_table = StarFile.getTableFromFile(first.rlnTomoName, self.join(first.rlnTomoTiltSeriesStarFile))
+
+                        # Validate that have tilt columns
+                        if not ts_table.hasAllColumns(RelionStar.TOMO_FRAME_SERIES_COLUMNS):
+                            raise ValueError(f"Tilt series {filepath} does not have the required columns:  "
+                                            f"{RelionStar.TOMO_FRAME_SERIES_COLUMNS}")
+
+                        # 'info': f"{len(self.allTsTable)} items, {x} x {y} x {n} x {N}, {ps:0.3f} Å/px",
+
+                        if ts_table.hasColumn('rlnMicrographName'):
+                            datatype = 'TiltSeries'
+
+                        if ts_table.hasAllColumns(RelionStar.TOMO_ALIGNMENT_COLUMNS):
+                            datatype = 'TiltSeriesAligned'
+                        return {
+                            'type': datatype,
+                            'info': f'{len(global_table)} items'
+                    }
+                    
+                elif filepath.endswith('tomograms.star'):
                     global_table = StarFile.getTableFromFile('global', filepath)
                     first = global_table[0]
-                    ts_table = StarFile.getTableFromFile(first.rlnTomoName, self.join(first.rlnTomoTiltSeriesStarFile))
-
-                    # Validate that have tilt columns
-                    if not ts_table.hasAllColumns(RelionStar.TOMO_FRAME_SERIES_COLUMNS):
-                        raise ValueError(f"Tilt series {filepath} does not have the required columns:  "
-                                        f"{RelionStar.TOMO_FRAME_SERIES_COLUMNS}")
-
-                    # 'info': f"{len(self.allTsTable)} items, {x} x {y} x {n} x {N}, {ps:0.3f} Å/px",
-
-                    if ts_table.hasColumn('rlnMicrographName'):
-                        datatype = 'TiltSeries'
-
-                    if ts_table.hasAllColumns(RelionStar.TOMO_ALIGNMENT_COLUMNS):
-                        datatype = 'TiltSeriesAligned'
+                    datatype = 'Tomograms'
+                    n = len(global_table)
+                    ps = getTomoPixelSize(first)
+                    binning = getTomoBinning(first)
                     return {
                         'type': datatype,
-                        'info': f'{len(global_table)} items'
-                }
-                except Exception as e:
-                    self._debug(
-                        f"Error computing {Color.warn('OUTPUT')} info for "
-                        f"{Color.bold(filepath)}: {e}")
-            elif filepath.endswith('tomograms.star'):
-                global_table = StarFile.getTableFromFile('global', filepath)
-                first = global_table[0]
-                datatype = 'Tomograms'
-                n = len(global_table)
-                ps = getTomoPixelSize(first)
-                binning = getTomoBinning(first)
-                return {
-                    'type': datatype,
-                    'info': f'{n} items, {ps:0.1f} Å/px, bin: {binning:0.1f}'
-                }
+                        'info': f'{n} items, {ps:0.1f} Å/px, bin: {binning:0.1f}'
+                    }
+            except Exception as e:
+                self._debug(
+                    f"Error computing {Color.warn('OUTPUT')} info for "
+                    f"{Color.bold(filepath)}: {e}")
+                info = f'Error: {str(e)}'
+
         elif filepath.endswith('.mrc'):
             try:
                 dims = Image.get_dimensions(filepath)
@@ -118,7 +175,7 @@ class ProjectData(FolderManager):
 
         return {
             'type': 'File',
-            'info': 'No-info'
+            'info': info
         }
 
     def _computeJobInfo(self, jobId, jobFiles):
@@ -161,9 +218,14 @@ class ProjectData(FolderManager):
                 if row.rlnPipeLineNodeName not in outputs:
                     outputs.append(row.rlnPipeLineNodeName)
 
+        # Resolve status: RELION marker files, then project.json, then pipeline
+        status = self._resolveJobStatus(job)
+        job['status'] = status
+
         return {
             'inputs': inputs,
-            'outputs': outputs
+            'outputs': outputs,
+            'status': status
         }
 
     def _set_info(self, info_dict, item_id, info):
@@ -172,7 +234,8 @@ class ProjectData(FolderManager):
         info_dict[item_id] = info
 
     def _get_info(self, info_dict, item_id, info_files, compute_info_func):
-        info = info_dict.get(item_id, None)
+        info, computed = info_dict.get(item_id, None), False
+
         if info:
             # Check if the info is up to date by checking the timestamp of the info files
             for info_file in info_files:
@@ -183,11 +246,12 @@ class ProjectData(FolderManager):
                         info = None
                         break
             if info:
-                return info
+                return info, computed
 
+        computed = True
         info = compute_info_func(item_id, info_files)
         self._set_info(info_dict, item_id, info)
-        return info
+        return info, computed
 
     def _updateJob(self, job, jobInfo):
         """ Update the job data base on the updated info. """
@@ -215,15 +279,29 @@ class ProjectData(FolderManager):
             data = job.getOutput(o) if job.hasOutput(o) else job.registerOutput(o)
             _update_data(data, o)
 
+        if status := jobInfo.get('status'):
+            job['status'] = status
+
     def updateWorkflow(self):
+        updated = False
         for job in self._wf.jobs():
-            info = self.getJobInfo(job.id)
-            self._updateJob(job, info)
+            info, computed = self._getJobInfo(job.id)
+            if computed:
+                self._updateJob(job, info)
+                updated = True
+            else:
+                self._debug(f"{Color.cyan('JOB')}: Info for {Color.bold(job.id)} is up to date")
+
+        return updated
+
+    def _getJobInfo(self, job_id):
+        self._debug(f"{Color.cyan('JOB')}: Getting info for {Color.bold(job_id)}")
+        jobFiles = [self.join(job_id, fn) for fn in ['job.star', 'RELION_OUTPUT_NODES.star', 'run.out']]
+        return self._get_info(self._jobs, job_id, jobFiles, self._computeJobInfo)
 
     def getJobInfo(self, job_id):
-        self._debug(f"{Color.cyan('JOB')}: Getting info for {Color.bold(job_id)}")
-        jobFiles = [self.join(job_id, fn) for fn in ['job.star', 'RELION_OUTPUT_NODES.star']]
-        return self._get_info(self._jobs, job_id, jobFiles, self._computeJobInfo)
+        info, computed = self._getJobInfo(job_id)
+        return info
 
     def setJobInfo(self, job_id, job_info):
         self._set_info(self._jobs, job_id, job_info)
@@ -231,7 +309,8 @@ class ProjectData(FolderManager):
     def getOutputInfo(self, output_id):
         self._debug(f"{Color.warn('OUTPUT')}: Getting info for {Color.bold(output_id)}")
         outputFiles = [self.join(output_id)]
-        return self._get_info(self._outputs, output_id, outputFiles, self._computeOutputTypeInfo)
+        info, computed = self._get_info(self._outputs, output_id, outputFiles, self._computeOutputTypeInfo)
+        return info
 
     def setOutputInfo(self, output_id, output_info):
         self._set_info(self._outputs, output_id, output_info)
@@ -239,3 +318,6 @@ class ProjectData(FolderManager):
     def save(self):
         with open(self._project_json_path, 'w') as f:
             json.dump(self._data, f, indent=4)
+
+    def isActiveJob(self, job):
+        return job['status'] in self.JOB_STATUS_ACTIVE
