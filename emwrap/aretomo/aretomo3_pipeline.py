@@ -113,8 +113,6 @@ class AreTomo3Pipeline(ProcessingPipeline):
             'rlnTomoYShiftAngst',
             'rlnCtfScalefactor',
             # AreTomo3 provenance/debug labels
-            'at3OriginalNominalStageTiltAngle',
-            'at3OriginalNominalTiltAxisAngle',
             'at3CorrectedTiltAngle',
             'at3RefinedTiltAxisAngle',
         ]
@@ -548,9 +546,6 @@ class AreTomo3Pipeline(ProcessingPipeline):
             tiltAxisAngle = (refinedTiltAxisAngle if refinedTiltAxisAngle != '' else originalNominalTiltAxis)
 
             tiltDict.update({
-                 # Corrected nominal geometry
-                'rlnTomoNominalStageTiltAngle': stageTilt,
-                'rlnTomoNominalTiltAxisAngle': tiltAxisAngle,
                  # Per-image alignment geometry
                 'rlnTomoXTilt': imodValues.get('rlnTomoXTilt', 0.0 if stageTilt != '' else ''),
                 'rlnTomoYTilt': imodValues.get('rlnTomoYTilt', stageTilt),
@@ -562,8 +557,6 @@ class AreTomo3Pipeline(ProcessingPipeline):
                 'rlnCtfScalefactor': imodValues.get('rlnCtfScalefactor', ''),
                 
                 # Provenance/debug labels
-                'at3OriginalNominalStageTiltAngle': originalNominalStageTilt,
-                'at3OriginalNominalTiltAxisAngle': originalNominalTiltAxis,
                 'at3CorrectedTiltAngle': correctedTilt,
                 'at3RefinedTiltAxisAngle': tiltAxisAngle,
             })
