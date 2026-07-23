@@ -1,6 +1,6 @@
 # **************************************************************************
 # *
-# * Authors:     J.M. de la Rosa Trevin (delarosatrevin@gmail.com)
+# * Authors:     Daniel Marchan Torres (danielmarchan3@gmail.com)
 # *
 # * This program is free software; you can redistribute it and/or modify
 # * it under the terms of the GNU General Public License as published by
@@ -194,6 +194,11 @@ class AreTomo3:
                     self.__expect(splitName)
                     batch['outputs'].append(splitName)
                     result[key] = splitName
+
+            imodFolder = batch.join('output', f'{tsName}_Imod')
+            if os.path.isdir(imodFolder):
+                batch['outputs'].append(imodFolder)
+                result['at3ImodFolder'] = imodFolder
 
             metricsCsv = batch.join('output', 'TiltSeries_Metrics.csv')
             if os.path.exists(metricsCsv):
