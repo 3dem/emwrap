@@ -30,7 +30,7 @@ from emtools.metadata import StarFile, Acquisition, Table, Mdoc
 from emwrap.base import ProcessingPipeline
 from .aretomo3 import AreTomo3
 
-from .utils import read_imod_alignment, stack_entry, create_dummy_edf_file
+from .utils import compute_relion_alignments_from_imod, stack_entry, create_dummy_edf_file
 
 # 'rlnTiltSeriesAligned' is not aligned is the normal tilt series unaligned
 
@@ -220,6 +220,7 @@ class AreTomo3Pipeline(ProcessingPipeline):
         if not mappingFile or not os.path.exists(mappingFile):
             return tiltAnglesByIndex
 
+        # TODO: Use TextFile.stripLines to parse the file.
         with open(mappingFile) as f:
             for lineNo, line in enumerate(f, start=1):
                 line = line.strip()
@@ -265,6 +266,7 @@ class AreTomo3Pipeline(ProcessingPipeline):
         if not ctfFile or not os.path.exists(ctfFile):
             return ctfByIndex
 
+        # TODO: Use TextFile.stripLines to parse the file.
         with open(ctfFile) as f:
             for lineNo, line in enumerate(f, start=1):
                 line = line.strip()
@@ -361,7 +363,7 @@ class AreTomo3Pipeline(ProcessingPipeline):
             return alignment
 
         inLocalAlignment = False
-
+       
         with open(alnFile) as f:
             for lineNo, line in enumerate(f, start=1):
                 rawLine = line
@@ -588,8 +590,8 @@ class AreTomo3Pipeline(ProcessingPipeline):
         alignmentByIndex = self._read_aretomo3_alignment_file(
             result.get('at3TomoAlignmentFile', None), newTsPs)
 
-        imodAlignmentByIndex = read_imod_alignment(
-            result.get('at3ImodFolder', None), tsName, newTsPs)
+        imodAlignmentByIndex = {i: a for i, a in enumerate(compute_relion_alignments_from_imod(
+            result.get('at3ImodFolder', None), tsName, newTsPs), start=1)}
 
         refinedTiltAxisAngle = self._get_refined_tilt_axis_angle(alignmentByIndex)
 

@@ -4,62 +4,64 @@
 import os
 import math
 
-
-def read_imod_tlt_file(imod_folder, ts_name):
-    """Read AreTomo3/IMOD corrected tilt angles.
-    Expected file:
-        TS_NAME_Imod/TS_NAME_st.tlt
-    Returns:
-        dict[int, float]: {micrograph_index_1_based: corrected_tilt_angle}
-    """
-    if not imod_folder:
-        return {}
-
-    tlt_file = os.path.join(imod_folder, f'{ts_name}_st.tlt')
-    if not os.path.exists(tlt_file):
-        return {}
-
-    tilt_by_index = {}
-
-    with open(tlt_file) as f:
-        for index, line in enumerate(f, start=1):
-            line = line.strip()
-            if not line:
-                continue
-            tilt_by_index[index] = float(line)
-
-    return tilt_by_index
+from emtools.metadata import Imod
 
 
-def read_imod_xf_file(imod_folder, ts_name):
-    """Read IMOD XF transformation matrices.
-    Expected file:
-        TS_NAME_Imod/TS_NAME_st.xf
-    Each row contains:
-        A11 A12 A21 A22 DX DY
-    Returns:
-        dict[int, list[float]]
-    """
-    if not imod_folder:
-        return {}
+# def read_imod_tlt_file(imod_folder, ts_name):
+#     """Read AreTomo3/IMOD corrected tilt angles.
+#     Expected file:
+#         TS_NAME_Imod/TS_NAME_st.tlt
+#     Returns:
+#         dict[int, float]: {micrograph_index_1_based: corrected_tilt_angle}
+#     """
+#     if not imod_folder:
+#         return {}
 
-    xf_file = os.path.join(imod_folder, f'{ts_name}_st.xf')
-    if not os.path.exists(xf_file):
-        return {}
+#     tlt_file = os.path.join(imod_folder, f'{ts_name}_st.tlt')
+#     if not os.path.exists(tlt_file):
+#         return {}
 
-    xf_by_index = {}
+#     tilt_by_index = {}
 
-    with open(xf_file) as f:
-        for index, line in enumerate(f, start=1):
-            line = line.strip()
-            if not line:
-                continue
+#     with open(tlt_file) as f:
+#         for index, line in enumerate(f, start=1):
+#             line = line.strip()
+#             if not line:
+#                 continue
+#             tilt_by_index[index] = float(line)
 
-            values = [float(x) for x in line.split()]
-            if len(values) >= 6:
-                xf_by_index[index] = values[:6]
+#     return tilt_by_index
 
-    return xf_by_index
+
+# def read_imod_xf_file(imod_folder, ts_name):
+#     """Read IMOD XF transformation matrices.
+#     Expected file:
+#         TS_NAME_Imod/TS_NAME_st.xf
+#     Each row contains:
+#         A11 A12 A21 A22 DX DY
+#     Returns:
+#         dict[int, list[float]]
+#     """
+#     if not imod_folder:
+#         return {}
+
+#     xf_file = os.path.join(imod_folder, f'{ts_name}_st.xf')
+#     if not os.path.exists(xf_file):
+#         return {}
+
+#     xf_by_index = {}
+
+#     with open(xf_file) as f:
+#         for index, line in enumerate(f, start=1):
+#             line = line.strip()
+#             if not line:
+#                 continue
+
+#             values = [float(x) for x in line.split()]
+#             if len(values) >= 6:
+#                 xf_by_index[index] = values[:6]
+
+#     return xf_by_index
 
 
 def compute_relion_alignment_from_xf(xf_row, pixel_size):
@@ -93,42 +95,23 @@ def compute_relion_alignment_from_xf(xf_row, pixel_size):
     }
 
 
-def read_imod_alignment(imod_folder, ts_name, pixel_size):
-    """Read corrected tilt angles and XF transforms from AreTomo3 IMOD output.
+def compute_relion_alignments_from_imod(imod_folder, ts_name, pixel_size):
+    """ Read tilt angles and XF transforms from AreTomo3 IMOD output and compute Relion alignments.
     Returns:
-        {
-            micrograph_index: {
-                'tilt': float,
-                'rlnTomoXTilt': 0.0,
-                'rlnTomoYTilt': float,
-                'rlnTomoZRot': float,
-                'rlnTomoXShiftAngst': float,
-                'rlnTomoYShiftAngst': float,
-                'rlnCtfScalefactor': float,
-            }
-        }
+        list[dict]: list of Relion alignments
     """
-    tilt_by_index = read_imod_tlt_file(imod_folder, ts_name)
-    xf_by_index = read_imod_xf_file(imod_folder, ts_name)
+    tlt_file = os.path.join(imod_folder, f'{ts_name}_st.tlt')
+    tilt_angles = Imod.get_angles_from_tlt(tlt_file)
+    xf_file = os.path.join(imod_folder, f'{ts_name}_st.xf')
+    alignments = Imod.get_alignment_from_xf(xf_file)
 
-    alignment_by_index = {}
+    rln_alignments = []
 
-    all_indices = sorted(set(tilt_by_index) | set(xf_by_index))
+    for tilt, xf_row in zip(tilt_angles, alignments):
+        xf_values = compute_relion_alignment_from_xf(xf_row, pixel_size)
+        ctf_scale = math.cos(math.radians(tilt))
 
-    for index in all_indices:
-        tilt = tilt_by_index.get(index, '')
-        xf_row = xf_by_index.get(index)
-
-        xf_values = {}
-        if xf_row is not None:
-            xf_values = compute_relion_alignment_from_xf(xf_row, pixel_size)
-
-        if tilt != '':
-            ctf_scale = math.cos(math.radians(tilt))
-        else:
-            ctf_scale = ''
-
-        alignment_by_index[index] = {
+        rln_alignments.append({
             'tilt': tilt,
             'rlnTomoXTilt': 0.0 if tilt != '' else '',
             'rlnTomoYTilt': tilt,
@@ -136,9 +119,9 @@ def read_imod_alignment(imod_folder, ts_name, pixel_size):
             'rlnTomoXShiftAngst': xf_values.get('rlnTomoXShiftAngst', ''),
             'rlnTomoYShiftAngst': xf_values.get('rlnTomoYShiftAngst', ''),
             'rlnCtfScalefactor': ctf_scale,
-        }
+        })
 
-    return alignment_by_index
+    return rln_alignments
 
 
 def stack_entry(stack_path, index, zero_pad=False):
