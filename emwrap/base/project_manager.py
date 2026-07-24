@@ -329,7 +329,8 @@ class ProjectManager(FolderManager):
             self.update()
 
         job = None
-        if self._hasJob(jobTypeOrId):
+        is_existing = self._hasJob(jobTypeOrId)
+        if is_existing:
             job = self._getJob(jobTypeOrId)
             # FIXME Activate the following validation once we allow to override the job's status
             # if job['status'] != STATUS_SAVED:
@@ -344,6 +345,8 @@ class ProjectManager(FolderManager):
 
         self._data.setJobStatus(job.id, ProjectData.STATUS_SAVED)
         self._updateJobInputs(job, params)
+        if is_existing:
+            self._data.resetJobForSave(job.id)
         self._save_workflow_data()
 
         return job
@@ -481,6 +484,7 @@ class ProjectManager(FolderManager):
                 self.log(f"Clean job folder {job.id}")
                 self._deleteJobFolder(job)
                 self.mkdir(job.id)
+                self._data.clearJobOutputs(job.id)
 
             jobDef = ProcessingConfig.get_job_conf(jobType)
             self._updateJobInputs(job, job_params)
@@ -503,6 +507,7 @@ class ProjectManager(FolderManager):
         if not launcher:
             raise Exception(f"Invalid launcher for job type: {jobType}")
 
+        self._data._clearJobStatusFiles(job.id)
         self._runCmd(f"{launcher} -i {jobStar} -o {job.id}", job.id,
                      wait=wait, job_params=job_params)
         self._data.setJobStatus(job.id, ProjectData.STATUS_LAUNCHED)

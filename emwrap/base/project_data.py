@@ -80,19 +80,62 @@ class ProjectData(FolderManager):
         return None
 
     def _resolveJobStatus(self, job):
-        """ Resolve canonical status: RELION files > project.json > pipeline.star."""
+        """ Resolve canonical status: project.json intent > RELION files > pipeline.star."""
+        cached_status = self._jobs.get(job.id, {}).get('status')
         relion_status = self._statusFromRelionFiles(job.id)
+
+        # Saved in project.json overrides stale terminal RELION markers after re-save
+        if cached_status == self.STATUS_SAVED:
+            if relion_status == self.STATUS_RUNNING:
+                return relion_status
+            if relion_status in (self.STATUS_SUCCEEDED, self.STATUS_FAILED,
+                                 self.STATUS_ABORTED):
+                return cached_status
+            if relion_status is None:
+                return cached_status
+
         if relion_status:
             return relion_status
 
         pipeline_status = job['status']
-        cached_status = self._jobs.get(job.id, {}).get('status')
 
         # default_pipeline.star maps Saved/Launched to Scheduled; recover from cache
         if pipeline_status == self.STATUS_SCHEDULED and cached_status:
             return cached_status
 
         return pipeline_status
+
+    def _clearJobStatusFiles(self, job_id):
+        for statusFile in self.JOB_STATUS_FILES:
+            path = self.join(job_id, statusFile)
+            if os.path.exists(path):
+                os.remove(path)
+
+    def _removeJobOutput(self, job, output_id):
+        """Remove one output from the workflow graph and project.json cache."""
+        job.removeOutput(output_id)
+        if output_id in self._outputs:
+            del self._outputs[output_id]
+
+    def clearJobOutputs(self, job_id):
+        """Clear workflow outputs and project.json output cache for a job."""
+        job = self._wf.getJob(job_id, None)
+        if job:
+            for output_id in list(job._outputs.keys()):
+                self._removeJobOutput(job, output_id)
+
+        if job_id in self._jobs:
+            info = dict(self._jobs[job_id])
+            info['outputs'] = []
+            self._set_info(self._jobs, job_id, info)
+
+    def resetJobForSave(self, job_id):
+        """Reset a re-saved job: drop stale RELION markers, outputs, and cache."""
+        self._clearJobStatusFiles(job_id)
+        output_nodes = self.join(job_id, 'RELION_OUTPUT_NODES.star')
+        if os.path.exists(output_nodes):
+            os.remove(output_nodes)
+        self.clearJobOutputs(job_id)
 
     def setJobStatus(self, job_id, status):
         """ Persist status in project.json and the in-memory workflow."""
@@ -275,9 +318,14 @@ class ProjectData(FolderManager):
             _update_data(data, rel_value)
 
         outputs = jobInfo.get('outputs', [])
+        output_ids = set(outputs)
         for o in outputs:
             data = job.getOutput(o) if job.hasOutput(o) else job.registerOutput(o)
             _update_data(data, o)
+
+        for output in list(job.outputs):
+            if output.id not in output_ids:
+                self._removeJobOutput(job, output.id)
 
         if status := jobInfo.get('status'):
             job['status'] = status
