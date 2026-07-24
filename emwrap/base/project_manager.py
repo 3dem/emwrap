@@ -684,7 +684,8 @@ class ProjectManager(FolderManager):
 
         if gpus:
             # FIXME: Use emgoat for a more general interaction with HPC
-            gpu_line = f'#BSUB -gpu "num={gpus}/host:mode=shared"'
+            mig = ':mig=2' if qparams.get('mig', False) else ''
+            gpu_line = f'#BSUB -gpu "num={gpus}/host:mode=shared{mig}"'
             gpu_type = qparams.get('gpu_type', 'any')
             if gpu_type != 'any':
                 gpu_line += f'\n#BSUB -R {gpu_type.lower()}'
