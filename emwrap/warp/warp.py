@@ -21,7 +21,7 @@ from collections import defaultdict
 from glob import glob
 
 from emtools.utils import FolderManager, Path
-from emtools.metadata import StarFile, Table, RelionStar, WarpXml, TextFile
+from emtools.metadata import StarFile, Table, RelionStar, WarpXml, Imod
 from emtools.jobs import Batch, Args
 from emtools.image import Image
 from emwrap.base import ProcessingPipeline
@@ -325,79 +325,21 @@ class WarpBasePipeline(ProcessingPipeline):
     def parseAlignmentParams(self, tsDict, ps):
         """ Parse AreTomo alignment parameters from .st.aln into Relion convention. """
         tsName = tsDict['rlnTomoName']
-        self.log(f"Parsing alignments for tomo: {tsName}")
-        alnFile = self.join(self.TS, 'tiltstack', tsName, f'{tsName}.st.aln')
-        alignments = []
-        # Despite Warp's Aretomo wrapper writes the angles from positive to negative
-        # Aretomo always write the alignment back from negative to positive order,
-        # So we don't need to reverse it when parsing to the STAR file
-        
-        # self.log(f"Parsing alignments from: {alnFile}, pixel size: {ps}")
-
-        # for line in TextFile.stripLines(alnFile):
-        #     parts = line.split()
-        #     values = {
-        #         'rlnTomoXTilt': 0,
-        #         'rlnTomoYTilt': float(parts[-1]),
-        #         "rlnTomoZRot": float(parts[1]),
-        #         'rlnTomoXShiftAngst': float(parts[3]) * ps,
-        #         'rlnTomoYShiftAngst': float(parts[4]) * ps,
-        #     }
-        #     alignments.append(values)
-
-        # /Users/jdela80/coescb/public/tests/WarpTutorialTest3/WarpOtf/job030/warp_tiltseries/tiltstack/TS_11/TS_11_Imod
         xfFile = self.join(self.TS, 'tiltstack', tsName, f'{tsName}_Imod/{tsName}_st.xf')
         tltFile = self.join(self.TS, 'tiltstack', tsName, f'{tsName}_Imod/{tsName}_st.tlt')
 
-        self.log(f"Parsing alignments from: {xfFile}, pixel size: {ps}")
+        self.log(f"Parsing alignments for tomo: {tsName} from: {xfFile}, pixel size: {ps}")
 
+        tlt_angles = Imod.get_angles_from_tlt(tltFile)
+        #tlt_angles.reverse()
+        xf_alignments = Imod.get_alignment_from_xf(xfFile)
+        #xf_alignments.reverse()
 
-
-        xf_lines = list(TextFile.stripLines(xfFile))
-        xf_lines.reverse()
-        tlt_lines = list(TextFile.stripLines(tltFile))
-        tlt_lines.reverse()
-
-        import math
-
-        for xf_line, tilt_angle in zip(xf_lines, tlt_lines):
-            a11, a12, a21, a22, dx, dy = map(float, xf_line.split())
-            A = np.array([[a11, a12], [a21, a22]])
-
-            # Compute in-plane shifts            
-            # image_shifts = np.linalg.inv(A) @ np.array([dx, dy])
-            # dx, dy = -image_shifts * ps # Convert shifts to Angstroms            
-
-            # # Compute z-rotation angle in degrees
-            # zrot = math.degrees(math.acos(a11))
-
-            # TODO: Check if the tilt angle is flipped
-
-            # TODO: Check if there is tilt angle offset and subtract it from tilt_angle
-            tilt_angle_offset = 0.0
-
-            # Checking from https://github.com/Phaips/aretomo3torelion5/blob/main/aretomo3torelion5.py#L211
-            # Build the full 3x3 transformation matrix
-            T = np.array([[a11, a12, dx],
-                          [a21, a22, dy],
-                          [0.0, 0.0, 1.0]])
-            # Note: np.arctan2(A12, A11) gives the proper sign.
-            zrot = np.degrees(np.arctan2(a12, a11))
-            
-            # Invert the full transformation matrix to get the corrected translation
-            T_inv = np.linalg.inv(T)
-            # The translation (shift) is given by the third column of the inverted matrix
-            x_shift_angst = T_inv[0, 2] * ps
-            y_shift_angst = T_inv[1, 2] * ps
-
-            values = {
-                'rlnTomoXTilt': 0.0,
-                'rlnTomoYTilt': float(tilt_angle) - tilt_angle_offset,
-                "rlnTomoZRot": zrot,
-                'rlnTomoXShiftAngst': dx,
-                'rlnTomoYShiftAngst': dy,
-            }
-            alignments.append(values)
+        alignments = RelionStar.alignments_from_imod(tlt_angles, xf_alignments, ps)
+        for aln in alignments:
+            del aln['tilt']
+            del aln['rlnCtfScalefactor']
+            aln['rlnTomoYTilt'] *= -1
 
         return alignments
 
