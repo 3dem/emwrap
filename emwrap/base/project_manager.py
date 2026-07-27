@@ -96,186 +96,19 @@ class ProjectManager(FolderManager):
         self._runCmd(cmd, jobId, wait=wait)
 
     def listJobDetails(self, job, update=True, tail_lines=10):
-        """ Print status, inputs, outputs and run logs for a single job. """
-        if isinstance(job, str):
-            job = self._getJob(job)
-
-        if update:
-            self.update()
-
-        print(f"JOB:     {job.id}")
-        print(f"TYPE:    {job['jobtype']}")
-        print(f"STATUS:  {job['status']}")
-        print()
-
-        print("INPUTS:")
-        if job.inputs:
-            for i in job.inputs:
-                info = self._data.getOutputInfo(i.id)
-                print(f"  {i.id:<45} {info['type']:<20} {info['info']}")
-        else:
-            print("  (none)")
-        print()
-
-        print("OUTPUTS:")
-        if job.outputs:
-            for o in job.outputs:
-                info = self._data.getOutputInfo(o.id)
-                print(f"  {o.id:<45} {info['type']:<20} {info['info']}")
-        else:
-            print("  (none)")
-        print()
-
-        self._printRunLogs(job.id, tail_lines=tail_lines)
+        return self._data.listJobDetails(job, update=update, tail_lines=tail_lines)
 
     def listOutputDetails(self, output, update=True):
-        """ Print details for a single workflow output/data node. """
-        if isinstance(output, str):
-            output_id = Path.rmslash(output)
-            if not self._wf.hasData(output_id):
-                raise Exception(f"There is no output with id: {output_id}.")
-            output = self._wf.getData(output_id)
-
-        if update:
-            self.update()
-
-        job = output.parent
-        info = self._data.getOutputInfo(output.id)
-        file_path = self.join(output.id)
-
-        print(f"OUTPUT:  {output.id}")
-        print(f"TYPE:    {info['type']}")
-        print(f"INFO:    {info['info']}")
-        print()
-        print(f"JOB:     {job.id}")
-        print(f"         {job['jobtype']}, {job['status']}")
-        print()
-
-        print("FILE:")
-        if os.path.exists(file_path):
-            s = os.stat(file_path)
-            print(f"  {output.id}")
-            print(f"  {Pretty.size(s.st_size)}, {Pretty.elapsed(s.st_mtime)}")
-        else:
-            print(f"  {Color.red('missing')}: {output.id}")
-        print()
-
-        print("USED BY:")
-        if output.childs:
-            for child in output.childs:
-                print(f"  {child.id:<25} {child['jobtype']:<20} {child['status']}")
-        else:
-            print("  (none)")
-
-    def _projectPath(self, *parts):
-        """ Return a path relative to the project root. """
-        if len(parts) == 1 and not os.path.isabs(parts[0]):
-            return Path.rmslash(parts[0])
-        return Path.rmslash(self.relpath(self.join(*parts)))
-
-    def _printRunLogs(self, jobId, tail_lines=10):
-        """ Print run.err summary and last lines of run.out. """
-        err_path = self.join(jobId, 'run.err')
-        out_path = self.join(jobId, 'run.out')
-        err_rel = self._projectPath(jobId, 'run.err')
-        out_rel = self._projectPath(jobId, 'run.out')
-
-        print("RUN LOGS:")
-
-        if os.path.exists(err_path):
-            s = os.stat(err_path)
-            if s.st_size > 0:
-                print(f"  {err_rel}: {Color.red(Pretty.size(s.st_size))}, "
-                      f"{Pretty.elapsed(s.st_mtime)}")
-                with open(err_path) as f:
-                    err_lines = f.readlines()
-                for line in err_lines[-min(5, len(err_lines)):]:
-                    print(f"    {Color.red(line.rstrip())}")
-            else:
-                print(f"  {err_rel}: empty")
-        else:
-            print(f"  {err_rel}: missing")
-
-        if os.path.exists(out_path):
-            s = os.stat(out_path)
-            print(f"  {out_rel}: {Pretty.size(s.st_size)}, "
-                  f"{Pretty.elapsed(s.st_mtime)}")
-            if s.st_size > 0:
-                with open(out_path) as f:
-                    lines = f.readlines()
-                for line in lines[-tail_lines:]:
-                    print(f"    {line.rstrip()}")
-        else:
-            print(f"  {out_rel}: missing")
+        return self._data.listOutputDetails(output, update=update)
 
     def listJobs(self, update=True):
-        """ List current jobs. """
-        if update:
-            self.update()
-
-        header = ["JOB_ID", "JOB_TYPE", "JOB_STATUS", "OUTPUTS", "INPUTS"]
-        format = u'{:<25}{:<25}{:<15}{:<35}{:<45}'
-        print(format.format(*header))
-
-        def _data_id(data_list, index):
-            return data_list[index].id if data_list and index < len(data_list) else ''
-
-        def _output(job_id, input_value):
-            return input_value.replace(f'{job_id}/', '') if input_value else ''
-
-        for job in self._wf.jobs():
-            inputs = list(job.inputs)
-            outputs = list(job.outputs)
-            first_input = _data_id(inputs, 0)
-            first_output = _output(job.id, _data_id(outputs, 0))
-            print(format.format(job.id, job['jobtype'], job['status'], first_output, first_input))
-            max_length = max(len(inputs), len(outputs))
-            for i in range(1, max_length):
-                input = _output(job.id, _data_id(inputs, i))
-                output = _output(job.id, _data_id(outputs, i))
-                print(format.format('', '', '', output, input))
+        return self._data.listJobs(update=update)
 
     def listOutputs(self):
-        """ List current jobs. """
-        self.update()
-
-        header = ["JOB_ID", "OUTPUT", "DATATYPE", "INFO"]
-        format = u'{:<20}{:<55}{:<45}{:<45}'
-        print(format.format(*header))
-
-        for job in self._wf.jobs():
-            filesDict = self.loadJobOutputs(job)
-            for o in job.outputs:
-                if oInfo := filesDict.get(o.id, None):
-                    datatype = oInfo['type']
-                    info = oInfo['info']
-                else:
-                    datatype = 'No-type'
-                    info = 'No-info'
-
-                print(format.format(job.id, o.id, datatype, info))
+        return self._data.listOutputs()
 
     def listInputs(self):
-        header = ["JOB_ID", "KEY", "INPUT", "DATATYPE", "INFO"]
-        format = u'{:<20}{:25}{:<45}{:<35}{:<45}'
-
-        # Build the list of outputs for all jobs
-        filesDict = {}
-        for job in self._wf.jobs():
-            jobFilesDict = self.loadJobOutputs(job)
-            filesDict.update(jobFilesDict)
-
-        for job in self._wf.jobs():
-            params = self._readJobParams(job)
-            for k, v in params.items():
-                if v in filesDict:
-                    info = filesDict[v]
-                    print(format.format(job.id, k, v, info['type'], info['info']))
-                    if not job.hasInput(v):
-                        job.addInputs([self._wf.getData(v)])
-
-        self._save_workflow_data()
-
+        return self._data.listInputs()
 
     def update(self):
         """ Update status of the running jobs. """

@@ -18,7 +18,7 @@ import os
 import json
 from datetime import datetime
 
-from emtools.utils import FolderManager, Color, Pretty
+from emtools.utils import FolderManager, Color, Pretty, Path
 from emtools.metadata import StarFile, RelionStar
 from emtools.image import Image
 
@@ -153,10 +153,33 @@ class ProjectData(FolderManager):
 
     def _debug(self, message, **kwargs):
         self._project._print(f">>> ProjectData:: {message}", level=2)
-        
+
+    def _outputParentJob(self, output_id):
+        if self._wf.hasData(output_id):
+            return self._wf.getData(output_id).parent
+        return None
+
+    def _pendingOutputInfo(self, output_id):
+        datatype = 'File'
+        if self._wf.hasData(output_id):
+            datatype = self._wf.getData(output_id).get('datatype', datatype)
+        return {'type': datatype, 'info': 'Pending'}
+
+    def _isPendingOutput(self, output_id):
+        job = self._outputParentJob(output_id)
+        filepath = self.join(output_id)
+        return (job is not None and self.isActiveJob(job)
+                and not os.path.exists(filepath))
+
     def _computeOutputTypeInfo(self, output_id, outputFiles):
         filepath = outputFiles[0]
         self._debug(f"{Color.warn('OUTPUT')}: {Color.red('Computing')} info for {Color.bold(filepath)}")
+
+        if not os.path.exists(filepath):
+            if self._isPendingOutput(output_id):
+                return self._pendingOutputInfo(output_id)
+            return {'type': 'File', 'info': 'No-info'}
+
         info = 'No-info'
 
         if filepath.endswith('.star'):            
@@ -200,6 +223,8 @@ class ProjectData(FolderManager):
                 self._debug(
                     f"Error computing {Color.warn('OUTPUT')} info for "
                     f"{Color.bold(filepath)}: {e}")
+                if self._isPendingOutput(output_id):
+                    return self._pendingOutputInfo(output_id)
                 info = f'Error: {str(e)}'
 
         elif filepath.endswith('.mrc'):
@@ -215,6 +240,8 @@ class ProjectData(FolderManager):
                 self._debug(
                     f"Error computing {Color.warn('OUTPUT')} info for "
                     f"{Color.bold(filepath)}: {e}")
+                if self._isPendingOutput(output_id):
+                    return self._pendingOutputInfo(output_id)
 
         return {
             'type': 'File',
@@ -248,11 +275,6 @@ class ProjectData(FolderManager):
         # Detect outputs not already in the job
         # FIXME: Check if job_pipeline.star is used or not, or RELION_OUTPUT_NODES.star is enough.
         outputsStarFile = jobFiles[1]
-        # for fn in ['RELION_OUTPUT_NODES.star']: #, 'job_pipeline.star']:
-        #     output_path = self.join(jobId, fn)
-        #     if os.path.exists(output_path):
-        #         outputsFile = output_path
-        #         break
 
         if os.path.exists(outputsStarFile):
             self._debug(f"{Color.cyan('JOB')}: {Color.red('Reading')} star from {Color.bold(outputsStarFile)}")
@@ -327,15 +349,22 @@ class ProjectData(FolderManager):
             if output.id not in output_ids:
                 self._removeJobOutput(job, output.id)
 
-        if status := jobInfo.get('status'):
-            job['status'] = status
+        status = self._resolveJobStatus(job)
+        job['status'] = status
+        cached = self._jobs.get(job.id, {})
+        if cached.get('status') != status:
+            info = dict(cached) if cached else dict(jobInfo)
+            info['status'] = status
+            self._set_info(self._jobs, job.id, info)
+            return True
+        return False
 
     def updateWorkflow(self):
         updated = False
         for job in self._wf.jobs():
             info, computed = self._getJobInfo(job.id)
-            if computed:
-                self._updateJob(job, info)
+            # Always sync output metadata: pipeline reload drops info from nodes.
+            if self._updateJob(job, info) or computed:
                 updated = True
             else:
                 self._debug(f"{Color.cyan('JOB')}: Info for {Color.bold(job.id)} is up to date")
@@ -344,7 +373,10 @@ class ProjectData(FolderManager):
 
     def _getJobInfo(self, job_id):
         self._debug(f"{Color.cyan('JOB')}: Getting info for {Color.bold(job_id)}")
-        jobFiles = [self.join(job_id, fn) for fn in ['job.star', 'RELION_OUTPUT_NODES.star', 'run.out']]
+        jobFiles = [self.join(job_id, fn) for fn in [
+            'job.star', 'RELION_OUTPUT_NODES.star', 'run.out',
+            *self.JOB_STATUS_FILES.keys(),
+        ]]
         return self._get_info(self._jobs, job_id, jobFiles, self._computeJobInfo)
 
     def getJobInfo(self, job_id):
@@ -356,8 +388,18 @@ class ProjectData(FolderManager):
 
     def getOutputInfo(self, output_id):
         self._debug(f"{Color.warn('OUTPUT')}: Getting info for {Color.bold(output_id)}")
+        if self._isPendingOutput(output_id):
+            cached = self._outputs.get(output_id)
+            if cached and not str(cached.get('info', '')).startswith('Error:'):
+                return cached
+            return self._pendingOutputInfo(output_id)
+
         outputFiles = [self.join(output_id)]
-        info, computed = self._get_info(self._outputs, output_id, outputFiles, self._computeOutputTypeInfo)
+        info, computed = self._get_info(self._outputs, output_id, outputFiles,
+                                        self._computeOutputTypeInfo)
+        if (self._isPendingOutput(output_id)
+                and str(info.get('info', '')).startswith('Error:')):
+            return self._pendingOutputInfo(output_id)
         return info
 
     def setOutputInfo(self, output_id, output_info):
@@ -369,3 +411,179 @@ class ProjectData(FolderManager):
 
     def isActiveJob(self, job):
         return job['status'] in self.JOB_STATUS_ACTIVE
+
+    def _projectPath(self, *parts):
+        """ Return a path relative to the project root. """
+        if len(parts) == 1 and not os.path.isabs(parts[0]):
+            return Path.rmslash(parts[0])
+        return Path.rmslash(self.relpath(self.join(*parts)))
+
+    def _printRunLogs(self, jobId, tail_lines=10):
+        """ Print run.err summary and last lines of run.out. """
+        err_path = self.join(jobId, 'run.err')
+        out_path = self.join(jobId, 'run.out')
+        err_rel = self._projectPath(jobId, 'run.err')
+        out_rel = self._projectPath(jobId, 'run.out')
+
+        print("RUN LOGS:")
+
+        if os.path.exists(err_path):
+            s = os.stat(err_path)
+            if s.st_size > 0:
+                print(f"  {err_rel}: {Color.red(Pretty.size(s.st_size))}, "
+                      f"{Pretty.elapsed(s.st_mtime)}")
+                with open(err_path) as f:
+                    err_lines = f.readlines()
+                for line in err_lines[-min(5, len(err_lines)):]:
+                    print(f"    {Color.red(line.rstrip())}")
+            else:
+                print(f"  {err_rel}: empty")
+        else:
+            print(f"  {err_rel}: missing")
+
+        if os.path.exists(out_path):
+            s = os.stat(out_path)
+            print(f"  {out_rel}: {Pretty.size(s.st_size)}, "
+                  f"{Pretty.elapsed(s.st_mtime)}")
+            if s.st_size > 0:
+                with open(out_path) as f:
+                    lines = f.readlines()
+                for line in lines[-tail_lines:]:
+                    print(f"    {line.rstrip()}")
+        else:
+            print(f"  {out_rel}: missing")
+
+    def listJobDetails(self, job, update=True, tail_lines=10):
+        """ Print status, inputs, outputs and run logs for a single job. """
+        if isinstance(job, str):
+            job = self._project._getJob(job)
+
+        if update:
+            self._project.update()
+
+        print(f"JOB:     {job.id}")
+        print(f"TYPE:    {job['jobtype']}")
+        print(f"STATUS:  {job['status']}")
+        print()
+
+        print("INPUTS:")
+        if job.inputs:
+            for i in job.inputs:
+                info = self.getOutputInfo(i.id)
+                print(f"  {i.id:<45} {info['type']:<20} {info['info']}")
+        else:
+            print("  (none)")
+        print()
+
+        print("OUTPUTS:")
+        if job.outputs:
+            for o in job.outputs:
+                info = self.getOutputInfo(o.id)
+                print(f"  {o.id:<45} {info['type']:<20} {info['info']}")
+        else:
+            print("  (none)")
+        print()
+
+        self._printRunLogs(job.id, tail_lines=tail_lines)
+
+    def listOutputDetails(self, output, update=True):
+        """ Print details for a single workflow output/data node. """
+        if isinstance(output, str):
+            output_id = Path.rmslash(output)
+            if not self._wf.hasData(output_id):
+                raise Exception(f"There is no output with id: {output_id}.")
+            output = self._wf.getData(output_id)
+
+        if update:
+            self._project.update()
+
+        job = output.parent
+        info = self.getOutputInfo(output.id)
+        file_path = self.join(output.id)
+
+        print(f"OUTPUT:  {output.id}")
+        print(f"TYPE:    {info['type']}")
+        print(f"INFO:    {info['info']}")
+        print()
+        print(f"JOB:     {job.id}")
+        print(f"         {job['jobtype']}, {job['status']}")
+        print()
+
+        print("FILE:")
+        if os.path.exists(file_path):
+            s = os.stat(file_path)
+            print(f"  {output.id}")
+            print(f"  {Pretty.size(s.st_size)}, {Pretty.elapsed(s.st_mtime)}")
+        else:
+            print(f"  {Color.red('missing')}: {output.id}")
+        print()
+
+        print("USED BY:")
+        if output.childs:
+            for child in output.childs:
+                print(f"  {child.id:<25} {child['jobtype']:<20} {child['status']}")
+        else:
+            print("  (none)")
+
+    def listJobs(self, update=True):
+        """ List current jobs. """
+        if update:
+            self._project.update()
+
+        header = ["JOB_ID", "JOB_TYPE", "JOB_STATUS", "OUTPUTS", "INPUTS"]
+        format = u'{:<25}{:<25}{:<15}{:<35}{:<45}'
+        print(format.format(*header))
+
+        def _data_id(data_list, index):
+            return data_list[index].id if data_list and index < len(data_list) else ''
+
+        def _output(job_id, input_value):
+            return input_value.replace(f'{job_id}/', '') if input_value else ''
+
+        for job in self._wf.jobs():
+            inputs = list(job.inputs)
+            outputs = list(job.outputs)
+            first_input = _data_id(inputs, 0)
+            first_output = _output(job.id, _data_id(outputs, 0))
+            print(format.format(job.id, job['jobtype'], job['status'],
+                                first_output, first_input))
+            max_length = max(len(inputs), len(outputs))
+            for i in range(1, max_length):
+                input = _output(job.id, _data_id(inputs, i))
+                output = _output(job.id, _data_id(outputs, i))
+                print(format.format('', '', '', output, input))
+
+    def listOutputs(self):
+        """ List outputs for all jobs. """
+        self._project.update()
+
+        header = ["JOB_ID", "OUTPUT", "DATATYPE", "INFO"]
+        format = u'{:<20}{:<55}{:<45}{:<45}'
+        print(format.format(*header))
+
+        for job in self._wf.jobs():
+            for o in job.outputs:
+                oInfo = self.getOutputInfo(o.id)
+                print(format.format(job.id, o.id, oInfo['type'], oInfo['info']))
+
+    def listInputs(self):
+        """ List job inputs detected from job.star parameters. """
+        header = ["JOB_ID", "KEY", "INPUT", "DATATYPE", "INFO"]
+        format = u'{:<20}{:25}{:<45}{:<35}{:<45}'
+
+        for job in self._wf.jobs():
+            params = self._project._readJobParams(job)
+            for k, v in params.items():
+                if not isinstance(v, str):
+                    continue
+                if os.path.isabs(v):
+                    v = self._project.relpath(v)
+                v = Path.rmslash(v)
+                if not self._wf.hasData(v):
+                    continue
+                info = self.getOutputInfo(v)
+                print(format.format(job.id, k, v, info['type'], info['info']))
+                if not job.hasInput(v):
+                    job.addInputs([self._wf.getData(v)])
+
+        self._project._save_workflow_data()
