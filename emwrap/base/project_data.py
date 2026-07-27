@@ -157,9 +157,9 @@ class ProjectData(FolderManager):
     def _computeOutputTypeInfo(self, output_id, outputFiles):
         filepath = outputFiles[0]
         self._debug(f"{Color.warn('OUTPUT')}: {Color.red('Computing')} info for {Color.bold(filepath)}")
+        info = 'No-info'
 
-        if filepath.endswith('.star'):
-            info = 'No-info'
+        if filepath.endswith('.star'):            
             try:
                 if '_series' in filepath:
                     

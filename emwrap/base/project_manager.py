@@ -436,12 +436,18 @@ class ProjectManager(FolderManager):
 
     def loadWorkflow(self, **kwargs):
         """ Load a workflow with jobs templates. """
-        if 'workflow_id' in kwargs:
+        if 'workflow_file' in kwargs:
+            workflow_file = kwargs['workflow_file']
+            if not os.path.exists(workflow_file):
+                raise Exception(f"Workflow file not found: {workflow_file}")
+            with open(workflow_file) as f:
+                workflow = json.load(f)
+        elif 'workflow_id' in kwargs:
             workflow = ProcessingConfig.get_workflow(kwargs['workflow_id'])
         elif 'workflow' in kwargs:
             workflow = kwargs['workflow']
         else:
-            raise Exception("workflow_id or workflow is required.")
+            raise Exception("workflow_id, workflow_file or workflow is required.")
 
         def _jobInfo(jobEntry):
             return {
@@ -940,6 +946,9 @@ class ProjectManager(FolderManager):
         g.add_argument('--stop', '-t', metavar='JOB_ID',
                        help="Stop a launched or running job.")
 
+        g.add_argument('--workflow', '-w', metavar='WORKFLOW_FILE',
+                       help="Load a workflow from a JSON file and create its jobs.")
+
         g.add_argument('--submit', nargs=3,
                        metavar=('JOB_TYPE', 'PARAMS_OR_FILE', 'OUTPUT_FOLDER'),
                        help="Submit a job: write job.star and run locally or "
@@ -958,7 +967,7 @@ class ProjectManager(FolderManager):
                        help="With --submit, print the run or queue submission "
                             "commands without writing files or executing.")
 
-        p.add_argument('--wait', '-w', action='store_true',
+        p.add_argument('--wait', action='store_true',
                        help="Works with --run and make the project waits for "
                             "the sub-process to complete. Useful for scripting "
                             "and benchmarking.")
@@ -976,12 +985,10 @@ class ProjectManager(FolderManager):
             p.print_help(sys.stderr)
             sys.exit(1)
         else:
-            if n == 2 and args.clean:
-                # Only clean option, clean and create project
-                pm = ProjectManager(args.path, create=True, verbose=args.verbose)
-            else:
-                # Just try to load the existing project
-                pm = ProjectManager(args.path, verbose=args.verbose)
+            pipeline_star = os.path.join(args.path, 'default_pipeline.star')
+            create = ((n == 2 and args.clean)
+                      or (args.workflow and not os.path.exists(pipeline_star)))
+            pm = ProjectManager(args.path, create=create, verbose=args.verbose)
 
         def _params(params, i):
             n = len(params)
@@ -1020,6 +1027,15 @@ class ProjectManager(FolderManager):
 
         elif args.stop:
             pm.stopJob(args.stop)
+
+        elif args.workflow:
+            if args.clean:
+                pm.clean()
+            id_map = pm.loadWorkflow(workflow_file=args.workflow)
+            pm.log(f"Loaded workflow from {args.workflow}: "
+                   f"{len(id_map)} job(s) created")
+            for old_id, new_id in id_map.items():
+                pm.log(f"  {old_id} -> {new_id}")
 
         elif args.submit:
             params = ProcessingPipeline.loadParams(args.submit[1])
