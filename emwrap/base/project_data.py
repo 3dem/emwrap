@@ -74,6 +74,23 @@ class ProjectData(FolderManager):
         self._outputs = self._data.get('outputs', {})
         self.restoreJobStatuses()
 
+    def reload(self):
+        """Reload project.json from disk and re-sync workflow job statuses."""
+        self._wf = self._project.get_workflow()
+        self._data = {'jobs': {}, 'outputs': {}}
+
+        if os.path.exists(self._project_json_path):
+            try:
+                with open(self._project_json_path, 'r') as f:
+                    self._data = json.load(f)
+            except Exception as e:
+                self._debug(
+                    f"Error loading project data from {Color.bold(self._project_json_path)}: {e}")
+
+        self._jobs = self._data.get('jobs', {})
+        self._outputs = self._data.get('outputs', {})
+        self.restoreJobStatuses()
+
     def _statusFromRelionFiles(self, job_id):
         for statusFile, status in self.JOB_STATUS_FILES.items():
             if self.exists(job_id, statusFile):
@@ -117,6 +134,43 @@ class ProjectData(FolderManager):
         job.removeOutput(output_id)
         if output_id in self._outputs:
             del self._outputs[output_id]
+
+    def removeJobFromWorkflow(self, job):
+        """Remove a job from the workflow graph and project.json cache."""
+        job_id = job.id
+        output_ids = set(job._outputs.keys())
+        job_prefix = f'{job_id}/'
+
+        for other in self._wf.jobs():
+            if other.id == job_id:
+                continue
+            for input_id in list(other._inputs.keys()):
+                if input_id in output_ids or input_id.startswith(job_prefix):
+                    data = other._inputs.pop(input_id)
+                    if other in data.childs:
+                        data.childs.remove(other)
+
+        self._wf.deleteJob(job)
+
+        if job_id in self._jobs:
+            del self._jobs[job_id]
+
+        for output_id in list(self._outputs.keys()):
+            if output_id == job_id or output_id.startswith(job_prefix):
+                del self._outputs[output_id]
+
+        return True
+
+    def removeMissingJobs(self):
+        """Remove pipeline jobs whose on-disk folder no longer exists."""
+        removed = []
+        for job in list(self._wf.jobs()):
+            if not self.exists(job.id):
+                self._project.log(
+                    f"Removing job {job.id} from pipeline (missing folder)")
+                self.removeJobFromWorkflow(job)
+                removed.append(job.id)
+        return removed
 
     def clearJobOutputs(self, job_id):
         """Clear workflow outputs and project.json output cache for a job."""
@@ -319,7 +373,7 @@ class ProjectData(FolderManager):
         self._set_info(info_dict, item_id, info)
         return info, computed
 
-    def _updateJob(self, job, jobInfo):
+    def _updateJob(self, job, jobInfo, prune_outputs=False):
         """ Update the job data base on the updated info. """
         def _update_data(data, data_id):
             info = self.getOutputInfo(data_id)
@@ -346,9 +400,10 @@ class ProjectData(FolderManager):
             data = job.getOutput(o) if job.hasOutput(o) else job.registerOutput(o)
             _update_data(data, o)
 
-        for output in list(job.outputs):
-            if output.id not in output_ids:
-                self._removeJobOutput(job, output.id)
+        if prune_outputs:
+            for output in list(job.outputs):
+                if output.id not in output_ids:
+                    self._removeJobOutput(job, output.id)
 
         status = self._resolveJobStatus(job)
         job['status'] = status
@@ -361,11 +416,11 @@ class ProjectData(FolderManager):
         return False
 
     def updateWorkflow(self):
-        updated = False
+        updated = bool(self.removeMissingJobs())
         for job in self._wf.jobs():
             info, computed = self._getJobInfo(job.id)
             # Always sync output metadata: pipeline reload drops info from nodes.
-            if self._updateJob(job, info) or computed:
+            if self._updateJob(job, info, prune_outputs=computed) or computed:
                 updated = True
             else:
                 self._debug(f"{Color.cyan('JOB')}: Info for {Color.bold(job.id)} is up to date")
@@ -378,6 +433,7 @@ class ProjectData(FolderManager):
             'job.star', 'RELION_OUTPUT_NODES.star', 'run.out',
             *self.JOB_STATUS_FILES.keys(),
         ]]
+        jobFiles.extend([self._project.pipeline_star, self._project_json_path])
         return self._get_info(self._jobs, job_id, jobFiles, self._computeJobInfo)
 
     def getJobInfo(self, job_id):
@@ -586,4 +642,4 @@ class ProjectData(FolderManager):
                 if not job.hasInput(v):
                     job.addInputs([self._wf.getData(v)])
 
-        self._project._save_workflow_data()
+        self._project._save_workflow_data(message='sync job inputs')

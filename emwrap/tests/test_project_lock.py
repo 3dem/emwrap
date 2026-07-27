@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import tempfile
 import unittest
 
@@ -93,6 +94,85 @@ class TestWorkflowSaveLock(unittest.TestCase):
         self.assertTrue(os.path.exists(self.pm.join('project.json')))
         self.assertFalse(os.path.exists(lock_file))
         self.assertFalse(os.path.isdir(lock_dir))
+
+    def test_reload_preserves_pipeline_outputs(self):
+        wf = self.pm.get_workflow()
+        job = wf.registerJob(
+            'Import/job001',
+            status=ProjectData.STATUS_SAVED,
+            alias='None',
+            jobtype='emw-import-ts',
+            jobindex=1,
+        )
+        output_id = 'Import/job001/movies.star'
+        job.registerOutput(output_id, datatype='File')
+        self.pm._save_workflow_data()
+
+        reloaded = RelionStar.pipeline_to_workflow(self.pm.pipeline_star)
+        self.assertTrue(reloaded.getJob(job.id).hasOutput(output_id))
+
+        # Simulate stale in-memory state (lost update without reload).
+        job.removeOutput(output_id)
+        self.assertFalse(wf.getJob(job.id).hasOutput(output_id))
+
+        self.pm._save_workflow_data()
+        final = RelionStar.pipeline_to_workflow(self.pm.pipeline_star)
+        self.assertTrue(final.getJob(job.id).hasOutput(output_id))
+
+    def test_cached_job_info_does_not_prune_outputs(self):
+        wf = self.pm.get_workflow()
+        job = wf.registerJob(
+            'Import/job001',
+            status=ProjectData.STATUS_SAVED,
+            alias='None',
+            jobtype='emw-import-ts',
+            jobindex=1,
+        )
+        output_id = 'Import/job001/movies.star'
+        job.registerOutput(output_id, datatype='File')
+        self.pm._save_workflow_data()
+
+        self.pm._data.setJobInfo(job.id, {
+            'status': ProjectData.STATUS_SAVED,
+            'inputs': [],
+            'outputs': [],
+            'ts': 9999999999.0,
+        })
+
+        self.pm.reload_from_disk()
+        job = self.pm.get_workflow().getJob(job.id)
+        self.assertTrue(job.hasOutput(output_id))
+
+        self.pm._data.updateWorkflow()
+        self.assertTrue(job.hasOutput(output_id))
+
+    def test_remove_missing_job_folder(self):
+        wf = self.pm.get_workflow()
+        job = wf.registerJob(
+            'Import/job001',
+            status=ProjectData.STATUS_SAVED,
+            alias='None',
+            jobtype='emw-import-ts',
+            jobindex=1,
+        )
+        self.pm.mkdir(job.id)
+        self.pm._data.setJobInfo(job.id, {
+            'status': ProjectData.STATUS_SAVED,
+            'inputs': [],
+            'outputs': [],
+        })
+        self.pm._save_workflow_data()
+
+        shutil.rmtree(self.pm.join(job.id))
+        self.pm.update()
+
+        self.assertFalse(self.pm.get_workflow().hasJob(job.id))
+        reloaded = RelionStar.pipeline_to_workflow(self.pm.pipeline_star)
+        self.assertFalse(reloaded.hasJob(job.id))
+
+        with open(self.pm.join('project.json')) as f:
+            data = json.load(f)
+        self.assertNotIn(job.id, data.get('jobs', {}))
 
 
 if __name__ == '__main__':

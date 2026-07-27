@@ -21,6 +21,7 @@ import json
 import subprocess
 import argparse
 import shutil
+from contextlib import contextmanager
 from datetime import datetime
 
 from emtools.utils import FolderManager, Process, Color, Path, Timer, Pretty
@@ -72,6 +73,19 @@ class ProjectManager(FolderManager):
     def get_workflow(self):
         return self._wf
 
+    def reload_from_disk(self):
+        """Reload pipeline and project.json from disk into memory."""
+        if self.exists(self.pipeline_star):
+            self._wf = RelionStar.pipeline_to_workflow(self.pipeline_star)
+        self._data.reload()
+
+    @contextmanager
+    def _project_write(self, message):
+        """Exclusive project transaction: lock, reload fresh state, then mutate."""
+        with ProjectLock(self.path, message=message):
+            self.reload_from_disk()
+            yield
+
     @property
     def pipeline_star(self):
         return self.join('default_pipeline.star')
@@ -113,13 +127,13 @@ class ProjectManager(FolderManager):
 
     def update(self):
         """ Update status of the running jobs. """
-        self.log("ProjectManager::: Updating project.")
-        t = Timer()
-        updated = self._data.updateWorkflow()
-        if updated:
-            self._save_workflow_data()
-
-        self.log(t.getToc(f"{Color.cyan('Update took')}"))
+        with self._project_write('update project'):
+            self.log("ProjectManager::: Updating project.")
+            t = Timer()
+            updated = self._data.updateWorkflow()
+            if updated:
+                self._persist_workflow()
+            self.log(t.getToc(f"{Color.cyan('Update took')}"))
 
     def _validateJobInputs(self, jobDef, params):
         """ Validate that provide values match with the job definition.
@@ -159,29 +173,30 @@ class ProjectManager(FolderManager):
         You can pass update=False in a context where the
         workflow has been already updated before the call to saveJob.
         """
-        if update:
-            self.update()
+        with self._project_write('save job'):
+            if update:
+                self._data.updateWorkflow()
 
-        job = None
-        is_existing = self._hasJob(jobTypeOrId)
-        if is_existing:
-            job = self._getJob(jobTypeOrId)
-            # FIXME Activate the following validation once we allow to override the job's status
-            # if job['status'] != STATUS_SAVED:
-            #     raise Exception("Can only save un-run jobs.")
-            self._writeJobParams(job, params)
-        else:
-            if jobDef := ProcessingConfig.get_job_form(jobTypeOrId):
-                job = self._createJob(jobTypeOrId, params, update=False)
+            job = None
+            is_existing = self._hasJob(jobTypeOrId)
+            if is_existing:
+                job = self._getJob(jobTypeOrId)
+                # FIXME Activate the following validation once we allow to override the job's status
+                # if job['status'] != STATUS_SAVED:
+                #     raise Exception("Can only save un-run jobs.")
+                self._writeJobParams(job, params)
+            else:
+                if jobDef := ProcessingConfig.get_job_form(jobTypeOrId):
+                    job = self._createJob(jobTypeOrId, params, update=False)
 
-        if job is None:
-            raise Exception(f"{jobTypeOrId} is not an existing jobId or job type.")
+            if job is None:
+                raise Exception(f"{jobTypeOrId} is not an existing jobId or job type.")
 
-        self._data.setJobStatus(job.id, ProjectData.STATUS_SAVED)
-        self._updateJobInputs(job, params)
-        if is_existing:
-            self._data.resetJobForSave(job.id)
-        self._save_workflow_data()
+            self._data.setJobStatus(job.id, ProjectData.STATUS_SAVED)
+            self._updateJobInputs(job, params)
+            if is_existing:
+                self._data.resetJobForSave(job.id)
+            self._persist_workflow()
 
         return job
 
@@ -304,87 +319,96 @@ class ProjectManager(FolderManager):
         if not jobTypeOrId:
             raise Exception("Job type or id is required to run a job.")
 
-        if update:
-            self.update()
-
-        job = None
         jobTypeOrId = Path.rmslash(jobTypeOrId)
+        job = None
+        jobStar = None
+        job_params = None
+        launcher_cmd = None
 
-        if self._hasJob(jobTypeOrId):
-            job = self._getJob(jobTypeOrId)
-            jobStar = os.path.join(job.id, 'job.star')
-            jobType = job['jobtype']
+        with self._project_write('run job'):
+            if update:
+                self._data.updateWorkflow()
 
-            if self._data.isActiveJob(job):
-                raise Exception("Can not re-run running or launched jobs.")
-
-            job_params = self._readJobParams(job, extraParams=params)
-
-            if clean:
-                self.log(f"Clean job folder {job.id}")
-                self._deleteJobFolder(job)
-                self.mkdir(job.id)
-                self._data.clearJobOutputs(job.id)
-
-            jobDef = ProcessingConfig.get_job_conf(jobType)
-            self._updateJobInputs(job, job_params)
-            self._writeJobParams(job, job_params)
-
-        else:
-            job_params = params
-            jobType = jobTypeOrId
-            jobDef = ProcessingConfig.get_job_conf(jobType)
-            if jobDef:
-                job = self._createJob(jobType, job_params)
-                self._updateJobInputs(job, job_params)
+            if self._hasJob(jobTypeOrId):
+                job = self._getJob(jobTypeOrId)
                 jobStar = os.path.join(job.id, 'job.star')
+                jobType = job['jobtype']
 
-        if job is None:
-            raise Exception(f"{jobTypeOrId} is not an existing jobId or job type.")
+                if self._data.isActiveJob(job):
+                    raise Exception("Can not re-run running or launched jobs.")
 
-        launcher = ProcessingConfig.get_job_launcher(jobType)
+                job_params = self._readJobParams(job, extraParams=params)
 
-        if not launcher:
-            raise Exception(f"Invalid launcher for job type: {jobType}")
+                if clean:
+                    self.log(f"Clean job folder {job.id}")
+                    self._deleteJobFolder(job)
+                    self.mkdir(job.id)
+                    self._data.clearJobOutputs(job.id)
 
-        self._data._clearJobStatusFiles(job.id)
-        self._runCmd(f"{launcher} -i {jobStar} -o {job.id}", job.id,
-                     wait=wait, job_params=job_params)
-        self._data.setJobStatus(job.id, ProjectData.STATUS_LAUNCHED)
-        self._save_workflow_data()
+                jobDef = ProcessingConfig.get_job_conf(jobType)
+                self._updateJobInputs(job, job_params)
+                self._writeJobParams(job, job_params)
+
+            else:
+                job_params = params
+                jobType = jobTypeOrId
+                jobDef = ProcessingConfig.get_job_conf(jobType)
+                if jobDef:
+                    job = self._createJob(jobType, job_params, update=False)
+                    self._updateJobInputs(job, job_params)
+                    jobStar = os.path.join(job.id, 'job.star')
+
+            if job is None:
+                raise Exception(f"{jobTypeOrId} is not an existing jobId or job type.")
+
+            launcher = ProcessingConfig.get_job_launcher(jobType)
+
+            if not launcher:
+                raise Exception(f"Invalid launcher for job type: {jobType}")
+
+            self._data._clearJobStatusFiles(job.id)
+            launcher_cmd = f"{launcher} -i {jobStar} -o {job.id}"
+            self._persist_workflow()
+
+        self._runCmd(launcher_cmd, job.id, wait=wait, job_params=job_params)
+
+        with self._project_write('mark job launched'):
+            self._data.setJobStatus(job.id, ProjectData.STATUS_LAUNCHED)
+            self._persist_workflow()
 
         return job
 
     def stopJob(self, jobId):
         """ Stop a job. """
-        job = self._getJob(jobId)
-        if not self._data.isActiveJob(job):
-            raise Exception("Can not stop non-running jobs.")
+        with self._project_write('stop job'):
+            job = self._getJob(jobId)
+            if not self._data.isActiveJob(job):
+                raise Exception("Can not stop non-running jobs.")
 
-        self._data.setJobStatus(jobId, ProjectData.STATUS_ABORTED)
-        if self.exists(jobId, 'job.id'):
-            with open(self.join(jobId, 'job.id')) as f:
-                job_id = f.readline().strip()
+            self._data.setJobStatus(jobId, ProjectData.STATUS_ABORTED)
+            if self.exists(jobId, 'job.id'):
+                with open(self.join(jobId, 'job.id')) as f:
+                    job_id = f.readline().strip()
 
-            job_params = self._readJobParams(job)
-            qname = job_params.get('queue.name', 'NO-NAME')
-            if qname == 'NO-NAME':
-                raise Exception(f"No queue name found for stopping job {jobId}.")
+                job_params = self._readJobParams(job)
+                qname = job_params.get('queue.name', 'NO-NAME')
+                if qname == 'NO-NAME':
+                    raise Exception(f"No queue name found for stopping job {jobId}.")
 
-            if queue := ProcessingConfig.get_queue(qname):
-                cancelCmd = queue['cancel'].format(job_id=job_id)
-            else:
-                raise Exception(f"Queue {qname} not found in config for stopping job {jobId}.")
+                if queue := ProcessingConfig.get_queue(qname):
+                    cancelCmd = queue['cancel'].format(job_id=job_id)
+                else:
+                    raise Exception(f"Queue {qname} not found in config for stopping job {jobId}.")
 
-            scriptLog = self.join(jobId, 'job.log')
-            try:
-                subprocess.run(shlex.split(cancelCmd), check=True, capture_output=True, text=True)                
-                self._log(f"Stopping CLUSTER job, {cancelCmd}", jobFile=scriptLog, flush=True)
-            except subprocess.CalledProcessError as e:
-                self._log("ERROR: Stopping CLUSTER job failed", jobFile=scriptLog)
-                self._log(f"  Error: '{e.stderr.rstrip()}'", jobFile=scriptLog)
-        self._data.setJobStatus(jobId, ProjectData.STATUS_ABORTED)
-        self._save_workflow_data()
+                scriptLog = self.join(jobId, 'job.log')
+                try:
+                    subprocess.run(shlex.split(cancelCmd), check=True, capture_output=True, text=True)                
+                    self._log(f"Stopping CLUSTER job, {cancelCmd}", jobFile=scriptLog, flush=True)
+                except subprocess.CalledProcessError as e:
+                    self._log("ERROR: Stopping CLUSTER job failed", jobFile=scriptLog)
+                    self._log(f"  Error: '{e.stderr.rstrip()}'", jobFile=scriptLog)
+            self._data.setJobStatus(jobId, ProjectData.STATUS_ABORTED)
+            self._persist_workflow()
         return job
 
     def _deleteJobFolder(self, job, validate=True):
@@ -405,16 +429,17 @@ class ProjectManager(FolderManager):
     def deleteJobs(self, jobIds):
         """ Clean up job's folder. """
         deleted = []
-        for jobId in jobIds:
-            jobId = Path.rmslash(jobId)
-            if job := self._getJob(jobId, validateExists=False):
-                self._deleteJobFolder(job)
-                self._wf.deleteJob(job)
-                deleted.append(jobId)
-            else:
-                raise Exception(f"{jobId} is not an existing jobId.")
+        with self._project_write('delete jobs'):
+            for jobId in jobIds:
+                jobId = Path.rmslash(jobId)
+                if job := self._getJob(jobId, validateExists=False):
+                    self._deleteJobFolder(job)
+                    self._data.removeJobFromWorkflow(job)
+                    deleted.append(jobId)
+                else:
+                    raise Exception(f"{jobId} is not an existing jobId.")
 
-        self._save_workflow_data()
+            self._persist_workflow()
         return deleted
 
     def _create(self):
@@ -430,14 +455,18 @@ class ProjectManager(FolderManager):
 
         RelionStar.write_pipeline(self.pipeline_star)
 
-    def _save_workflow_data(self):
-        with ProjectLock(self.path, message='save workflow'):
-            self.log(f"Updating {self.pipeline_star}")
-            self._data.save()
-            tmp_pipeline = self.join(
-                f'.{os.path.basename(self.pipeline_star)}.{os.getpid()}.tmp')
-            RelionStar.workflow_to_pipeline(self._wf, tmp_pipeline)
-            os.replace(tmp_pipeline, self.pipeline_star)
+    def _persist_workflow(self):
+        """Write project.json and default_pipeline.star (caller must hold project lock)."""
+        self.log(f"Updating {self.pipeline_star}")
+        self._data.save()
+        tmp_pipeline = self.join(
+            f'.{os.path.basename(self.pipeline_star)}.{os.getpid()}.tmp')
+        RelionStar.workflow_to_pipeline(self._wf, tmp_pipeline)
+        os.replace(tmp_pipeline, self.pipeline_star)
+
+    def _save_workflow_data(self, message='save workflow'):
+        with self._project_write(message):
+            self._persist_workflow()
 
     def _saveCmd(self, cmd, jobId):
         """ Write command.txt file to be used for restart. """
