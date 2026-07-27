@@ -97,7 +97,7 @@
           "label": "Particles (RELION _data.star):",
           "default": "",
           "paramClass": "PathParam",
-          "pointerClass": "TomogramParticles",
+          "pointerClass": "TomoParticles",
           "help": "Path to ${RELION_PREFIX}_data.star particle metadata from RELION (--particles_relion). It is expected to have the same particle names as the half-maps."
         },
         {

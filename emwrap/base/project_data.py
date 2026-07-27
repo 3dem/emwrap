@@ -274,6 +274,29 @@ class ProjectData(FolderManager):
                         'type': datatype,
                         'info': f'{n} items, {ps:0.1f} Å/px, bin: {binning:0.1f}'
                     }
+                elif filepath.endswith('optimisation_set.star'):
+                    t = None
+                    with StarFile(filepath, 'r') as sf:
+                        allTables = sf.getTableNames()
+                        t = sf.getTable(allTables[0])
+
+                    cols = {
+                        'rlnTomoParticlesFile': 'particles',
+                        'rlnTomoTomogramsFile': 'global'
+                    }
+                    info = {}
+                    for col, tableName in cols.items():
+                        v = getattr(t[0], col)
+                        with StarFile(v, 'r') as sf:
+                            info[col] = {'size': sf.getTableSize(tableName), 'table': sf.getTableInfo(tableName)}
+
+                    # TODO: Check if there are TomoParticles
+                    ptsInfo = info['rlnTomoParticlesFile']
+                    datatype = 'TomoParticles' if ptsInfo['table'].hasColumn('rlnTomoParticleId') else 'TomoCoordinates'
+                    return {
+                        'type': datatype,
+                        'info': f'{ptsInfo["size"]} items, Tomograms: {info["rlnTomoTomogramsFile"]["size"]}'
+                    }
             except Exception as e:
                 self._debug(
                     f"Error computing {Color.warn('OUTPUT')} info for "

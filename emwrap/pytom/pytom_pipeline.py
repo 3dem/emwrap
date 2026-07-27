@@ -61,6 +61,7 @@ class PyTomPipeline(ProcessingPipeline):
 
         self.inTomoStar = self._args['input_tomograms']
         self.outTomoStar = self.join('tomograms_coords.star')
+        self.outTomoOptimisationSet = self.join('optimisation_set.star')
 
         self._pytom_args = {
             'pytom': self.get_subargs('pytom'),
@@ -202,7 +203,7 @@ class PyTomPipeline(ProcessingPipeline):
     def _updateOutput(self):
         N = len(self.outTable)
         n = sum(row.rlnParticleNumber for row in self.outTable)
-        outputNodes = [[self.outTomoStar, 'TomogramGroupMetadata.star.relion.tomo.tomocoordinates']]
+        outputNodes = [[self.outTomoOptimisationSet, 'TomogramGroupMetadata.star.emwrap.TomoCoordinates']]
         self.writeRelionOutputNodes(outputNodes)
 
     def prerun(self):
@@ -238,9 +239,11 @@ class PyTomPipeline(ProcessingPipeline):
 
         # First create the optimisation_set.star file and then the associated tomograms and particles
         with StarFile(optsetFn, 'w') as sf:
-            t = Table(columns=['rlnTomoParticlesFile', 'rlnTomoTomogramsFile'])
-            t.addRowValues(particlesFn, tomogramsFn)
-            sf.writeTable('optimisation_set', t, timeStamp=True)
+            values = {
+                'rlnTomoParticlesFile': particlesFn,
+                'rlnTomoTomogramsFile': tomogramsFn
+            }
+            sf.writeTable('optimisation_set', Table.fromDict(values), timeStamp=True)
 
         with StarFile(tomogramsFn, 'w') as sf:
             newTomoTable = tomoCoordsTable.cloneColumns(['rlnCoordinatesMetadata'])

@@ -13,7 +13,7 @@
                             "name": "relion_refine.ios",
                             "label": "Tomo Particles (optimisation set):",
                             "paramClass": "PathParam",
-                            "pointerClass": "TomogramParticles",
+                            "pointerClass": "TomoParticles",
                             "help": "Passed as --ios (optimisation set or particles STAR from RELION tomography input options)."
                         }
                     ]

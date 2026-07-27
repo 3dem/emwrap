@@ -13,7 +13,7 @@
                     "name": "relion_refine.ios",
                     "label": "Input optimisation set:",
                     "paramClass": "PathParam",
-                    "pointerClass": "TomogramParticles",
+                    "pointerClass": "TomoParticles",
                     "help": "Input optimisation set. This will be passed with a --ios argument to relion_refine (tomography inimodel path). If any individual components of the optimisation set are specified in direct-entry mode in RELION, they override the optimisation set; here only the optimisation set STAR is used."
                 },
                 {

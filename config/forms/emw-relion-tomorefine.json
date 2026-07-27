@@ -7,7 +7,7 @@
                     "name": "relion_refine.ios",
                     "label": "Input particles STAR file:",
                     "paramClass": "PathParam",
-                    "pointerClass": "TomogramParticles",
+                    "pointerClass": "TomoParticles",
                     "help": "This will be passed with a --ios argument to the executable."
                 },
                 {
