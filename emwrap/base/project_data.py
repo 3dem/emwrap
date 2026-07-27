@@ -25,6 +25,7 @@ from emtools.image import Image
 from .config import ProcessingConfig
 from .processing_pipeline import ProcessingPipeline
 from .data import getTomoPixelSize, getTomoBinning
+from .project_lock import atomic_write_json
 
 
 class ProjectData(FolderManager):
@@ -406,8 +407,7 @@ class ProjectData(FolderManager):
         self._set_info(self._outputs, output_id, output_info)
 
     def save(self):
-        with open(self._project_json_path, 'w') as f:
-            json.dump(self._data, f, indent=4)
+        atomic_write_json(self._project_json_path, self._data)
 
     def isActiveJob(self, job):
         return job['status'] in self.JOB_STATUS_ACTIVE

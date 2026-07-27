@@ -30,6 +30,7 @@ from emtools.metadata import Table, StarFile, RelionStar
 from .config import ProcessingConfig
 from .processing_pipeline import ProcessingPipeline
 from .project_data import ProjectData
+from .project_lock import ProjectLock
 
 
 
@@ -430,9 +431,13 @@ class ProjectManager(FolderManager):
         RelionStar.write_pipeline(self.pipeline_star)
 
     def _save_workflow_data(self):
-        self.log(f"Updating {self.pipeline_star}")
-        self._data.save()
-        RelionStar.workflow_to_pipeline(self._wf, self.pipeline_star)
+        with ProjectLock(self.path, message='save workflow'):
+            self.log(f"Updating {self.pipeline_star}")
+            self._data.save()
+            tmp_pipeline = self.join(
+                f'.{os.path.basename(self.pipeline_star)}.{os.getpid()}.tmp')
+            RelionStar.workflow_to_pipeline(self._wf, tmp_pipeline)
+            os.replace(tmp_pipeline, self.pipeline_star)
 
     def _saveCmd(self, cmd, jobId):
         """ Write command.txt file to be used for restart. """
