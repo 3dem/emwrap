@@ -194,6 +194,29 @@ class WarpBasePipeline(ProcessingPipeline):
         with StarFile(starFile, 'w') as sfOut:
             sfOut.writeTable(tableName, table, computeFormat='left', timeStamp=True)
 
+    def appendGlobalTsRow(self, starFile, rowDict):
+        """Append one global row; all rows must share the same columns."""
+        rowDict = dict(rowDict)
+        if os.path.exists(starFile):
+            table = StarFile.getTableFromFile('global', starFile)
+            colNames = set(table.getColumnNames())
+            rowKeys = set(rowDict.keys())
+            if rowKeys != colNames:
+                missing = sorted(colNames - rowKeys)
+                extra = sorted(rowKeys - colNames)
+                parts = []
+                if missing:
+                    parts.append(f"missing columns: {missing}")
+                if extra:
+                    parts.append(f"extra columns: {extra}")
+                raise ValueError(
+                    f"Column mismatch appending to {starFile}: {'; '.join(parts)}"
+                )
+            table.addRowValues(**rowDict)
+        else:
+            table = Table.fromDict(rowDict)
+        self.write_ts_table('global', table, starFile)
+
     def targetPs(self, inputPs):
         """ Return target pixel size from create_settings.bin_angpix, or inputPs. """
         v = (self._args.get('create_settings.bin_angpix', '') or
@@ -372,6 +395,17 @@ class WarpBasePipeline(ProcessingPipeline):
             })
             return False, None
 
+        xfFile = self.join(self.TS, 'tiltstack', tsName, f'{tsName}_Imod/{tsName}_st.xf')
+        tltFile = self.join(self.TS, 'tiltstack', tsName, f'{tsName}_Imod/{tsName}_st.tlt')
+        if not os.path.exists(xfFile) or not os.path.exists(tltFile):
+            self.log(f"ERROR: Missing IMOD alignment files for TS {tsName}: "
+                     f"{xfFile}, {tltFile}")
+            tsDict.update({
+                'rlnTomoTiltSeriesStarFile': tsStarFile,
+                'rlnTiltSeriesAligned': tsAligned
+            })
+            return False, None
+
         dims = Image.get_dimensions(tsAligned)
         tsDict.update({
             'rlnTomoTiltSeriesStarFile': tsStarFile,
@@ -381,6 +415,10 @@ class WarpBasePipeline(ProcessingPipeline):
         # Generate the proper metadata star file for this row
         tsTable = StarFile.getTableFromFile(tsName, inputTsStar)
         alignments = self.parseAlignmentParams(tsDict, newPs)
+        if len(alignments) != len(tsTable):
+            self.log(f"ERROR: Alignment count mismatch for TS {tsName}: "
+                     f"{len(alignments)} alignments vs {len(tsTable)} tilts")
+            return False, dims
         newTsTable = Table(tsTable.getColumnNames() + RelionStar.TOMO_ALIGNMENT_COLUMNS)
         # Alignments from AreTomo are sorted from negative to positive tilt angle
         # so we need to sort the TS metadata to match that order
@@ -450,10 +488,18 @@ class WarpBasePipeline(ProcessingPipeline):
 
         # FIXME: validate for missing tomostar files
         tomostar = self.join(self.TM, tsName + '.tomostar')
+        tssFile = self.join(self.TSS)
+        if not os.path.exists(tssFile):
+            self.log(f"ERROR: Missing {self.TSS} needed for tomogram metadata")
+            return False, None
+
         # For Relion tomogram.star, we need the original tomogram dimensions
-        wxml = WarpXml(self.join(self.TSS))
-        d = wxml.getDict('Settings', 'Tomo', 'Param')
+        d = WarpXml(tssFile).getDict('Settings', 'Tomo', 'Param')
         # {'DimensionsX': '4400', 'DimensionsY': '6000', 'DimensionsZ': '1000'}
+
+        if not ok:
+            self.log(f"ERROR: Missing reconstructed tomogram for TS {tsName} in {recpath}")
+            return False, None
 
         tsDict.update({
             'rlnTomoReconstructedTomogram': t,
