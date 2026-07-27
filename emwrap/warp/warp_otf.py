@@ -86,6 +86,8 @@ class WarpOTF(WarpBasePipeline):
             self.log(f"OTF - MCTF arguments: {mctf_args}")
             
             mctf_args['fs_motion_and_ctf.perdevice'] = self._args['perdevice']
+            # Both here and reconstruct step need to use the same halfmap_frames setting
+            mctf_args['fs_motion_and_ctf.out_average_halves'] = self._args['ctfrec.ts_reconstruct.halfmap_frames']
             _run(WarpMotionCtf, mctf_args, inputTs=inputTs)
 
             # 2. Run Alignment
