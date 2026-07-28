@@ -1,28 +1,28 @@
 {
     "name": "ApoF - AreTomo3 preprocessing",
-    "description": "Minimal AreTomo3 preprocessing workflow for the ApoF tutorial dataset.",                                                                                                                                                                                                                         
-    "jobs": [                                                                                                                                                                                                             
-        {                                                                                                                                                                                                                 
-            "jobid": "External/job065",                                                                                                                                                                                   
-            "jobtype": "emw-import-ts",                                                                                                                                                                                   
-            "params": {                                                                                                                                                                                                   
-                "mdoc_files": "data/mdoc/*mdoc",                                                                                                                                                                          
-                "tilt_axis_angle": "-85.6",                                                                                                                                                                               
-                "acq.voltage": "300",                                                                                                                                                                                     
-                "acq.cs": "2.7",                                                                                                                                                                                          
-                "acq.amplitude_contrast": "0.1",                                                                                                                                                                          
-                "wait.timeout": "1",                                                                                                                                                                                      
-                "wait.file_change": "1",                                                                                                                                                                                  
-                "wait.sleep": "1",                                                                                                                                                                                        
-                "tilt_images": "data/frames/",                                                                                                                                                                            
-                "acq.gain": "data/gain_ref.mrc",                                                                                                                                                                          
+    "description": "Minimal AreTomo3 preprocessing workflow for the ApoF tutorial dataset.",
+    "jobs": [
+        {
+            "jobid": "EMwrap/job065",
+            "jobtype": "emw-import-ts",
+            "params": {
+                "mdoc_files": "data/mdoc/*mdoc",
+                "tilt_axis_angle": "-85.6",
+                "acq.voltage": "300",
+                "acq.cs": "2.7",
+                "acq.amplitude_contrast": "0.1",
+                "wait.timeout": "1",
+                "wait.file_change": "1",
+                "wait.sleep": "1",
+                "tilt_images": "data/frames/",
+                "acq.gain": "data/gain_ref.mrc",
                 "acq.pixel_size": "0.789",
                 "acq.total_dose": "2.64",
                 "acq.amplitude_constrast": "0.1"
             }
         },
         {
-            "jobid": "External/job066",
+            "jobid": "Aretomo3/job066",
             "jobtype": "emw-aretomo3",
             "params": {
                 "aretomo3.EerSampling": "1",
@@ -41,7 +41,7 @@
                 "aretomo3.FlipVol": true,
                 "aretomo3.OutImod": "3",
                 "aretomo3.SplitSum": true,
-                "input_tiltseries": "External/job065/tilt_series.star",
+                "input_tiltseries": "EMwrap/job065/tilt_series.star",
                 "aretomo3.FmInt": "1",
                 "aretomo3.McGroup": "1 3",
                 "aretomo3.TiltAxis": "-85.6 0",

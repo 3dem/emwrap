@@ -7,7 +7,7 @@
                     "name": "relion_reconstruct.i",
                     "label": "Input particles STAR file:",
                     "paramClass": "PathParam",
-                    "pointerClass": "TomogramParticles",
+                    "pointerClass": "TomoParticles",
                     "help": "Input particles STAR file with particles extracted from tomograms"
                 },               
                 {

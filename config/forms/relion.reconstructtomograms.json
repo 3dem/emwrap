@@ -1,0 +1,153 @@
+{
+    "sections": [
+        {
+            "label": "I/O",
+            "params": [
+                {
+                    "name": "in_tiltseries",
+                    "label": "Input tilt series:",
+                    "pattern": "STAR Files (*.star)",
+                    "help": "Input global tilt series star file.",
+                    "paramClass": "PathParam",
+                    "pointerClass": "TiltSeriesAligned"
+                },
+                {
+                    "name": "generate_split_tomograms",
+                    "label": "Generate tomograms for denoising?",
+                    "default": false,
+                    "paramClass": "BooleanParam",
+                    "help": "Generate tomograms for input into a denoising job. For this option to work, Save images for denoising? should have been True during Motion Correction. Additionally, adjust zdim to minimise the amount of empty space without sample within the tomograms."
+                },
+                {
+                    "name": "do_proj",
+                    "label": "Also write 2D sums of central Z-slices?",
+                    "default": true,
+                    "paramClass": "BooleanParam",
+                    "help": "When set to Yes, this option will result in the calculation of 2D sums of Z-slices from the reconstructed tomograms. These may be useful to quickly screen for bad tomograms using the relion_display program."
+                },
+                {
+                    "label": "2D projection",
+                    "paramClass": "Group",
+                    "condition": "do_proj == True",
+                    "params": [
+                        {
+                            "name": "centre_proj",
+                            "label": "Central Z-slice (in binned pix):",
+                            "default": 0,
+                            "paramClass": "FloatParam",
+                            "help": "This defines the central Z-slice of all Z-slices that will be summed to generate the 2D projection (in pixels in the tomogram). Zero means the middle (centre) of the tomogram."
+                        },
+                        {
+                            "name": "thickness_proj",
+                            "label": "Number of Z-slices (in binned pix):",
+                            "default": 10,
+                            "paramClass": "FloatParam",
+                            "help": "This defines how many Z-slices will be summed to generate the 2D projection (in pixels in the tomogram). Half of the slices will be above and half will be below the central slice defined above."
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "label": "Reconstruct",
+            "params": [
+                {
+                    "name": "xdim",
+                    "label": "Unbinned tomogram width (Xdim):",
+                    "default": 4000,
+                    "paramClass": "IntParam",
+                    "help": "The tomogram X-dimension in unbinned pixels."
+                },
+                {
+                    "name": "ydim",
+                    "label": "Unbinned tomogram height (Ydim):",
+                    "default": 4000,
+                    "paramClass": "IntParam",
+                    "help": "The tomogram Y-dimension in unbinned pixels."
+                },
+                {
+                    "name": "zdim",
+                    "label": "Unbinned tomogram thickness (Zdim):",
+                    "default": 2000,
+                    "paramClass": "IntParam",
+                    "help": "The tomogram Z-dimension in unbinned pixels."
+                },
+                {
+                    "name": "binned_angpix",
+                    "label": "Binned pixel size (A):",
+                    "default": 10,
+                    "paramClass": "FloatParam",
+                    "help": "The tomogram will be downscaled to this pixel size. For particle picking, often binning to pixel sizes of 5-10 A gives good enough tomograms. Note that the downsized tomograms are only used for picking; subsequent subtomogram averaging will not use these."
+                },
+                {
+                    "name": "tiltangle_offset",
+                    "label": "Tilt angle offset (deg):",
+                    "default": 0,
+                    "paramClass": "FloatParam",
+                    "help": "The tomogram tilt angles will all be changed by this value. This may be useful to reconstruct lamellae that are all milled under a given angle. All tomograms will be reconstructed with the same offset. Use the tomogram name option below to reconstruct only a single tomogram."
+                },
+                {
+                    "name": "tomo_name",
+                    "label": "Reconstruct only this tomogram:",
+                    "default": "",
+                    "paramClass": "StringParam",
+                    "help": "If not left empty, the program will only reconstruct this particular tomogram"
+                },
+                {
+                    "name": "do_fourier",
+                    "label": "Use Fourier-inversion?",
+                    "default": true,
+                    "paramClass": "BooleanParam",
+                    "help": "When set to Yes, instead of using real-space backprojection, a Fourier-space inversion algorithm is used."
+                },
+                {
+                    "label": "Fourier inversion",
+                    "paramClass": "Group",
+                    "condition": "do_fourier == True",
+                    "params": [
+                        {
+                            "name": "do_skip_wiener",
+                            "label": "Skip Wiener filter?",
+                            "default": false,
+                            "paramClass": "BooleanParam",
+                            "help": "By default, the Fourier-inversion method uses a Wiener-filter, where the signal-to-noise ratios are calculated from Fourier shell correlations between the odd/even frames, which should have thus been calculated during MotionCorrection. If this option is true, then the odd/even frames are not necessary, and the images will only be pre-calculated with the CTF, without any division by CTF^2 as in the Wiener filter. This is the option that should be used for subsequent (real) sub-tomogram averaging"
+                        },
+                        {
+                            "name": "ctf_intact_first_peak",
+                            "label": "Ignore CTFs until first peak?",
+                            "default": true,
+                            "paramClass": "BooleanParam",
+                            "help": "When set to Yes, the lowest spatial frequencies will not be boosted through CTF-correction, which will lead to a reconstruction with less low-resolution contrast, but better high-resolution details>"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "label": "Compute",
+            "params": [
+                {
+                    "name": "nr_mpi",
+                    "label": "Number of MPI procs:",
+                    "default": 1,
+                    "paramClass": "IntParam",
+                    "help": "Number of MPI nodes to use in parallel. When set to 1, MPI will not be used. The maximum can be set through the environment variable RELION_MPI_MAX."
+                },
+                {
+                    "name": "nr_threads",
+                    "label": "Number of threads:",
+                    "default": 1,
+                    "paramClass": "IntParam",
+                    "help": "Number of shared-memory (POSIX) threads to use in parallel. When set to 1, no multi-threading will be used. The maximum can be set through the environment variable RELION_THREAD_MAX."
+                },
+                {
+                    "name": "other_args",
+                    "label": "Additional arguments:",
+                    "default": "",
+                    "paramClass": "StringParam",
+                    "help": "In this box command-line arguments may be provided that are not generated by the GUI. This may be useful for testing developmental options and/or expert use of the program. To print a list of possible options, run the corresponding program from the command line without any arguments."
+                }
+            ]
+        }
+    ]
+}

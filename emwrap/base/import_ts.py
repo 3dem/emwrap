@@ -58,22 +58,16 @@ class ImportTsPipeline(ProcessingPipeline):
         mdoc.write(mdocFile)
         # Write the TS star file
         tsStarFile = self.join('tilt_series', f"{tsName}.star")
-        
-        tsTable = Table([
-            'rlnMicrographMovieName',
-            'rlnTomoTiltMovieFrameCount',
-            'rlnTomoNominalStageTiltAngle',
-            'rlnTomoNominalTiltAxisAngle',
-            'rlnMicrographPreExposure',
-            'rlnTomoNominalDefocus'
-        ])
-
+        rows = []
         preExposure = 0
         dims = None
         N = 0
         minAngle = 999
         maxAngle = -999
-        for z, s in mdoc.zsections():
+        # There are mdocs where the ZValue index does not match the acquisition order
+        # We will sort the zvalues by date and assign the index accordingly
+        for z, s in mdoc.zsections(sort='date'):
+            n = 0
             N += 1
             movieName = mdoc.getSubFrameBase(s)
             framesPath = os.path.join(self.tsFolder, movieName)
@@ -82,35 +76,28 @@ class ImportTsPipeline(ProcessingPipeline):
             angle = float(s['TiltAngle'])
             minAngle = min(minAngle, angle)
             maxAngle = max(maxAngle, angle)
-            tsTable.addRowValues(
+            rows.append(dict(
+                rlnTomoTiltMovieIndex=N,
                 rlnMicrographMovieName=framesPath,
                 rlnTomoTiltMovieFrameCount=n,
                 rlnTomoNominalStageTiltAngle=s['TiltAngle'],
                 rlnTomoNominalTiltAxisAngle=self.tiltAxisAngle,
-                rlnMicrographPreExposure='%0.3f' % preExposure,
-                rlnTomoNominalDefocus=s['TargetDefocus'])
+                rlnMicrographPreExposure='%0.3f' % preExposure,                
+                rlnTomoNominalDefocus=s['TargetDefocus'],
+                #emwMdocPriorRecordDose=s['PriorRecordDose'],
+                #emwMdocDateTime=s['DateTime']
+            ))
+
             preExposure += self.acq.total_dose
 
         with StarFile(tsStarFile, 'w') as sfOut:
+            tsTable = Table.fromDict(rows)
             sfOut.writeTable(tsName, tsTable,
                              computeFormat="left",
                              timeStamp=True)
 
-        if self.allTsTable is None:
-            self.allTsTable = Table([
-                'rlnTomoName',
-                'rlnTomoTiltSeriesStarFile',
-                'rlnVoltage',
-                'rlnSphericalAberration',
-                'rlnAmplitudeContrast',
-                'rlnMicrographOriginalPixelSize',
-                'rlnTomoHand',
-                'rlnOpticsGroupName',
-                'rlnTomoMdocFile'
-            ])
-
         ps = self.acq.pixel_size
-        self.allTsTable.addRowValues(
+        rowValues = dict(
             rlnTomoName=tsName,
             rlnTomoTiltSeriesStarFile=tsStarFile,
             rlnVoltage=self.acq.voltage,
@@ -122,6 +109,11 @@ class ImportTsPipeline(ProcessingPipeline):
             rlnTomoMdocFile=mdocFile
         )
 
+        if self.allTsTable is None:
+            self.allTsTable = Table.fromDict([rowValues])
+        else:
+            self.allTsTable.addRowValues(**rowValues)
+        
         with StarFile(self.outputStar, 'w') as sfOut:
             sfOut.writeTable('global', self.allTsTable,
                              computeFormat="left",

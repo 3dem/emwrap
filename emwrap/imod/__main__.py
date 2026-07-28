@@ -14,6 +14,7 @@
 # *
 # **************************************************************************
 
-from .processing_pipeline import ProcessingPipeline
-from .project_manager import ProjectManager
-from .config import ProcessingConfig
+from .imod_reconstruct import ImodReconstructPipeline
+
+if __name__ == '__main__':
+    ImodReconstructPipeline.main()
