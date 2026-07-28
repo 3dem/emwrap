@@ -24,10 +24,10 @@ from glob import glob
 from datetime import datetime, timedelta
 
 from emtools.utils import Color, FolderManager, Path, Process
-from emtools.metadata import StarFile, Acquisition, StarMonitor, Table
+from emtools.metadata import StarFile, Acquisition, StarMonitor, Table, RelionStar
 from emtools.jobs import Batch
 from emtools.image import Image
-from emwrap.base import ProcessingPipeline, getTomoPixelSize, getTomogram
+from emwrap.base import ProcessingPipeline
 
 from .pytom import PyTom
 
@@ -137,7 +137,7 @@ class PyTomPipeline(ProcessingPipeline):
             voltage=row.rlnVoltage,
             cs=row.rlnSphericalAberration,
             amplitude_contrast=row.rlnAmplitudeContrast,
-            pixel_size=getTomoPixelSize(row)
+            pixel_size=RelionStar.getTomoPixelSize(row)
         )
 
     def _getInputTomograms(self):
@@ -182,7 +182,7 @@ class PyTomPipeline(ProcessingPipeline):
             batch = Batch(id=batchId, index=counter,
                         rowDict=row._asdict(),
                         path=os.path.join(self.tmpDir, batchId),
-                        tsName=tsName, tomogram=getTomogram(row),
+                        tsName=tsName, tomogram=RelionStar.getTomogram(row),
                         tilt_angles=[float(r.rlnTomoNominalStageTiltAngle) for r in t],
                         dose_accumulation=[float(r.rlnMicrographPreExposure) for r in t])
             if hasattr(row, 'rlnDefocus'):
@@ -195,9 +195,9 @@ class PyTomPipeline(ProcessingPipeline):
         first = inputTomoTable[0]
         N = len(inputTomoTable)
         if self._dims is None:
-            self._dims = Image.get_dimensions(getTomogram(first))
+            self._dims = Image.get_dimensions(RelionStar.getTomogram(first))
         x, y, n = self._dims
-        ps = getTomoPixelSize(first)
+        ps = RelionStar.getTomoPixelSize(first)
         bin = first.rlnTomoTomogramBinning
 
     def _updateOutput(self):
