@@ -16,11 +16,12 @@
 
 import os
 import shutil
+import numpy as np
 from collections import defaultdict
 from glob import glob
 
 from emtools.utils import FolderManager, Path
-from emtools.metadata import StarFile, Table, RelionStar, WarpXml, TextFile
+from emtools.metadata import StarFile, Table, RelionStar, WarpXml, Imod
 from emtools.jobs import Batch, Args
 from emtools.image import Image
 from emwrap.base import ProcessingPipeline
@@ -193,6 +194,29 @@ class WarpBasePipeline(ProcessingPipeline):
         with StarFile(starFile, 'w') as sfOut:
             sfOut.writeTable(tableName, table, computeFormat='left', timeStamp=True)
 
+    def appendGlobalTsRow(self, starFile, rowDict):
+        """Append one global row; all rows must share the same columns."""
+        rowDict = dict(rowDict)
+        if os.path.exists(starFile):
+            table = StarFile.getTableFromFile('global', starFile)
+            colNames = set(table.getColumnNames())
+            rowKeys = set(rowDict.keys())
+            if rowKeys != colNames:
+                missing = sorted(colNames - rowKeys)
+                extra = sorted(rowKeys - colNames)
+                parts = []
+                if missing:
+                    parts.append(f"missing columns: {missing}")
+                if extra:
+                    parts.append(f"extra columns: {extra}")
+                raise ValueError(
+                    f"Column mismatch appending to {starFile}: {'; '.join(parts)}"
+                )
+            table.addRowValues(**rowDict)
+        else:
+            table = Table.fromDict(rowDict)
+        self.write_ts_table('global', table, starFile)
+
     def targetPs(self, inputPs):
         """ Return target pixel size from create_settings.bin_angpix, or inputPs. """
         v = (self._args.get('create_settings.bin_angpix', '') or
@@ -252,13 +276,12 @@ class WarpBasePipeline(ProcessingPipeline):
             tsDict['rlnTomoTiltSeriesStarFile'] = "None"
             return False, None, None
 
-        # FIXME: Do not add even/odd when this option is not selected
         extra_cols = [
             'rlnCtfPowerSpectrum', 'rlnMicrographName', 'rlnMicrographMetadata',
             'rlnAccumMotionTotal', 'rlnAccumMotionEarly', 'rlnAccumMotionLate',
-            'rlnMicrographNameEven', 'rlnMicrographNameOdd', 'rlnCtfImage',
-            'rlnDefocusU', 'rlnDefocusV', 'rlnCtfAstigmatism', 'rlnDefocusAngle',
+            'rlnCtfImage', 'rlnDefocusU', 'rlnDefocusV', 'rlnCtfAstigmatism', 'rlnDefocusAngle',
             'rlnCtfFigureOfMerit', 'rlnCtfMaxResolution', 'rlnCtfIceRingDensity',
+            'rlnMicrographNameEven', 'rlnMicrographNameOdd'
         ]
 
         filesMap = {
@@ -268,6 +291,16 @@ class WarpBasePipeline(ProcessingPipeline):
             'rlnMicrographNameEven': 'average/even',
             'rlnMicrographNameOdd': 'average/odd'
         }
+        
+        filesMapExtra = {
+            'rlnMicrographNameEven': 'average/even',
+            'rlnMicrographNameOdd': 'average/odd'
+        }
+
+        if all(os.path.exists(self.join(self.FS, v)) for v in filesMapExtra.values()):
+            filesMap.update(filesMapExtra)
+            extra_cols.extend(filesMapExtra.keys())
+            
         newTsTable = Table(tsTable.getColumnNames() + extra_cols)
         dims = None
         for frameRow in tsTable:
@@ -275,7 +308,8 @@ class WarpBasePipeline(ProcessingPipeline):
             movieMrc = moviePrefix + '.mrc'
             frameDict = frameRow._asdict()
             for k, v in filesMap.items():
-                frameDict[k] = self.join(self.FS, v, movieMrc)
+                movieFn = self.join(self.FS, v, movieMrc)
+                frameDict[k] = movieFn if os.path.exists(movieFn) else ""
             frameDict['rlnMicrographMetadata'] = "None"
 
             avgMrcPath = frameDict['rlnMicrographName']
@@ -311,24 +345,24 @@ class WarpBasePipeline(ProcessingPipeline):
              self._args.get('wat.ts_aretomo.angpix', '') or 0)
         return float(v)
 
-    def parseAlignmentParams(self, tsName, ps):
+    def parseAlignmentParams(self, tsDict, ps):
         """ Parse AreTomo alignment parameters from .st.aln into Relion convention. """
-        self.log(f"Parsing alignments for tomo: {tsName}")
-        alnFile = self.join(self.TS, 'tiltstack', tsName, f'{tsName}.st.aln')
-        alignments = []
-        # Despite Warp's Aretomo wrapper writes the angles from positive to negative
-        # Aretomo always write the alignment back from negative to positive order,
-        # So we don't need to reverse it when parsing to the STAR file
-        for line in TextFile.stripLines(alnFile):
-            parts = line.split()
-            values = {
-                'rlnTomoXTilt': 0,
-                'rlnTomoYTilt': float(parts[-1]),
-                "rlnTomoZRot": float(parts[1]),
-                'rlnTomoXShiftAngst': float(parts[3]) * ps,
-                'rlnTomoYShiftAngst': float(parts[4]) * ps,
-            }
-            alignments.append({k: float(values[k]) for k in values})
+        tsName = tsDict['rlnTomoName']
+        xfFile = self.join(self.TS, 'tiltstack', tsName, f'{tsName}_Imod/{tsName}_st.xf')
+        tltFile = self.join(self.TS, 'tiltstack', tsName, f'{tsName}_Imod/{tsName}_st.tlt')
+
+        self.log(f"Parsing alignments for tomo: {tsName} from: {xfFile}, pixel size: {ps}")
+
+        tlt_angles = Imod.get_angles_from_tlt(tltFile)
+        #tlt_angles.reverse()
+        xf_alignments = Imod.get_alignment_from_xf(xfFile)
+        #xf_alignments.reverse()
+
+        alignments = RelionStar.alignments_from_imod(tlt_angles, xf_alignments, ps)
+        for aln in alignments:
+            del aln['tilt']
+            del aln['rlnCtfScalefactor']
+            aln['rlnTomoYTilt'] *= -1
 
         return alignments
 
@@ -361,6 +395,17 @@ class WarpBasePipeline(ProcessingPipeline):
             })
             return False, None
 
+        xfFile = self.join(self.TS, 'tiltstack', tsName, f'{tsName}_Imod/{tsName}_st.xf')
+        tltFile = self.join(self.TS, 'tiltstack', tsName, f'{tsName}_Imod/{tsName}_st.tlt')
+        if not os.path.exists(xfFile) or not os.path.exists(tltFile):
+            self.log(f"ERROR: Missing IMOD alignment files for TS {tsName}: "
+                     f"{xfFile}, {tltFile}")
+            tsDict.update({
+                'rlnTomoTiltSeriesStarFile': tsStarFile,
+                'rlnTiltSeriesAligned': tsAligned
+            })
+            return False, None
+
         dims = Image.get_dimensions(tsAligned)
         tsDict.update({
             'rlnTomoTiltSeriesStarFile': tsStarFile,
@@ -369,7 +414,11 @@ class WarpBasePipeline(ProcessingPipeline):
 
         # Generate the proper metadata star file for this row
         tsTable = StarFile.getTableFromFile(tsName, inputTsStar)
-        alignments = self.parseAlignmentParams(tsName, newPs)
+        alignments = self.parseAlignmentParams(tsDict, newPs)
+        if len(alignments) != len(tsTable):
+            self.log(f"ERROR: Alignment count mismatch for TS {tsName}: "
+                     f"{len(alignments)} alignments vs {len(tsTable)} tilts")
+            return False, dims
         newTsTable = Table(tsTable.getColumnNames() + RelionStar.TOMO_ALIGNMENT_COLUMNS)
         # Alignments from AreTomo are sorted from negative to positive tilt angle
         # so we need to sort the TS metadata to match that order
@@ -439,10 +488,18 @@ class WarpBasePipeline(ProcessingPipeline):
 
         # FIXME: validate for missing tomostar files
         tomostar = self.join(self.TM, tsName + '.tomostar')
+        tssFile = self.join(self.TSS)
+        if not os.path.exists(tssFile):
+            self.log(f"ERROR: Missing {self.TSS} needed for tomogram metadata")
+            return False, None
+
         # For Relion tomogram.star, we need the original tomogram dimensions
-        wxml = WarpXml(self.join(self.TSS))
-        d = wxml.getDict('Settings', 'Tomo', 'Param')
+        d = WarpXml(tssFile).getDict('Settings', 'Tomo', 'Param')
         # {'DimensionsX': '4400', 'DimensionsY': '6000', 'DimensionsZ': '1000'}
+
+        if not ok:
+            self.log(f"ERROR: Missing reconstructed tomogram for TS {tsName} in {recpath}")
+            return False, None
 
         tsDict.update({
             'rlnTomoReconstructedTomogram': t,

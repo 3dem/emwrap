@@ -74,16 +74,25 @@ class WarpOTF(WarpBasePipeline):
             with StarFile(inputTs, 'w') as sf:
                 sf.writeTable('global', table, timeStamp=True)
 
+            def _subargs(key):
+                """ Special subargs to remove the first prefix only. """ 
+                return self._args.subset(key, '')
+
             # 1. Run Motion Correction and CTF Estimation
-            mctf_args = self.get_subargs('mctf', prefix='')
-           # mctf_args['input_tiltseries'] = inputTs
+            mctf_args = _subargs('mctf')
+            
+            # mctf_args['input_tiltseries'] = inputTs
+
+            self.log(f"OTF - MCTF arguments: {mctf_args}")
             
             mctf_args['fs_motion_and_ctf.perdevice'] = self._args['perdevice']
+            # Both here and reconstruct step need to use the same halfmap_frames setting
+            mctf_args['fs_motion_and_ctf.out_average_halves'] = self._args['ctfrec.ts_reconstruct.halfmap_frames']
             _run(WarpMotionCtf, mctf_args, inputTs=inputTs)
 
             # 2. Run Alignment
 
-            wat_args = self.get_subargs('wat', prefix='')
+            wat_args = _subargs('wat')
             wat_args['ts_import.override_axis'] = tsTable[0].rlnTomoNominalTiltAxisAngle
 
             #mctf_args['input_tiltseries'] = inputTs
@@ -91,14 +100,17 @@ class WarpOTF(WarpBasePipeline):
 
             # 3. Run CTF Reconstruction
             # Update some CTF parameters from MCTF
-            ctf_args = self.get_subargs('ctfrec', prefix='')
+            ctf_args = _subargs('ctfrec')
             key_map_exceptions = {
                 'range_low': 'range_min',
                 'range_high': 'range_max',
             }
             for ctf_key in ['range_low', 'range_high', 'defocus_min', 'defocus_max', 'window']:
                 input_key = key_map_exceptions.get(ctf_key, ctf_key)
-                ctf_args[f'ts_ctf.{ctf_key}'] = mctf_args[f'fs_motion_and_ctf.c_{input_key}']
+                mctf_key = f'fs_motion_and_ctf.c_{input_key}'
+                value = mctf_args.get(mctf_key, self._args.get(f'mctf.{mctf_key}'))
+                if value not in (None, ''):
+                    ctf_args[f'ts_ctf.{ctf_key}'] = value
 
             _run(WarpCtfReconstruct, ctf_args, inputTs=inputTs)
 
@@ -146,14 +158,6 @@ class WarpOTF(WarpBasePipeline):
 
         tsName = tsDict['rlnTomoName']
 
-        def _append_global_star(starFile, rowDict):
-            if create or not os.path.exists(starFile):
-                table = Table.fromDict(rowDict)
-            else:
-                table = StarFile.getTableFromFile('global', starFile)
-                table.addRowValues(**rowDict)
-            self.write_ts_table('global', table, starFile)
-
         alignedStar = self.join('aligned_tilt_series.star')
         tomogramsStar = self.join('tomograms.star')
 
@@ -164,11 +168,11 @@ class WarpOTF(WarpBasePipeline):
             # Enrich with AreTomo alignment labels (rewrites the per-TS star)
             ok, _ = self.updateAlignTsDict(tsDict)
             if ok:
-                _append_global_star(alignedStar, tsDict)
+                self.appendGlobalTsRow(alignedStar, tsDict)
 
                 ok, _ = self.updateCtfRecTsDict(tsDict)
                 if ok:
-                    _append_global_star(tomogramsStar, tsDict)
+                    self.appendGlobalTsRow(tomogramsStar, tsDict)
                 else:
                     self.log(f"WARNING: Could not register CTF/reconstruction output for TS {tsName}")
             else:
@@ -176,16 +180,39 @@ class WarpOTF(WarpBasePipeline):
         else:
             self.log(f"WARNING: Could not register MCTF output for TS {tsName}")
 
-        if not self.exists('RELION_OUTPUT_NODES.star'):
-            self.writeRelionOutputNodes([
-                [alignedStar, 'TomogramGroupMetadata.star.emwrap.TiltSeriesAligned'],
-                [tomogramsStar, 'TomogramGroupMetadata.star.relion.tomo.Tomograms']                
-            ])
+        self._maybe_write_output_nodes()
+
+    def _maybe_write_output_nodes(self):
+        """Register Relion output nodes once any STAR output exists."""
+        if self.exists('RELION_OUTPUT_NODES.star'):
+            return
+
+        alignedStar = self.fixOutputPath('aligned_tilt_series.star')
+        tomogramsStar = self.fixOutputPath('tomograms.star')
+        nodes = []
+        if self.exists('aligned_tilt_series.star'):
+            nodes.append([alignedStar, 'TomogramGroupMetadata.star.emwrap.TiltSeriesAligned'])
+        if self.exists('tomograms.star'):
+            nodes.append([tomogramsStar, 'TomogramGroupMetadata.star.relion.tomo.Tomograms'])
+        if nodes:
+            self.writeRelionOutputNodes(nodes)
+
+    def _resolve_mdoc_file(self, tsDict):
+        """Return an existing mdoc path for this tilt series."""
+        tsName = tsDict['rlnTomoName']
+        for candidate in (
+            tsDict.get('rlnTomoMdocFile', ''),
+            self.join('mdocs', f'{tsName}.mdoc'),
+        ):
+            if candidate and os.path.exists(candidate):
+                return candidate
+        return tsDict.get('rlnTomoMdocFile', '')
 
     def _output_all(self):
         """ Method to generated the output only. """
         for i, row in enumerate(self.inputTs):
             tsDict = row._asdict()
+            tsDict['rlnTomoMdocFile'] = self._resolve_mdoc_file(tsDict)
             self._output_single_item(tsDict, create=not i)  # Create only the first time
 
     def _output(self, batch):
@@ -197,9 +224,10 @@ class WarpOTF(WarpBasePipeline):
         else:
             self._move_batch_files(batch)
             tsDict = dict(batch['rowDict'])
-            # Prefer the original mdoc path from the batch if not already in the row
-            if not tsDict.get('rlnTomoMdocFile'):
-                tsDict['rlnTomoMdocFile'] = batch.get('tsMdoc', '')
+            tsDict['rlnTomoMdocFile'] = self._resolve_mdoc_file({
+                **tsDict,
+                'rlnTomoMdocFile': tsDict.get('rlnTomoMdocFile') or batch.get('tsMdoc', ''),
+            })
             self._output_single_item(tsDict, create=False)
             batch.info['name'] = tsName
             self.updateBatchInfo(batch)

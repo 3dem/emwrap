@@ -12,11 +12,19 @@
                     "params": [
                         {
                             "name": "input_tomograms",
-                            "label": "Input tomograms (STAR):",
+                            "label": "Input tomograms:",
                             "pattern": "",
-                            "help": "Input tomograms with coordinates",
+                            "help": "Input tomograms.star file from a Warp reconstruction run.",
                             "paramClass": "PathParam",
-                            "pointerClass": "TomogramCoordinates"
+                            "pointerClass": "TomoCoordinates"
+                        },
+                        {
+                            "name": "input_coordinates",
+                            "label": "Input coordinates:",
+                            "pattern": "",
+                            "help": "Input coordinates from particles.star or optimisation_set.star.",
+                            "paramClass": "PathParam",
+                            "pointerClass": "TomoCoordinates"
                         },
                         {
                             "name": "ts_export_particles.diameter",

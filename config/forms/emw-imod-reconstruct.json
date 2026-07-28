@@ -1,0 +1,77 @@
+{
+    "name": "emw-imod-reconstruct",
+    "label": "IMOD - Reconstruct",
+    "help": "Apply IMOD alignment parameters from an aligned tilt-series STAR file and reconstruct tomograms using batchruntomo.\n\nFor each tilt series, a temporary working folder named after *rlnTomoName* is created. The job reads *rlnEtomoDirectiveFile* from the input STAR file (typically produced by an IMOD alignment job) and runs IMOD steps 8 (aligned stack generation) through 14 (reconstruction).\n\n*REFERENCES*:\n[[http://bio3d.colorado.edu/imod/doc/man/batchruntomo.html][batchruntomo]]\n[[http://bio3d.colorado.edu/imod/doc/directives.html][IMOD batch directives]]",
+    "sections": [
+        {
+            "label": "Input",
+            "params": [
+                {
+                    "name": "input_tiltseries",
+                    "label": "Input aligned tilt series:",
+                    "pattern": "",
+                    "help": "STAR file with aligned tilt-series metadata (e.g. aligned_tilt_series.star). Must contain rlnEtomoDirectiveFile.",
+                    "paramClass": "PathParam",
+                    "pointerClass": "TiltSeriesAligned"
+                },
+                {
+                    "label": "Reconstruction",
+                    "paramClass": "Group",
+                    "params": [
+                        {
+                            "name": "tomogram_height",
+                            "label": "Tomogram height (unbinned pixels)",
+                            "default": 1000,
+                            "paramClass": "IntParam",
+                            "help": "Tomogram thickness in unbinned pixels (IMOD comparam.tilt.tilt.THICKNESS)."
+                        },
+                        {
+                            "name": "starting_step",
+                            "label": "Starting IMOD step",
+                            "default": 8,
+                            "paramClass": "FloatParam",
+                            "help": "batchruntomo starting step. Step 8 = aligned stack generation."
+                        },
+                        {
+                            "name": "ending_step",
+                            "label": "Ending IMOD step",
+                            "default": 14,
+                            "paramClass": "FloatParam",
+                            "help": "batchruntomo ending step. Step 14 = reconstruction."
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "label": "Compute",
+            "params": [
+                {
+                    "name": "cpus",
+                    "label": "Parallel workers",
+                    "default": 1,
+                    "paramClass": "IntParam",
+                    "help": "Number of tilt series to process in parallel."
+                },
+                {
+                    "label": "Launchers",
+                    "paramClass": "Group",
+                    "params": [
+                        {
+                            "name": "register_output_only",
+                            "label": "Register output only",
+                            "paramClass": "BooleanParam",
+                            "help": "Register output STAR files without running IMOD."
+                        },
+                        {
+                            "name": "launcher_batchtomo",
+                            "label": "batchruntomo",
+                            "paramClass": "StringParam",
+                            "help": "Launcher to use for IMOD batchruntomo. Leave empty to use EMWRAP_CONFIG default."
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}
