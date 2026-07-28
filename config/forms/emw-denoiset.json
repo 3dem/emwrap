@@ -1,0 +1,75 @@
+{
+    "name": "emw-aretomo3",
+    "help": "Wrapper to run DenoisET Noise2Noise algorithm. \n\n*REFERENCES*:\n[[https://github.com/apeck12/denoiset][DenoisET]]",
+    "sections": [
+        {
+            "label": "Denoising",
+            "params": [
+                {
+                    "label": "Input",
+                    "paramClass": "Group",
+                    "params": [
+                        {
+                            "name": "input_tomograms",
+                            "label": "Input tomograms:",
+                            "pattern": "",
+                            "help": "STAR file with input tomograms",
+                            "paramClass": "PathParam",
+                            "pointerClass": "Tomograms"
+                        }
+                    ]
+                },
+                {
+                    "label": "Training and Inference",
+                    "paramClass": "Group",
+                    "params": [
+                        {
+                            "name": "train.n_training",
+                            "label": "Number of tomgrams for training",
+                            "paramClass": "IntParam",
+                            "default": 1,
+                            "help": "Number of tomograms for launching the training."
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "label": "Compute",
+            "params": [
+                {
+                    "name": "gpus",
+                    "label": "GPUs",
+                    "help": "If a single number (N), it represents the total number of GPUs (0..N-1). If multiple values, these are specific GPU IDs."
+                },
+                {
+                    "name": "cpus",
+                    "label": "CPUs",
+                    "default": "",
+                    "help": "If empty, the program will use the number of GPUs * 10 CPUs."
+                }, 
+                {
+                    "label": "Launchers",
+                    "paramClass": "Group",
+                    "help": "Launchers to use for the different programs",
+                    "collapsed": true,
+                    "params": [
+                        {
+                            "name": "register_output_only",
+                            "label": "Register output only",
+                            "paramClass": "BooleanParam",
+                            "default": false,
+                            "help": "If enabled, the job will only register the output files, but not run the program."
+                        },
+                        {
+                            "name": "launcher_denoiset",
+                            "label": "DenoisET",
+                            "paramClass": "StringParam",
+                            "help": "Launcher to use for DenoisET"
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}
