@@ -39,6 +39,11 @@ export EMWRAP_CONFIG=$(cat <<EOF
             "label": "Warp OTF Preprocessing",
             "output": "WarpOtf"
         },
+        "emw-warp-export_particles": {
+            "launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_export_particles",
+            "label": "Warp Export Particles",
+            "output": "WarpExportParticles"
+        },
         "emw-pytom-create_template": {
             "launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.pytom.pytom_create_template",
             "label": "PyTom Create Template",
@@ -58,19 +63,13 @@ export EMWRAP_CONFIG=$(cat <<EOF
             "launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.imod.imod_reconstruct",
             "label": "IMOD Reconstruct",
             "output": "ImodReconstruct"
-        },
-        "relion.reconstructtomograms": {
-            "launcher": "$SCRIPTS/relion_job_launcher.sh",
-            "label": "Relion Reconstruct Tomograms",
-            "output": "Tomograms"
-        },
+        },              
         "emw-warp-aretomo": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_aretomo"},
         "emw-warp-etomo_patches": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_etomo_patches"},
         "emw-warp-ctfrec": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_ctfrec"},
         "emw-pytom-create_template": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.pytom.pytom_create_template"},
         "emw-pytom": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.pytom.pytom_pipeline"},
         "emw-pytme": {"launcher": "$SCRIPTS/emw-pytme.sh"},
-        "emw-warp-export_particles": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_export_particles"},
         "emw-relion-tomorecons": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.relion.tomorecons"},
         "emw-relion-tomoinitial": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.relion.tomoinitial"},
         "emw-relion-tomorefine": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.relion.tomorefine"},
