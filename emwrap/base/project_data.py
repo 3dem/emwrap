@@ -24,7 +24,6 @@ from emtools.image import Image
 
 from .config import ProcessingConfig
 from .processing_pipeline import ProcessingPipeline
-from .data import getTomoPixelSize, getTomoBinning
 from .project_lock import atomic_write_json
 
 
@@ -268,8 +267,8 @@ class ProjectData(FolderManager):
                     first = global_table[0]
                     datatype = 'Tomograms'
                     n = len(global_table)
-                    ps = getTomoPixelSize(first)
-                    binning = getTomoBinning(first)
+                    ps = RelionStar.getTomoPixelSize(first)
+                    binning = RelionStar.getTomoBinning(first)
                     return {
                         'type': datatype,
                         'info': f'{n} items, {ps:0.1f} Å/px, bin: {binning:0.1f}'
@@ -610,7 +609,7 @@ class ProjectData(FolderManager):
             self._project.update()
 
         header = ["JOB_ID", "JOB_TYPE", "JOB_STATUS", "OUTPUTS", "INPUTS"]
-        format = u'{:<25}{:<25}{:<15}{:<35}{:<45}'
+        format = u'{:<25}{:<30}{:<15}{:<35}{:<45}'
         print(format.format(*header))
 
         def _data_id(data_list, index):
