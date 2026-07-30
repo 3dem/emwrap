@@ -19,7 +19,6 @@ import os
 import argparse
 import shutil
 import time
-import json
 from glob import glob
 import threading
 from datetime import datetime
@@ -128,12 +127,6 @@ class ImportTsPipeline(ProcessingPipeline):
     def prerun(self):
         previousTs = set()
         self.allTsTable = None
-
-        # Keep acquisition.json for backward compatibility with older jobs
-        acqJson = os.path.abspath('acquisition.json')
-        self.log(f"Writing acquisition file: {acqJson}")
-        with open(acqJson, 'w') as f:
-            json.dump(dict(self.acq), f)
 
         # Load already seen movies if we are continuing the job
         if os.path.exists(self.outputStar):
