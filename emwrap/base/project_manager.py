@@ -125,43 +125,11 @@ class ProjectManager(FolderManager):
     def listInputs(self):
         return self._data.listInputs()
 
-    def _annotationPath(self, jobId):
-        return self.join('.emhub', Path.rmslash(jobId), 'annotation.json')
-
     def getJobAnnotation(self, jobId):
-        """Return run name and comment stored for a workflow job."""
-        path = self._annotationPath(jobId)
-        if not os.path.isfile(path):
-            return {'runName': '', 'comment': ''}
-
-        try:
-            with open(path) as f:
-                data = json.load(f)
-        except (OSError, json.JSONDecodeError):
-            return {'runName': '', 'comment': ''}
-
-        if not isinstance(data, dict):
-            return {'runName': '', 'comment': ''}
-
-        return {
-            'runName': str(data.get('runName') or data.get('run_name') or ''),
-            'comment': str(data.get('comment') or ''),
-        }
+        return self._data.getJobAnnotation(jobId)
 
     def saveJobAnnotation(self, jobId, runName='', comment=''):
-        """Persist run name and comment for a workflow job."""
-        jobId = Path.rmslash(str(jobId))
-        self._getJob(jobId, validateExists=False)
-        path = self._annotationPath(jobId)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        payload = {
-            'runName': str(runName or ''),
-            'comment': str(comment or ''),
-        }
-        with open(path, 'w') as f:
-            json.dump(payload, f, indent=2)
-            f.write('\n')
-        return payload
+        return self._data.saveJobAnnotation(jobId, runName, comment)
 
     def update(self):
         """ Update status of the running jobs. """
