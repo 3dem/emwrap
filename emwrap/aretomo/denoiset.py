@@ -48,8 +48,8 @@ class DenoisET(ProcessingPipeline):
     # Quality-metric flags that only make sense when a metrics file is
     # supplied; stripped from the command otherwise.
     QUALITY_METRIC_KEYS = (
-        'tilt_axis', 'thickness', 'global_shift',
-        'bad_patch_low', 'bad_patch_all', 'ctf_res', 'ctf_score', 'sort_by',
+        '--tilt_axis', '--thickness', '--global_shift',
+        '--bad_patch_low', '--bad_patch_all', '--ctf_res', '--ctf_score'
     )
  
 
@@ -316,20 +316,39 @@ class DenoisET(ProcessingPipeline):
     # Training
     # ------------------------------------------------------------------
     def _get_best_training_model(self, trainingOutputDir):
-        """ Parse training_stats.csv and return the path to the epoch
-        model with the highest ch_mean (the checkerboard-artifact metric).
-        The epoch number is read from the first column of the CSV. """
+        """ Parse training_stats.csv and return the path to the model from
+        the epoch immediately BEFORE ch_mean (the checkerboard-artifact
+        metric) first reaches/exceeds --ch_threshold. Training itself
+        stops once that threshold is crossed specifically to avoid
+        checkerboard/overdenoising artifacts, so the last epoch below
+        threshold -- not the epoch with the single lowest ch_mean -- is
+        the safe model to use. The epoch number is read from the first
+        column of the CSV. """
         statsCsv = os.path.join(trainingOutputDir, 'training_stats.csv')
         self.__expect(statsCsv)
  
         fieldnames, rows = self._read_csv_rows(statsCsv)
         epochCol = fieldnames[0]
-        bestRow = max(rows, key=lambda r: float(r['ch_mean'])) 
-        epoch = bestRow[epochCol]
+        rows = sorted(rows, key=lambda r: int(r[epochCol]))
  
+        chThreshold = float(
+            self.train_form_args().subset('dn3', new_prefix="")
+                .get('ch_threshold', 0.034))
+ 
+        bestRow = rows[0]
+        for i, row in enumerate(rows):
+            if float(row['ch_mean']) >= chThreshold:
+                # Use the epoch right before the threshold was crossed; if
+                # the very first epoch already crosses it, fall back to
+                # that first epoch since there is no earlier one to use.
+                bestRow = rows[i - 1] if i > 0 else row
+                break
+            bestRow = row  # keep advancing in case threshold is never hit
+ 
+        epoch = bestRow[epochCol]
         modelPath = os.path.join(trainingOutputDir, f'epoch{epoch}.pth')
         self.__expect(modelPath)
-        return modelPath
+        return modelPath  
 
     def launch_training(self, tomTable):
         """ Symlink the training subset into self.trainingDir and run
@@ -489,7 +508,6 @@ class DenoisET(ProcessingPipeline):
     # ------------------------------------------------------------------
     # Command execution
     # ------------------------------------------------------------------
-    
     def call(self, program, kwargs, logfile=None, verbose=False, cwd=True):
         """ Run `program` with `kwargs` as arguments.
         If cwd is True, call the program from the pipeline's working
