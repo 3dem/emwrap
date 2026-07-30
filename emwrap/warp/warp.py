@@ -115,7 +115,9 @@ class WarpBasePipeline(ProcessingPipeline):
         else:
             gpus = ''
         self.gpuList = self.get_gpu_list(gpus) if gpus else []
-        self.acq = self.loadAcquisition()
+        inputStar = (self._args.get('input_tiltseries')
+                     or self._args.get('input_tomograms'))
+        self.acq = self.loadAcquisition(inputStar)
         if gainFile := self.acq.get('gain', None):
             self.gain = os.path.basename(gainFile)
         else:

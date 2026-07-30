@@ -50,7 +50,10 @@ class PyTomPipeline(ProcessingPipeline):
         self.gpuList = [self.get_gpu_list(args['gpus'], as_string=True)]
         self.launcher = args.get('launcher', '') or ProcessingPipeline.get_launcher('PYTOM')
 
-        self.acq = self.loadAcquisition()
+        self.inTomoStar = self._args['input_tomograms']
+        self.acq = self.loadAcquisition(self.inTomoStar)
+        self.outTomoStar = self.join('tomograms_coords.star')
+        self.outTomoOptimisationSet = self.join('optimisation_set.star')
 
         # FIXME: Read this from the input arguments
         self.wait = {
@@ -58,10 +61,6 @@ class PyTomPipeline(ProcessingPipeline):
             'file_change': int(args.get('wait.file_change', 30)),
             'sleep': int(args.get('wait.sleep', 30)),
         }
-
-        self.inTomoStar = self._args['input_tomograms']
-        self.outTomoStar = self.join('tomograms_coords.star')
-        self.outTomoOptimisationSet = self.join('optimisation_set.star')
 
         self._pytom_args = {
             'pytom': self.get_subargs('pytom'),
@@ -132,14 +131,6 @@ class PyTomPipeline(ProcessingPipeline):
 
         return batch
 
-    def _loadAcquisitionFromRow(self, row):
-        return Acquisition(
-            voltage=row.rlnVoltage,
-            cs=row.rlnSphericalAberration,
-            amplitude_contrast=row.rlnAmplitudeContrast,
-            pixel_size=RelionStar.getTomoPixelSize(row)
-        )
-
     def _getInputTomograms(self):
         """ Create a generator for input tomograms. """
         # Let's create a STAR file monitor to check for incoming tomograms
@@ -160,7 +151,6 @@ class PyTomPipeline(ProcessingPipeline):
             extraLabels = ['rlnCoordinatesMetadata', 'rlnParticleNumber']
             self.outTable = Table(inTable.getColumnNames() + extraLabels)
 
-        self.acq.update(self._loadAcquisitionFromRow(inTable[0]))
         self.log(f"Input star file: {Color.bold(self.inTomoStar)}")
         self.log(f"Total input tomograms: {Color.bold(n)}")
         self.log(f"Tomograms to process: {Color.green(n - counter)}")

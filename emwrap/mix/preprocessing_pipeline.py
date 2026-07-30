@@ -43,7 +43,7 @@ class PreprocessingPipeline(ProcessingPipeline):
         self.inputStar = args['in_movies']
         self.batchSize = args.get('batch_size', 32)
         self.inputTimeOut = args.get('input_timeout', 3600)
-        self.acq = self.loadAcquisition()
+        self.acq = self.loadAcquisition(self.inputStar)
         self._totalInput = self._totalOutput = 0
         self._pp_args = args
         self._pp_args['acquisition'] = Acquisition(self.acq)
