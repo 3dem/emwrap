@@ -40,7 +40,7 @@ class McPipelineTomo(ProcessingPipeline):
         self.gpuList = args['gpu'].split()
         self.outputMicDir = self.join('Micrographs')
         self.inputLen = 0
-        self.acq = self.loadAcquisition()
+        self.acq = self.loadAcquisition(args['input_tiltseries'])
         self.inputGain = self.acq.get('gain', None)
         self.outputTsDir = 'TS'
         self._DEBUG_only_output = 'DEBUG_only_output' in args
@@ -202,7 +202,6 @@ class McPipelineTomo(ProcessingPipeline):
             return
 
         inputTs = self._getInputTsTable()
-        self.acq = RelionStar.get_acquisition(inputTs)
         batchMgr = TsStarBatchManager(inputTs, self.tmpDir)
         g = self.addGenerator(batchMgr.generate)
         outputQueue = None

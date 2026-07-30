@@ -19,7 +19,7 @@ import shutil
 import json
 import argparse
 
-from emtools.metadata import Table, Column, StarFile, RelionStar
+from emtools.metadata import Table, Column, StarFile
 from emwrap.base import ProcessingPipeline
 
 from .motioncor import Motioncor
@@ -33,7 +33,7 @@ class McPipeline(ProcessingPipeline):  # FIXME: Update with latest changes
         self.outputMicDir = self.join('Micrographs')
         self.inputStar = args['input_star']
         self.batchSize = args.get('batch_size', 32)
-        self.acq = RelionStar.get_acquisition(self.inputStar)
+        self.acq = self.loadAcquisition(self.inputStar)
         self.mc = Motioncor(self.acq, extra_args=args.get('motioncor_args', {}))
 
     def _build(self):

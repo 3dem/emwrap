@@ -19,7 +19,6 @@ import os
 import argparse
 import shutil
 import time
-import json
 from glob import glob
 import threading
 from datetime import datetime
@@ -108,6 +107,10 @@ class ImportTsPipeline(ProcessingPipeline):
             rlnOpticsGroupName='optics_group1',
             rlnTomoMdocFile=mdocFile
         )
+        if gain := self.acq.get('gain'):
+            rowValues['rlnMicrographGainName'] = gain
+        if total_dose := self.acq.get('total_dose'):
+            rowValues['rlnMicrographDoseRate'] = total_dose
 
         if self.allTsTable is None:
             self.allTsTable = Table.fromDict([rowValues])
@@ -124,13 +127,6 @@ class ImportTsPipeline(ProcessingPipeline):
     def prerun(self):
         previousTs = set()
         self.allTsTable = None
-
-        # FIXME We need to dump the acquisition.json now in the project directory
-        # because some jobs needs to read from it
-        acqJson = os.path.abspath('acquisition.json')
-        self.log(f"Writing acquisition file: {acqJson}")
-        with open(acqJson, 'w') as f:
-            json.dump(dict(self.acq), f)
 
         # Load already seen movies if we are continuing the job
         if os.path.exists(self.outputStar):

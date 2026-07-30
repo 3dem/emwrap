@@ -393,10 +393,31 @@ class ProcessingPipeline(Pipeline, FolderManager):
     def log(self, msg, flush=False):
         print(f"{Pretty.now()}: >>> {msg}", flush=flush)
 
-    def loadAcquisition(self):
-        # FIXME: allow to read a default one
-        with open('acquisition.json') as f:
-            return Acquisition(json.load(f))
+    def loadAcquisition(self, inputStar=None):
+        if inputStar:
+            acq = RelionStar.getAcquisition(inputStar)
+        elif acq := self._args.get('acquisition'):
+            acq = Acquisition(acq)
+        else:
+            acqArgs = {k.replace('acq.', ''): v for k, v in self._args.items()
+                       if k.startswith('acq.')}
+            if acqArgs:
+                acq = Acquisition(acqArgs)
+            elif os.path.exists(acqJson := os.path.join(self.workingDir,
+                                                        'acquisition.json')):
+                with open(acqJson) as f:
+                    acq = Acquisition(json.load(f))
+            else:
+                raise Exception(
+                    "Could not load acquisition parameters: no input STAR file, "
+                    "acquisition args or acquisition.json found."
+                )
+
+        if gain := self._args.get('acq.gain'):
+            if gain not in (None, ''):
+                acq['gain'] = gain
+
+        return acq
 
     @classmethod
     def loadParams(cls, inputArgs):
