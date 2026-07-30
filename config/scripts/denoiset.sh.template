@@ -1,0 +1,6 @@
+#!/bin/bash
+
+source /home/dmarchn/Code/denoiset_folder/miniforge3/etc/profile.d/conda.sh   # adjust path if conda lives elsewhere
+conda activate denoiset
+
+"$@" # we need to also include the command as it varies depending the action
