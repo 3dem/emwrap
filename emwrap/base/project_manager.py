@@ -125,6 +125,12 @@ class ProjectManager(FolderManager):
     def listInputs(self):
         return self._data.listInputs()
 
+    def getJobAnnotation(self, jobId):
+        return self._data.getJobAnnotation(jobId)
+
+    def saveJobAnnotation(self, jobId, runName='', comment=''):
+        return self._data.saveJobAnnotation(jobId, runName, comment)
+
     def update(self):
         """ Update status of the running jobs. """
         with self._project_write('update project'):

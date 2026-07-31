@@ -65,7 +65,7 @@ class AreTomo3Pipeline(ProcessingPipeline):
         self.gpuList = self.get_gpu_list(gpus) if gpus else []
         self.outputTomDir = 'tomograms'
         self.outputTsDir = 'tilt_series'
-        self.acq = self.loadAcquisition()
+        self.acq = self.loadAcquisition(self._args['input_tiltseries'])
         self.inputLen = 0
         self.inputGain = self.acq.get('gain', None)
         self._allResults = {}  # tsName -> result dict, accumulated by _output

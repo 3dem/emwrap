@@ -465,6 +465,46 @@ class ProjectData(FolderManager):
     def setJobInfo(self, job_id, job_info):
         self._set_info(self._jobs, job_id, job_info)
 
+    def _annotationPath(self, jobId):
+        return self.join('.emhub', Path.rmslash(jobId), 'annotation.json')
+
+    def getJobAnnotation(self, jobId):
+        """Return run name and comment stored for a workflow job."""
+        path = self._annotationPath(jobId)
+        if not os.path.isfile(path):
+            return {'runName': '', 'comment': ''}
+
+        try:
+            with open(path) as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            return {'runName': '', 'comment': ''}
+
+        if not isinstance(data, dict):
+            return {'runName': '', 'comment': ''}
+
+        return {
+            'runName': str(data.get('runName') or data.get('run_name') or ''),
+            'comment': str(data.get('comment') or ''),
+        }
+
+    def saveJobAnnotation(self, jobId, runName='', comment=''):
+        """Persist run name and comment for a workflow job."""
+        jobId = Path.rmslash(str(jobId))
+        if not self._wf.hasJob(jobId):
+            raise Exception(f"There is not job with id: '{jobId}'")
+
+        path = self._annotationPath(jobId)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        payload = {
+            'runName': str(runName or ''),
+            'comment': str(comment or ''),
+        }
+        with open(path, 'w') as f:
+            json.dump(payload, f, indent=2)
+            f.write('\n')
+        return payload
+
     def getOutputInfo(self, output_id):
         self._debug(f"{Color.warn('OUTPUT')}: Getting info for {Color.bold(output_id)}")
         if self._isPendingOutput(output_id):

@@ -44,7 +44,7 @@ class CryoloPipeline(ProcessingPipeline):
         self.inputStar = args['in_movies']
         self.batchSize = args.get('batch_size', 32)
         self.inputTimeOut = args.get('timeout', 3600)
-        self.acq = self.loadAcquisition()
+        self.acq = self.loadAcquisition(self.inputStar)
         self._totalInput = self._totalOutput = 0
 
     def prerun(self):

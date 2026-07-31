@@ -46,7 +46,8 @@ class AreTomoPipeline(ProcessingPipeline):
         self.outputTsDir = 'TS'
         self.inputMovies = args['in_movies']
         self.mdoc_suffix = args.get('mdoc_suffix', None)
-        self.acq = self.loadAcquisition()
+        inputStar = self.inputMovies if self.inputMovies.endswith('.star') else None
+        self.acq = self.loadAcquisition(inputStar)
         self.inputGain = self.acq.get('gain', None)
 
     def aretomo(self, batch, **kwargs):
