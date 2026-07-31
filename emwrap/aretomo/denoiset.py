@@ -30,12 +30,9 @@ from emwrap.base import ProcessingPipeline
 
 
 # TODO:
-# - Add the case where we only want to do inference without training with a selected model. In this situation we need to add 
-#   a check to see if the selected model exists and skip training step
 # - When the --metrics_files exist, we need to add a double comparison in the _wait_for_training_set, as now the training set must comply
-#   with the thresholds. This happens only when the --metrics_files exists. Add a log to see how many tomograms pass the threshold   
-# - In the function _denoiset: the variable outTomogramMrc expects a particular Aretomo convention name for a denoised tomogram, that is the same name as the tomogram, so we need to extract the tomograms name in another way
-# - In the _output function we want all tomograms in the same folder not under TS_NAME/TOMOGRAM.MRC
+#   with the thresholds. This happens only when the --metrics_files exists. Add a log to see how many tomograms pass the threshold. 
+# - When --metric_files exists and is copy to the training folder we need to use the metricsFile that is in this folder to launch the training, since the other one may change in the aretomo3 streaming method
 
 class DenoisET(ProcessingPipeline):
     """ Wrapper specific to DenoisET Noise2Noise algorithm.
@@ -370,6 +367,14 @@ class DenoisET(ProcessingPipeline):
 
         os.makedirs(trainingInputDir, exist_ok=True)
         os.makedirs(trainingOutputDir, exist_ok=True)
+
+        # Keep a copy of the metrics file used for this training run inside
+        # the training folder, so the entries denoise3d accepted/discarded
+        # via its own quality-based selection can be inspected later.
+        metricsFile = self.train_form_args().subset('dn3', new_prefix="").get('metrics_file', '')
+        if metricsFile and os.path.exists(metricsFile):
+            shutil.copy2(metricsFile,
+                         self.join(self.trainingDir, os.path.basename(metricsFile)))
  
         volumeCols = ['rlnTomoReconstructedTomogram',
                       'rlnTomoReconstructedTomogramHalf1',
@@ -385,6 +390,7 @@ class DenoisET(ProcessingPipeline):
                 if not os.path.lexists(destPath):
                     os.symlink(srcPath, destPath)
  
+        # TODO: we need to use the metricsFile that is in this folder to launch the training, since the other one may change in the aretomo3 streaming method
         cmdArgs = self._build_training_args(os.path.abspath(trainingInputDir), os.path.abspath(trainingOutputDir))
         launcher = self._get_launcher()
         # denoise3d is not part of the launcher itself, so it must be
@@ -418,6 +424,7 @@ class DenoisET(ProcessingPipeline):
             batch.log(f"----- Starting new batch: {tomoName} -----")
  
             # --input: symlink the full tomogram(s) for this batch
+            baseName = None
             for row in rows:
                 srcPath = os.path.abspath(row.rlnTomoReconstructedTomogram)
                 baseName = os.path.basename(srcPath)
@@ -445,9 +452,7 @@ class DenoisET(ProcessingPipeline):
                 'denoiset_elapsed': str(t.getElapsedTime()),
             })
  
-            outTomogramMrc = batch.join(outputDir, f'{tomoName}_Vol.mrc') # TODO: this expects a particular Aretomo convention name for a tomogram, we need to extract the name of a tomogram in another way
-            print('-----Test output tomogram mrc')
-            print(outTomogramMrc)
+            outTomogramMrc = batch.join(outputDir, baseName)
             self.__expect(outTomogramMrc)
  
             result = {
@@ -487,10 +492,11 @@ class DenoisET(ProcessingPipeline):
                 result[srcKey] = dst
                 return dst
  
-            tomFolder = self._getOutputTomFolder(tomoName)
-            tomFolder.create()
-            # tomFolder = self.join(self.outputTomDir) # TODO: we want all tomograms in the same folder
-            # os.makedirs(tomFolder, exist_ok=True)
+            # All denoised tomograms are written into a single shared
+            # folder (self.outputTomDir), not one subfolder per tilt series.
+            tomFolder = self._getOutputTomFolder("")
+            if not os.path.exists(tomFolder.join("")):
+                tomFolder.create() 
 
             _copy('rlnTomoReconstructedTomogram', tomFolder)
 
@@ -577,18 +583,27 @@ class DenoisET(ProcessingPipeline):
  
         self.inputTomTable = self._wait_for_input_table()
         self.log(f"Found input tomograms: {len(self.inputTomTable)}")
+
+        # infer.model, if set and pointing to an existing file, means the
+        # user wants to run inference only with that model, skipping
+        # training entirely.
+        userModel = self.inference_form_args().get('model', '')
+        if userModel and os.path.exists(userModel):
+            self.log(f"Pre-trained model selected, skipping training: {userModel}")
+            self.modelPath = userModel
+        else:
+            if userModel:
+                self.log(f"WARNING: selected model not found ({userModel}), "
+                          f"training a new model instead.")
+
+            self.inputTomTable = self._wait_for_training_set()
  
-        self.inputTomTable = self._wait_for_training_set()
- 
-        trainingSubset = list(itertools.islice(self.inputTomTable, self.n_training))
-        self.log(f"Starting training with {len(trainingSubset)} tomograms")
-        self.launch_training(trainingSubset)
- 
-        # infer.model (if set by the user) overrides the automatically
-        # selected best model from training.
-        userModel = self.inference_form_args().get('model', '') 
-        self.modelPath = userModel if userModel else self.trainingBestModel
-        self.log(f"Using model for inference: {self.modelPath}")
+            trainingSubset = list(itertools.islice(self.inputTomTable, self.n_training))
+            self.log(f"Starting training with {len(trainingSubset)} tomograms")
+            self.launch_training(trainingSubset)
+
+            self.modelPath = self.trainingBestModel
+            self.log(f"Using model for inference: {self.modelPath}")
  
         self.mkdir(self.outputTomDir)
  
