@@ -28,6 +28,15 @@ from emtools.metadata import StarFile, Table, StarMonitor
 
 from emwrap.base import ProcessingPipeline
 
+
+# TODO:
+# - Add the case where we only want to do inference without training with a selected model. In this situation we need to add 
+#   a check to see if the selected model exists and skip training step
+# - When the --metrics_files exist, we need to add a double comparison in the _wait_for_training_set, as now the training set must comply
+#   with the thresholds. This happens only when the --metrics_files exists. Add a log to see how many tomograms pass the threshold   
+# - In the function _denoiset: the variable outTomogramMrc expects a particular Aretomo convention name for a denoised tomogram, that is the same name as the tomogram, so we need to extract the tomograms name in another way
+# - In the _output function we want all tomograms in the same folder not under TS_NAME/TOMOGRAM.MRC
+
 class DenoisET(ProcessingPipeline):
     """ Wrapper specific to DenoisET Noise2Noise algorithm.
  
@@ -108,7 +117,7 @@ class DenoisET(ProcessingPipeline):
     # ------------------------------------------------------------------
     # Command-building helpers
     # ------------------------------------------------------------------
-    # TODO: Check if False should be ommited in all cases
+    # LOOK OUT: Be carefull if False should be ommited in all cases
     @staticmethod
     def _strip_empty_values(argsDict):
         """ Drop parameters left empty/None/False in the GUI so they are
@@ -436,7 +445,7 @@ class DenoisET(ProcessingPipeline):
                 'denoiset_elapsed': str(t.getElapsedTime()),
             })
  
-            outTomogramMrc = batch.join(outputDir, f'{tomoName}_Vol.mrc') # TODO: this expect a particular Aretomo convention name for a tomogram
+            outTomogramMrc = batch.join(outputDir, f'{tomoName}_Vol.mrc') # TODO: this expects a particular Aretomo convention name for a tomogram, we need to extract the name of a tomogram in another way
             print('-----Test output tomogram mrc')
             print(outTomogramMrc)
             self.__expect(outTomogramMrc)
@@ -480,7 +489,7 @@ class DenoisET(ProcessingPipeline):
  
             tomFolder = self._getOutputTomFolder(tomoName)
             tomFolder.create()
-            # tomFolder = self.join(self.outputTomDir) # TODO: do we want all tomograms in the same folder
+            # tomFolder = self.join(self.outputTomDir) # TODO: we want all tomograms in the same folder
             # os.makedirs(tomFolder, exist_ok=True)
 
             _copy('rlnTomoReconstructedTomogram', tomFolder)
@@ -575,7 +584,6 @@ class DenoisET(ProcessingPipeline):
         self.log(f"Starting training with {len(trainingSubset)} tomograms")
         self.launch_training(trainingSubset)
  
-        # TODO: It may be a case where we would like to only do inference without training with a selected model
         # infer.model (if set by the user) overrides the automatically
         # selected best model from training.
         userModel = self.inference_form_args().get('model', '') 

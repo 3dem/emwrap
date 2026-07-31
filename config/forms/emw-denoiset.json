@@ -114,13 +114,6 @@
                             "help": "(--ch_threshold) Checkerboard metric threshold for automatically terminating training to avoid overdenoising artifacts."
                         },
                         {
-                            "name": "train.dn3.train_all_epochs",
-                            "label": "Continue past threshold (diagnostic):",
-                            "default": false,
-                            "paramClass": "BooleanParam",
-                            "help": "(--train_all_epochs) Continue training through all epochs past the checkerboard threshold, for diagnostic purposes."
-                        },
-                        {
                             "name": "train.dn3.optimizer",
                             "label": "Optimizer:",
                             "default": "",
