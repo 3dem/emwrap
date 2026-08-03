@@ -29,11 +29,6 @@ from emtools.metadata import StarFile, Table, StarMonitor
 from emwrap.base import ProcessingPipeline
 
 
-# TODO:
-# - When the --metrics_files exist, we need to add a double comparison in the _wait_for_training_set, as now the training set must comply
-#   with the thresholds. This happens only when the --metrics_files exists. Add a log to see how many tomograms pass the threshold. 
-# - When --metric_files exists and is copy to the training folder we need to use the metricsFile that is in this folder to launch the training, since the other one may change in the aretomo3 streaming method
-
 class DenoisET(ProcessingPipeline):
     """ Wrapper specific to DenoisET Noise2Noise algorithm.
  
@@ -58,6 +53,32 @@ class DenoisET(ProcessingPipeline):
         '--bad_patch_low', '--bad_patch_all', '--ctf_res', '--ctf_score'
     )
  
+    # Quality-metric column candidates in TiltSeries_Metrics.csv, and the
+    # comparison mode against the configured GUI threshold ('max' = value
+    # must be <= threshold, 'min' = value must be >= threshold). These four
+    # can be compared directly against the CSV value.
+    QUALITY_METRIC_COLUMNS = {
+        'bad_patch_low': (['Bad_Patch_Low'], 'max'),
+        'bad_patch_all': (['Bad_Patch_All'], 'max'),
+        'ctf_res':       (['CTF_Res(A)'], 'max'),
+        'ctf_score':     (['CTF_Score'], 'min'),
+    }
+
+    # Tilt_Series identifies the tilt series in the metrics CSV, but with
+    # a trailing '.mrc' (e.g. 'TS_23.mrc'), unlike rlnTomoName in the STAR
+    # table ('TS_23') -- matching needs the extension stripped.
+    TIlT_SERIES_COLUMN = 'Tilt_Series'
+
+    # tilt_axis: the CSV reports the raw tilt-axis angle, not a deviation.
+    # --tilt_axis is "maximum deviation from the median tilt axis", so the
+    # median across the metrics file must be computed first.
+    TILT_AXIS_COLUMN = 'Tilt_Axis'
+
+    # thickness / global_shift: reported in pixels in the CSV, but the GUI
+    # thresholds are in Angstrom, so they need converting using the
+    # tilt series actual pixel size -- see _get_ts_pixel_size.
+    THICKNESS_PIX_COLUMN = 'Thickness(Pix)'
+    GLOBAL_SHIFT_PIX_COLUMN = 'Global_Shift(Pix)'
 
     def __init__(self, args, output):
         ProcessingPipeline.__init__(self, args, output) # self._args is defined here
@@ -131,14 +152,20 @@ class DenoisET(ProcessingPipeline):
             cleaned[key] = value
         return cleaned
  
-    def _build_training_args(self, inputDir, outputDir):
+    def _build_training_args(self, inputDir, outputDir, metricsFile=None):
         """ Build the full denoise3d argument dict: GUI params directly
         usable on the command line (train.dn3.*) plus the internally
         managed ones (--input, --output, --train_only, --min_selected,
-        --max_selected). """
+        --max_selected). If metricsFile it is used to point denoise3d
+        at the frozen copy of the metrics file inside the training folder,
+        instead of the original path which may still be growing under
+        AreTomo3's live streaming). """
         cmdArgs = self._strip_empty_values(
             self.train_form_args().subset('dn3', new_prefix="--"))
- 
+
+        if metricsFile:
+            cmdArgs['--metrics_file'] = metricsFile
+
         # Quality-metric thresholds are meaningless (and should not be
         # passed) if no metrics file was supplied.
         if not cmdArgs.get('--metrics_file'):
@@ -187,9 +214,6 @@ class DenoisET(ProcessingPipeline):
     def _getOutputTomFolder(self, tsName):
         return FolderManager(self.join(self.outputTomDir, tsName))
 
-    def _getTrainingFolder(self):
-        return FolderManager(self.join(self.trainingDir))
-
     def write_tomo_table(self, tableName, table, starFile):
         self.log(f"Writing: {starFile}")
         with StarFile(starFile, 'w') as sfOut:
@@ -220,7 +244,6 @@ class DenoisET(ProcessingPipeline):
         })
         return tomDict
 
-
     # ------------------------------------------------------------------
     # Output registration
     # ------------------------------------------------------------------
@@ -229,16 +252,21 @@ class DenoisET(ProcessingPipeline):
             reader = csv.DictReader(f)
             return reader.fieldnames, list(reader)
     
-    def _collect_existing_final_result(self, tomoName):
-        tomFolder = self._getOutputTomFolder(tomoName)
-        result = {'rlnTomoName': tomName}
+    def _collect_existing_final_result(self, tomoRow):
+        tomoName = tomoRow.rlnTomoName
+        result = {'rlnTomoName': tomoName}
 
-        denoisedPath = tomFolder.join(f'{tomoName}_Vol.mrc')
+        sourcePath = getattr(tomoRow, 'rlnTomoReconstructedTomogram', None)
+        if not sourcePath:
+            result['error'] = f"Missing source tomogram path for {tomoName}"
+            return result
+
+        denoisedPath = self._getOutputTomFolder("").join(os.path.basename(sourcePath))
         if os.path.exists(denoisedPath):
             result['rlnTomoReconstructedTomogram'] = denoisedPath
         else:
             result['error'] = f"Missing denoised tomogram for {tomoName}"
- 
+
         return result
     
     def _register_existing_final_outputs(self):
@@ -251,7 +279,7 @@ class DenoisET(ProcessingPipeline):
 
         for row in self.inputTomTable:
             tomoName = row.rlnTomoName
-            result = self._collect_existing_final_result(tomoName)
+            result = self._collect_existing_final_result(row)
             self._allResults[tomoName] = result
 
             if 'error' in result:
@@ -287,8 +315,6 @@ class DenoisET(ProcessingPipeline):
         tomogramsTable = Table(inputCols + tomExtraCols)
 
         inputByName = {row.rlnTomoName: row for row in self.inputTomTable}
-
-        tomDims = None
 
         for tomoName, result in self._allResults.items():
             tomoRow = inputByName.get(tomoName, None)
@@ -372,9 +398,10 @@ class DenoisET(ProcessingPipeline):
         # the training folder, so the entries denoise3d accepted/discarded
         # via its own quality-based selection can be inspected later.
         metricsFile = self.train_form_args().subset('dn3', new_prefix="").get('metrics_file', '')
+        trainingMetricsFile = None
         if metricsFile and os.path.exists(metricsFile):
-            shutil.copy2(metricsFile,
-                         self.join(self.trainingDir, os.path.basename(metricsFile)))
+            trainingMetricsFile = self.join(self.trainingDir, os.path.basename(metricsFile))
+            shutil.copy2(metricsFile, trainingMetricsFile)
  
         volumeCols = ['rlnTomoReconstructedTomogram',
                       'rlnTomoReconstructedTomogramHalf1',
@@ -390,8 +417,10 @@ class DenoisET(ProcessingPipeline):
                 if not os.path.lexists(destPath):
                     os.symlink(srcPath, destPath)
  
-        # TODO: we need to use the metricsFile that is in this folder to launch the training, since the other one may change in the aretomo3 streaming method
-        cmdArgs = self._build_training_args(os.path.abspath(trainingInputDir), os.path.abspath(trainingOutputDir))
+        cmdArgs = self._build_training_args(
+            os.path.abspath(trainingInputDir),
+            os.path.abspath(trainingOutputDir),
+            metricsFile=os.path.abspath(trainingMetricsFile) if trainingMetricsFile else None)
         launcher = self._get_launcher()
         # denoise3d is not part of the launcher itself, so it must be
         # prepended to the argument list before calling it.
@@ -548,7 +577,9 @@ class DenoisET(ProcessingPipeline):
             popenKwargs = {'stderr': f, 'stdout': f}
             if cwd:
                 popenKwargs['cwd'] = self.path
-            subprocess.call(args, **popenKwargs)
+            rc = subprocess.call(args, **popenKwargs)
+            if rc != 0:
+                raise subprocess.CalledProcessError(rc, args)
     
     def __expect(self, fileName):
         if not os.path.exists(fileName):
@@ -565,13 +596,176 @@ class DenoisET(ProcessingPipeline):
             table = self._getInputTomTable()
         return table
  
+    @staticmethod
+    def _find_csv_column(fieldnames, candidates):
+        lowerFields = {f.lower(): f for f in fieldnames}
+        for cand in candidates:
+            if cand in fieldnames:
+                return cand
+            if cand.lower() in lowerFields:
+                return lowerFields[cand.lower()]
+        return None
+
+    @staticmethod
+    def _strip_metrics_name(name):
+        """ TiltSeries_Metrics.csv identifies tilt series with a trailing
+        '.mrc' (e.g. 'TS_23.mrc'); STAR tables use the bare name
+        ('TS_23'). Strip the extension so the two can be matched. """
+        return os.path.splitext(name)[0]
+
+    @staticmethod
+    def _compute_median(values):
+        values = sorted(values)
+        n = len(values)
+        if n == 0:
+            return None
+        mid = n // 2
+        return values[mid] if n % 2 else (values[mid - 1] + values[mid]) / 2
+
+    def _get_ts_pixel_size(self):
+        """ Effective tilt series pixel size in Angstrom: the tilt series
+        pixel size is read from the input tomograms.star. It should be 
+        the same as the per-tomogram pixel size reported in TiltSeries_Metrics.csv, 
+        since that CSV and thresholds does not account for tomogram binning.
+        Assumes a uniform pixel size/binning across the dataset (read from the first row). """
+        if not self.inputTomTable or len(self.inputTomTable) == 0:
+            return None
+        row = next(iter(self.inputTomTable))
+        try:
+            tsPixelSize = float(row.rlnTomoTiltSeriesPixelSize)
+        except (AttributeError, TypeError, ValueError):
+            return None
+        return tsPixelSize
+
+    def _passes_quality_thresholds(self, metricsRow, fieldnames, thresholdArgs,
+                                    medianTiltAxis, pixelSize):
+        # -- tilt_axis: maximum deviation from the median tilt axis (deg) --
+        thresholdValue = thresholdArgs.get('tilt_axis', None)
+        if thresholdValue not in (None, '') and medianTiltAxis is not None:
+            col = self._find_csv_column(fieldnames, [self.TILT_AXIS_COLUMN])
+            if col is not None:
+                try:
+                    deviation = abs(float(metricsRow[col]) - medianTiltAxis)
+                    if deviation > float(thresholdValue):
+                        return False
+                except (TypeError, ValueError):
+                    pass
+
+        # -- thickness / global_shift: reported in pixels, GUI threshold
+        # is in Angstrom, so convert using the tomogram's actual pixel size
+        for guiKey, csvCol, mode in (
+            ('thickness', self.THICKNESS_PIX_COLUMN, 'min'),
+            ('global_shift', self.GLOBAL_SHIFT_PIX_COLUMN, 'max'),
+        ):
+            thresholdValue = thresholdArgs.get(guiKey, None)
+            if thresholdValue in (None, '') or pixelSize is None:
+                continue
+            col = self._find_csv_column(fieldnames, [csvCol])
+            if col is None:
+                continue
+            try:
+                valueA = float(metricsRow[col]) * pixelSize
+                thresholdValue = float(thresholdValue)
+            except (TypeError, ValueError):
+                continue
+            if mode == 'max' and valueA > thresholdValue:
+                return False
+            if mode == 'min' and valueA < thresholdValue:
+                return False
+
+        # -- remaining metrics: direct comparison, no conversion needed --
+        for guiKey, (candidates, mode) in self.QUALITY_METRIC_COLUMNS.items():
+            thresholdValue = thresholdArgs.get(guiKey, None)
+            if thresholdValue in (None, ''):
+                continue  # no threshold configured for this metric
+
+            col = self._find_csv_column(fieldnames, candidates)
+            if col is None:
+                continue  # column not found, can't verify, don't block on it
+
+            try:
+                metricValue = float(metricsRow[col])
+                thresholdValue = float(thresholdValue)
+            except (TypeError, ValueError):
+                continue
+
+            if mode == 'max' and metricValue > thresholdValue:
+                return False
+            if mode == 'min' and metricValue < thresholdValue:
+                return False
+
+        return True
+
+    def _get_qualifying_tomograms(self, metricsFile):
+        """ Return the list of currently-known input tomogram rows that
+        have a matching entry in metricsFile and pass the configured
+        quality thresholds. """
+        if not os.path.exists(metricsFile):
+            self.log(f"WARNING: metrics file not found, skipping quality "
+                      f"filtering: {metricsFile}")
+            return list(self.inputTomTable)
+
+        fieldnames, rows = self._read_csv_rows(metricsFile)
+        nameCol = self._find_csv_column(fieldnames, [self.TIlT_SERIES_COLUMN])
+        if nameCol is None:
+            self.log("WARNING: could not identify the tilt-series name "
+                      "column in the metrics file, skipping quality "
+                      "filtering.")
+            return list(self.inputTomTable)
+
+        metricsByName = {self._strip_metrics_name(row[nameCol]): row for row in rows}
+        thresholdArgs = self.train_form_args().subset('dn3', new_prefix="")
+
+        tiltAxisCol = self._find_csv_column(fieldnames, [self.TILT_AXIS_COLUMN])
+        medianTiltAxis = None
+        if tiltAxisCol is not None:
+            try:
+                medianTiltAxis = self._compute_median(
+                    [float(r[tiltAxisCol]) for r in rows])
+            except (TypeError, ValueError):
+                medianTiltAxis = None
+
+        pixelSize = self._get_ts_pixel_size()
+        if pixelSize is None:
+            self.log("WARNING: could not determine tilt series pixel size "
+                      "from the input STAR file (rlnTomoTiltSeriesPixelSize) "
+                      "thickness/global_shift quality checks will be skipped.")
+
+        qualifying = []
+        for row in self.inputTomTable:
+            metricsRow = metricsByName.get(row.rlnTomoName)
+            if metricsRow is None:
+                continue  # no metrics entry yet for this tomogram
+            if self._passes_quality_thresholds(metricsRow, fieldnames, thresholdArgs,
+                                                medianTiltAxis, pixelSize):
+                qualifying.append(row)
+
+        return qualifying
+
     def _wait_for_training_set(self):
-        while self.inputLen < self.n_training:
-            self.log(f"Waiting for enough tomograms "
-                      f"({self.inputLen}/{self.n_training})")
+        """ Wait until enough tomograms are available for training, and
+        return the actual list of rows to train on. """
+        metricsFile = self.train_form_args().subset('dn3', new_prefix="").get('metrics_file', '')
+
+        while True:
+            if self.inputLen < self.n_training:
+                self.log(f"Waiting for enough tomograms "
+                          f"({self.inputLen}/{self.n_training})")
+            elif metricsFile:
+                # A metrics file was supplied: the training set must also
+                # comply with the configured quality thresholds, not just
+                # meet the raw tomogram count.
+                qualifyingRows = self._get_qualifying_tomograms(metricsFile)
+                self.log(f"Quality metrics: {len(qualifyingRows)}/{self.inputLen} "
+                          f"tomograms currently pass the configured "
+                          f"thresholds (need {self.n_training}).")
+                if len(qualifyingRows) >= self.n_training:
+                    return qualifyingRows[:self.n_training]
+            else:
+                return list(itertools.islice(self.inputTomTable, self.n_training))
+
             time.sleep(30)
             self.inputTomTable = self._getInputTomTable()
-        return self.inputTomTable
     
     def prerun(self):
         self.inputToms = self._args['input_tomograms']
@@ -596,9 +790,8 @@ class DenoisET(ProcessingPipeline):
                 self.log(f"WARNING: selected model not found ({userModel}), "
                           f"training a new model instead.")
 
-            self.inputTomTable = self._wait_for_training_set()
- 
-            trainingSubset = list(itertools.islice(self.inputTomTable, self.n_training))
+            trainingSubset = self._wait_for_training_set()
+
             self.log(f"Starting training with {len(trainingSubset)} tomograms")
             self.launch_training(trainingSubset)
 
@@ -613,7 +806,6 @@ class DenoisET(ProcessingPipeline):
                                  itemFileNameFunc=self._filename)
         g = self.addGenerator(batchMgr.generate)
         self.addGpuProcessors(g, self.get_denoiset_proc, self._output)
-
 
 
 if __name__ == '__main__':
