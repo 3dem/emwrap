@@ -1,0 +1,5 @@
+#!/bin/bash
+
+module load -s conda3/202402 && conda activate /hpcf/authorized_apps/cryo_apps/miss-alignment
+
+ miss-alignment "$@"

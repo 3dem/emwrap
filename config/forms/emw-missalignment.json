@@ -1,0 +1,89 @@
+{
+    "name": "emw-missalignment",
+    "label": "MissAlignment",
+    "help": "Wrapper to run miss-alignment for tilt-series alignment improvement. \n\n*REFERENCES*:\n[[https://github.com/warpem/miss-alignment/tree/main][miss-alignment]]",
+    "sections": [
+        {
+            "label": "Import",
+            "params": [
+                {
+                    "name": "input_tiltseries",
+                    "label": "Input tilt series:",
+                    "pattern": "",
+                    "help": "STAR file with input tilt-series",
+                    "paramClass": "PathParam",
+                    "pointerClass": "TiltSeriesAligned"
+                }
+            ]
+        },
+        {
+            "label": "Miss-alignment",
+            "params": [
+                {
+                    "name": "ts_aretomo.angpix",
+                    "label": "Output pixel size (A/pix)",
+                    "paramClass": "FloatParam",
+                    "help": "Rescale tilt images to this pixel size; normally 10–15 A for cryo data; leave out to keep the original pixel size."
+                },
+                {
+                    "name": "ts_aretomo.alignz",
+                    "label": "Align Z (A)",
+                    "default": 1800,
+                    "paramClass": "FloatParam",
+                    "help": "REQUIRED Value for AreTomo's AlignZ parameter in Angstroms (will be auto-converted to binned pixels), i.e. the thickness of the reconstructed tomogram used for alignments."
+                },
+                {
+                    "name": "ts_aretomo.axis_iter",
+                    "label": "Axis Iter",
+                    "default": 0,
+                    "paramClass": "FloatParam",
+                    "help": ""
+                },
+                {
+                    "name": "ts_aretomo.axis_batch",
+                    "label": "Axis Batch",
+                    "default": 0,
+                    "paramClass": "FloatParam",
+                    "help": ""
+                },
+                {
+                    "name": "ts_aretomo.patches",
+                    "label": "Patches",
+                    "default": "",
+                    "help": "Number of patches for local alignments in X, Y, separated by 'x': e.g. 6x4. By default (empty, or 0x0 or 1x1) only global alignment is performed. More patches increase the processing time."                      
+                }
+            ]
+        },
+        {
+            "label": "Compute",
+            "params": [
+                {
+                    "name": "gpus",
+                    "label": "GPUs",                    
+                    "help": "If it is a single number (N), it will represent the total number of GPUs (0..N-1). It there are multiple values, it will be the specific GPUs ID."
+                },
+                {
+                    "name": "ts_aretomo.perdevice",
+                    "label": "Processes per device",
+                    "default": 2,
+                    "paramClass": "IntParam",
+                    "help": "(--perdevice in ts_aretomo)"
+                },
+                {
+                    "label": "Launchers",
+                    "paramClass": "Group",
+                    "help": "Launchers to use for the different programs",
+                    "collapsed": true,
+                    "params": [
+                        {
+                            "name": "launcher_missalignment",
+                            "label": "Missalignment",
+                            "paramClass": "StringParam",
+                            "help": "Launcher to use for Miss-alignment"
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}
