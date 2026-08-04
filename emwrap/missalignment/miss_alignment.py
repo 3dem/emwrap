@@ -24,7 +24,7 @@ import itertools
 
 from emtools.utils import Color, FolderManager, Timer
 from emtools.jobs import BatchManager, Args
-from emtools.metadata import StarFile, Table, StarMonitor
+from emtools.metadata import StarFile, Table, StarMonitor, RelionStar
 
 from emwrap.base import ProcessingPipeline
 
@@ -40,12 +40,13 @@ class MissAlignment(ProcessingPipeline):
         gpus = self._args.get('gpus', '')
         self.gpuList = self.get_gpu_list(str(gpus).strip()) if gpus else []
     
-        self.outputTomDir = 'tomograms'
+        self.outputTsDir = 'tilt_series'
         self.trainingDir = 'training'
+        self.imodAlignmentsDir = 'imod_alignments'
 
         self.inputLen = 0
         self.inputTs = None
-        self.inputTsTable = None      # set in prerun via _getInputTSTable
+        self.inputTsTable = None      # set in prerun via _getInputTsTable
         self.n_training = 0            # set in prerun
 
         self.trainingBestModel = None  # best epoch*.pth found after training
@@ -165,7 +166,7 @@ class MissAlignment(ProcessingPipeline):
     #             return t
     #     return None
 
-    def _getInputTSTable(self):
+    def _getInputTsTable(self):
         """ Read input star file and return the 'global' table. """
         inputStar = self._args['input_tiltseries']
         if os.path.exists(inputStar):
@@ -544,33 +545,19 @@ class MissAlignment(ProcessingPipeline):
 
     def _regenerate_imod_files_for_tiltseries(self, ts_name, ts_star_path, pixel_size, output_root):
         """Generate IMOD .xf and .tlt files from a RELION 5 tilt-series STAR.
-
         Parameters
         ----------
         ts_name : str
             Tilt-series name from rlnTomoName.
-
         ts_star_path : str
             Path from rlnTomoTiltSeriesStarFile.
-
         pixel_size : float
             Pixel size, in Angstrom/pixel, used for the alignment shifts.
-
         output_root : str
             Root alignment directory passed later to
             ``WarpTools ts_import_alignments --alignments``.
         """
         ts_star_path = os.path.abspath(ts_star_path)
-
-        if not os.path.isfile(ts_star_path):
-            raise FileNotFoundError(
-                f"Tilt-series STAR file does not exist: {ts_star_path}"
-            )
-
-        if pixel_size <= 0:
-            raise ValueError(
-                f"Invalid alignment pixel size for {ts_name}: {pixel_size}"
-            )
 
         imod_dir = os.path.join(output_root, f'{ts_name}_Imod')
         os.makedirs(imod_dir, exist_ok=True)
@@ -580,50 +567,29 @@ class MissAlignment(ProcessingPipeline):
 
         with StarFile(ts_star_path) as star_file:
             table_names = star_file.getTableNames()
-
-            # RELION 5 convention for an individual tilt-series STAR file.
-            if 'tilt_series' not in table_names:
-                raise ValueError(
-                    f"STAR file {ts_star_path} does not contain a "
-                    f"'tilt_series' data block. Available blocks: "
-                    f"{', '.join(table_names)}"
-                )
-
-            tilt_table = star_file.getTable('tilt_series')
+            tilt_table = star_file.getTable(ts_name)
 
         if not len(tilt_table):
-            raise ValueError(
-                f"Tilt-series STAR table is empty: {ts_star_path}"
-            )
+            raise ValueError(f"Tilt-series STAR table is empty: {ts_star_path}")
 
         xf_rows = []
         tilt_angles = []
 
         for index, tilt_row in enumerate(tilt_table):
-            try:
-                xf_row = RelionStar.alignment_to_xf(
-                    tilt_row,
-                    pixel_size
-                )
-                tilt_angle = float(tilt_row.rlnTomoYTilt)
-            except (AttributeError, TypeError, ValueError) as error:
-                raise ValueError(
-                    f"Cannot convert row {index + 1} of tilt series "
-                    f"{ts_name}: {error}"
-                ) from error
-
+            xf_row = RelionStar.alignment_to_xf(tilt_row, pixel_size)
+            tilt_angle = float(tilt_row.rlnTomoYTilt)
             xf_rows.append(xf_row)
             tilt_angles.append(tilt_angle)
 
         with open(xf_path, 'w', encoding='utf-8') as xf_file:
             for a11, a12, a21, a22, dx, dy in xf_rows:
                 xf_file.write(
-                    f'{a11: .10f} '
-                    f'{a12: .10f} '
-                    f'{a21: .10f} '
-                    f'{a22: .10f} '
-                    f'{dx: .10f} '
-                    f'{dy: .10f}\n'
+                    f'{a11: .3f} '
+                    f'{a12: .3f} '
+                    f'{a21: .3f} '
+                    f'{a22: .3f} '
+                    f'{dx: .2f} '
+                    f'{dy: .2f}\n'
                 )
 
         with open(tlt_path, 'w', encoding='utf-8') as tlt_file:
@@ -644,11 +610,9 @@ class MissAlignment(ProcessingPipeline):
 
             WarpTools ts_import_alignments --alignments <directory>
         """
-        self.imodAlignmentsDir = os.path.join(
-            self.tmpDir,
-            'imod_alignments'
-        )
-        os.makedirs(self.imodAlignmentsDir, exist_ok=True)
+        
+        imodAlignmentsDir = self.join(self.imodAlignmentsDir)
+        os.makedirs(imodAlignmentsDir, exist_ok=True)
 
         self.log(
             "Regenerating IMOD .xf and .tlt files for all tilt series."
@@ -671,7 +635,7 @@ class MissAlignment(ProcessingPipeline):
                 ts_name=ts_name,
                 ts_star_path=ts_path,
                 pixel_size=pixel_size,
-                output_root=self.imodAlignmentsDir,
+                output_root=imodAlignmentsDir,
             )
     
     
@@ -687,7 +651,7 @@ class MissAlignment(ProcessingPipeline):
         #     return
  
         self.mkdir(self.outputTsDir)
-        self.mkdir(self.outputTomDir)
+        # self.mkdir(self.outputTomDir)
         
         # batchMgr = TsStarBatchManager(self.inputTsTable, self.tmpDir)
         # g = self.addGenerator(batchMgr.generate)
