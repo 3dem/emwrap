@@ -93,6 +93,7 @@ class DenoisET(ProcessingPipeline):
 
         self.trainingBestModel = None  # best epoch*.pth found after training
         self.modelPath = None          # model actually used for inference
+        self.metricsFile = None        # metrics file actually used for training
 
         self._allResults = {}  # tsName -> result dict, accumulated by _output
         self.registerOnly = self._register_output_only() # DEBUG flag
@@ -627,22 +628,27 @@ class DenoisET(ProcessingPipeline):
 
         return True
 
-    def _get_qualifying_tomograms(self, metricsFile):
+    def _get_qualifying_tomograms(self, tomograms):
         """ Return the list of currently-known input tomogram rows that
         have a matching entry in metricsFile and pass the configured
-        quality thresholds. """
-        if not os.path.exists(metricsFile):
-            self.log(f"WARNING: metrics file not found, skipping quality "
-                      f"filtering: {metricsFile}")
-            return list(self.inputTomTable)
+        quality thresholds. 
+        This method assumes that metricsFiles was passed and exists.
 
-        fieldnames, rows = self._read_csv_rows(metricsFile)
+        Args:
+            tomograms: list of tomogram rows to filter
+
+        Returns:
+            list of qualifying tomogram rows, or the original list if there is any error.
+        """
+        
+        fieldnames, rows = self._read_csv_rows(self.metricsFile)
         nameCol = self._find_csv_column(fieldnames, [self.TIlT_SERIES_COLUMN])
+
         if nameCol is None:
             self.log("WARNING: could not identify the tilt-series name "
                       "column in the metrics file, skipping quality "
                       "filtering.")
-            return list(self.inputTomTable)
+            return tomograms
 
         metricsByName = {self._strip_metrics_name(row[nameCol]): row for row in rows}
         thresholdArgs = self._args.subset('train.dn3', new_prefix="")
@@ -663,7 +669,7 @@ class DenoisET(ProcessingPipeline):
                       "thickness/global_shift quality checks will be skipped.")
 
         qualifying = []
-        for row in self.inputTomTable:
+        for row in tomograms:
             metricsRow = metricsByName.get(row.rlnTomoName)
             if metricsRow is None:
                 continue  # no metrics entry yet for this tomogram
@@ -676,27 +682,30 @@ class DenoisET(ProcessingPipeline):
     def _wait_for_training_set(self):
         """ Wait until enough tomograms are available for training, and
         return the actual list of rows to train on. """
-        metricsFile = self._args.get('train.dn3.metrics_file', '')
 
-        while True:
-            if self.inputLen < self.n_training:
-                self.log(f"Waiting for enough tomograms "
-                          f"({self.inputLen}/{self.n_training})")
-            elif metricsFile:
+        def _get_training_rows():
+            rows = [row for row in self._getInputTomTable()]
+            n = len(rows)
+
+            if self.metricsFile:
                 # A metrics file was supplied: the training set must also
                 # comply with the configured quality thresholds, not just
-                # meet the raw tomogram count.
-                qualifyingRows = self._get_qualifying_tomograms(metricsFile)
-                self.log(f"Quality metrics: {len(qualifyingRows)}/{self.inputLen} "
+                # meet the raw tomogram count.                
+                rows = self._get_qualifying_tomograms(rows)
+                self.log(f"Quality metrics: {len(rows)}/{n} "
                           f"tomograms currently pass the configured "
-                          f"thresholds (need {self.n_training}).")
-                if len(qualifyingRows) >= self.n_training:
-                    return qualifyingRows[:self.n_training]
-            else:
-                return list(itertools.islice(self.inputTomTable, self.n_training))
+                          f"thresholds (need {self.n_training}).")  
 
+            return rows[:self.n_training]
+
+        rows = _get_training_rows()
+
+        while len(rows) < self.n_training:            
+            self.log(f"Waiting for enough tomograms ({len(rows)}/{self.n_training})")            
             time.sleep(30)
-            self.inputTomTable = self._getInputTomTable()
+            rows = _get_training_rows()
+
+        return rows
     
     def prerun(self):
         self.inputToms = self._args['input_tomograms']
@@ -708,6 +717,10 @@ class DenoisET(ProcessingPipeline):
  
         self.inputTomTable = self._wait_for_input_table()
         self.log(f"Found input tomograms: {len(self.inputTomTable)}")
+
+        self.metricsFile = self._args.get('train.dn3.metrics_file', '')
+        if not os.path.exists(self.metricsFile):
+            raise Exception(f"Metrics file not found: {self.metricsFile}")
 
         # infer.dn3.model, if set and pointing to an existing file, means the
         # user wants to run inference only with that model, skipping
