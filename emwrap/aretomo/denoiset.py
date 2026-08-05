@@ -670,12 +670,10 @@ class DenoisET(ProcessingPipeline):
 
         qualifying = []
         for row in tomograms:
-            metricsRow = metricsByName.get(row.rlnTomoName)
-            if metricsRow is None:
-                continue  # no metrics entry yet for this tomogram
-            if self._passes_quality_thresholds(metricsRow, fieldnames, thresholdArgs,
+            if metricsRow := metricsByName.get(row.rlnTomoName):
+                if self._passes_quality_thresholds(metricsRow, fieldnames, thresholdArgs,
                                                 medianTiltAxis, pixelSize):
-                qualifying.append(row)
+                    qualifying.append(row)
 
         return qualifying
 
