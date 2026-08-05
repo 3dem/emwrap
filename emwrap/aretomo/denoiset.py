@@ -709,25 +709,25 @@ class DenoisET(ProcessingPipeline):
         self.inputTomTable = self._wait_for_input_table()
         self.log(f"Found input tomograms: {len(self.inputTomTable)}")
 
-        # infer.model, if set and pointing to an existing file, means the
+        # infer.dn3.model, if set and pointing to an existing file, means the
         # user wants to run inference only with that model, skipping
         # training entirely.
-        userModel = self._args.get('infer.model', '')
-        if userModel and os.path.exists(userModel):
+        if userModel := self._args.get('infer.dn3.model', ''):
+            if not os.path.exists(userModel):
+                raise Exception(f"Selected model not found: {userModel}")
+
             self.log(f"Pre-trained model selected, skipping training: {userModel}")
             self.modelPath = userModel
+        
         else:
-            if userModel:
-                self.log(f"WARNING: selected model not found ({userModel}), "
-                          f"training a new model instead.")
-
             trainingSubset = self._wait_for_training_set()
 
             self.log(f"Starting training with {len(trainingSubset)} tomograms")
             self.launch_training(trainingSubset)
 
             self.modelPath = self.trainingBestModel
-            self.log(f"Using model for inference: {self.modelPath}")
+            
+        self.log(f"Using model for inference: {self.modelPath}")
  
         self.mkdir(self.outputTomDir)
  
