@@ -27,6 +27,7 @@ from emtools.jobs import BatchManager, Args
 from emtools.metadata import StarFile, Table, StarMonitor, RelionStar
 
 from emwrap.base import ProcessingPipeline
+from emwrap.warp impport WarpBasePipeline
 
 
 class MissAlignment(ProcessingPipeline):
@@ -44,6 +45,8 @@ class MissAlignment(ProcessingPipeline):
         self.trainingDir = 'training'
         self.imodAlignmentsDir = 'imod_alignments'
 
+        self.pixelSize = None
+
         self.inputLen = 0
         self.inputTs = None
         self.inputTsTable = None      # set in prerun via _getInputTsTable
@@ -55,6 +58,8 @@ class MissAlignment(ProcessingPipeline):
         self._allResults = {}  # tsName -> result dict, accumulated by _output
         self.registerOnly = self._register_output_only() # DEBUG flag
         self.launcher_missalignment = self._args.get('launcher_missalignment', None)
+
+        self.acq = self.loadAcquisition(self._args.get('input_tiltseries', None))
 
     
     # ------------------------------------------------------------------
@@ -541,8 +546,193 @@ class MissAlignment(ProcessingPipeline):
 
             time.sleep(30)
             self.inputTomTable = self._getInputTomTable()
-    
 
+    def _initialize_warp_paths(self):
+        """Initialize the Warp project paths used by MissAlignment."""
+        self.warpTomostarDir = 'warp_tomostar'
+        self.warpTiltSeriesDir = 'warp_tiltseries'
+        self.warpSettings = os.path.join(
+            self.warpTiltSeriesDir,
+            'warp_tiltseries.settings',
+        )
+
+        self.frameSeries = 'warp_frameseries'
+        self.frameSeriesSettings = f'{self.frameSeries}.settings'
+        self.mdocsDir = 'mdocs'
+
+        self.mkdir(self.warpTomostarDir)
+        self.mkdir(self.warpTiltSeriesDir)
+        self.mkdir(self.frameSeries)
+        self.mkdir(self.mdocsDir)
+
+    
+    def _build_ts_import_argv(self):
+        """Build WarpTools ts_import arguments."""
+
+        frameseries_settings = os.path.abspath(
+            self.frameSeries
+        )
+        mdocs_dir = os.path.abspath(
+            self.mdocsDir
+        )
+        output_dir = os.path.abspath(
+            self.warpTomostarDir
+        )
+
+        argv = [
+            'WarpTools',
+            'ts_import',
+            '--frameseries',
+            frameseries_settings,
+            '--tilt_exposure',
+            str(self.acq['total_dose']),
+            '--output',
+            output_dir,
+            '--mdocs',
+            mdocs_dir,
+        ]
+
+        # Recommended by the MissAlignment guide. Warp uses image intensity
+        # to determine the tilt offset.
+        argv.append('--auto_zero')
+
+        return argv
+    
+    def _importInputs(self, inputRunFolder, keys=None):
+        """ Inspect the input run folder and copy or link input folder/files
+        if necessary. If gain is present in the acquisition, it will be linked.
+
+        Args:
+            inputRunFolder: the input run folder
+            keys: input keys to import, if None, all inputs will be imported
+        """
+        print(f"{self.name}: Import inputs ", self.gain)
+        if keys is None:
+            keys = [k for k in self.INPUTS if k != self.M]  # all keys except m
+
+        if isinstance(inputRunFolder, FolderManager):
+            ifm = inputRunFolder
+        else:
+            ifm = FolderManager(inputRunFolder)
+
+        inputs = [ifm.join(self.INPUTS[k]) for k in keys]
+        if m := [fn for fn in inputs if not os.path.exists(fn)]:
+            raise Exception("Missing expected paths: " + str(m))
+
+        def _copyFolder(inputFolder):
+            baseFolder = os.path.basename(inputFolder)
+            inputFm = FolderManager(inputFolder)
+            outputFm = FolderManager(self.join(baseFolder))
+            outputFm.create()
+            for fn in inputFm.listdir():
+                inputPath = inputFm.join(fn)
+                if os.path.isdir(inputPath):
+                    if fn.endswith('logs'):
+                        outputFm.mkdir('logs')  # Don't copy logs
+                    else:
+                        outputFm.link(inputPath)
+                else:
+                    outputFm.copy(inputPath)
+    
+    def _run_ts_import(self):
+    """Generate Warp .tomostar files from frame-series and MDOC data."""
+        self._importInputs(inputFolder, keys=['fs', 'fss', 'frames', 'mdocs'])
+        
+        argv = self._build_ts_import_argv()    
+        launcher = self._get_launcher()
+
+        self.log(
+            "WarpTools ts_import command: "
+            f"{launcher} {shlex.join(argv)}"
+        )
+
+        self.call(
+            launcher,
+            argv,
+            logfile=self.join('warp_ts_import.log'),
+        )
+
+
+    def _build_create_settings_argv(self):
+        """Build WarpTools create_settings arguments."""
+
+        return [
+            'WarpTools',
+            'create_settings',
+            '--folder_data',
+            os.path.abspath(self.warpTomostarDir),
+            '--extension',
+            '*.tomostar',
+            '--folder_processing',
+            os.path.abspath(self.warpTiltSeriesDir),
+            '--output',
+            os.path.abspath(self.warpTiltSeriesSettings),
+            '--angpix',
+            f'{self.pixelSize:.6f}',
+            '--exposure',
+            str(self.acq['total_dose']),
+        ]
+
+    def _create_warp_settings(self):
+        """Create warp_tiltseries.settings."""
+        argv = self._build_create_settings_argv()
+        launcher = self._get_launcher()
+
+        self.log(
+            "WarpTools create_settings command: "
+            f"{launcher} {shlex.join(argv)}"
+        )
+
+        self.call(
+            launcher,
+            argv,
+            logfile=self.join('warp_create_settings.log'),
+        )
+
+        if not os.path.isfile(self.warpTiltSeriesSettings):
+            raise RuntimeError(
+                "WarpTools create_settings did not create the expected "
+                f"settings file: {self.warpTiltSeriesSettings}"
+            )
+
+    def _build_ts_import_alignments_argv(self):
+        """Build WarpTools ts_import_alignments arguments."""
+
+        settings_path = os.path.abspath(
+            self.warpTiltSeriesSettings
+        )
+
+        alignments_path = os.path.abspath(
+            self.imodAlignmentsDir
+        )
+
+        return [
+            'WarpTools',
+            'ts_import_alignments',
+            '--settings',
+            settings_path,
+            '--alignments',
+            alignments_path,
+            '--alignment_angpix',
+            f'{self.pixelSize:.3f}',
+        ]
+    
+    def _import_initial_alignments(self):
+        """Import the regenerated IMOD alignments into the Warp project."""
+        argv = self._build_ts_import_alignments_argv()
+        launcher = self._get_launcher()
+
+        self.log(
+            "WarpTools ts_import_alignments command: "
+            f"{launcher} {shlex.join(argv)}"
+        )
+
+        self.call(
+            launcher,
+            argv,
+            logfile=self.join('warp_import_alignments.log'),
+        )
+    
     def _regenerate_imod_files_for_tiltseries(self, ts_name, ts_star_path, pixel_size, output_root):
         """Generate IMOD .xf and .tlt files from a RELION 5 tilt-series STAR.
         Parameters
@@ -605,9 +795,7 @@ class MissAlignment(ProcessingPipeline):
     
     def _regenerate_imod_files(self):
         """Generate IMOD .xf and .tlt files for every input tilt series.
-
         The resulting root directory can be passed directly to:
-
             WarpTools ts_import_alignments --alignments <directory>
         """
         
@@ -625,6 +813,9 @@ class MissAlignment(ProcessingPipeline):
             # This must be the same pixel size used when the IMOD shifts were
             # converted to RELION Angstrom shifts.
             pixel_size = float(row.rlnTomoTiltSeriesPixelSize)
+
+            if self.pixelSize is None:
+                self.pixelSize = pixel_size
 
             self.log(
                 f"Regenerating IMOD alignment files for "
@@ -644,13 +835,33 @@ class MissAlignment(ProcessingPipeline):
         self.inputTs =  self._args['input_tiltseries']
         print(f"Input tilt-series: {len(self.inputTsTable)}")  
 
-        self._regenerate_imod_files()
-
         # if self.registerOnly:
         #     self._register_existing_final_outputs()
         #     return
- 
-        self.mkdir(self.outputTsDir)
+        
+       # Streaming is not supported yet. Start processing after all tilt
+        # series are available.
+
+        self._initialize_warp_paths()
+
+        # Import or link the frame-series Warp project, frames and MDOCs.
+        self._prepare_warp_inputs()
+
+        # Generate one .tomostar file per tilt series.
+        self._run_ts_import()
+        self._validate_tomostar_files()
+
+        # Generate warp_tiltseries.settings.
+        self._create_warp_settings()
+
+        # Generate the .xf and .tlt alignment files from RELION metadata.
+        self._regenerate_imod_files()
+
+        # Import the external alignment into the new Warp tilt-series project.
+        self._import_initial_alignments()
+        
+        
+        # self.mkdir(self.outputTsDir)
         # self.mkdir(self.outputTomDir)
         
         # batchMgr = TsStarBatchManager(self.inputTsTable, self.tmpDir)
