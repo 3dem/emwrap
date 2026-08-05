@@ -14,861 +14,492 @@
 # *
 # **************************************************************************
 
+
 import os
-import time
 import shlex
 import shutil
-import subprocess
-import csv
-import itertools
+import stat
+from glob import glob
 
-from emtools.utils import Color, FolderManager, Timer
-from emtools.jobs import BatchManager, Args
-from emtools.metadata import StarFile, Table, StarMonitor, RelionStar
+from emtools.image import Image
+from emtools.jobs import Args, Batch
+from emtools.metadata import StarFile, Table, WarpXml
+from emtools.utils import FolderManager
 
-from emwrap.base import ProcessingPipeline
-from emwrap.warp impport WarpBasePipeline
+from emwrap.warp.warp import WarpBasePipeline
 
 
-class MissAlignment(ProcessingPipeline):
-    """ Wrapper specific to MissAlignment algorithm.
+class MissAlignment(WarpBasePipeline):
+    """Run Miss-Alignment on a Warp project produced by coarse TS alignment.
+
+    Expected job arguments
+    ----------------------
+    input_tiltseries
+        Global STAR produced by the coarse Warp/AreTomo alignment job.
+    config_file
+        Miss-Alignment training or inference YAML template.
+    mode
+        ``train`` (default) or ``infer``.
+    gpus
+        EMHub GPU selection.  When provided, it is exported as
+        ``CUDA_VISIBLE_DEVICES`` by the generated runner.
+
+    Train-only arguments
+    --------------------
+    training_devices
+        Logical CUDA device IDs passed to ``--training-devices``. Default: 0.
+    reconstruction_devices
+        Logical CUDA device IDs passed to ``--reconstruction-devices``.
+        Default: 0,0,0.
+    dataloaders_per_trainer
+        Value for ``--dataloaders-per-trainer``. Default: 5.
+
+    Infer-only arguments
+    --------------------
+    model_run_directory
+        Finished Miss-Alignment training run containing iterN/model.ckpt.
+
+    Common execution arguments
+    --------------------------
+    start_at_iteration
+        Value for ``--start-at-iteration``. Default: 0.
+    prepare_stacks
+        Value for ``--prepare-stacks`` in Angstrom/pixel. Default: 10.0.
+    omp_num_threads, mkl_num_threads
+        Thread limits exported by the runner. Both default to 1.
+    extra_miss_alignment
+        Extra command-line arguments appended verbatim to the command.
+
+    XML geometry arguments
+    ----------------------
+    xml.image_size_x, xml.image_size_y
+        Original tilt-image dimensions in pixels. If omitted, they are inferred
+        from the first movie referenced by the input STAR.
+    xml.volume_size_x, xml.volume_size_y, xml.volume_size_z
+        Tomogram dimensions in pixels. If omitted, values are read from
+        warp_tiltseries.settings.
+    xml.pixel_size
+        Original pixel size in Angstrom/pixel. If omitted, it is read from the
+        input global STAR.
     """
     
     name = 'emw-missalignment'
+    PROGRAM = 'MISS_ALIGNMENT'
 
-    def __init__(self, args, output):
-        ProcessingPipeline.__init__(self, args, output) # self._args is defined here
-        gpus = self._args.get('gpus', '')
-        self.gpuList = self.get_gpu_list(str(gpus).strip()) if gpus else []
-    
-        self.outputTsDir = 'tilt_series'
-        self.trainingDir = 'training'
-        self.imodAlignmentsDir = 'imod_alignments'
+    CONFIG_NAME = 'miss_alignment_config.yaml'
+    PREPARE_SCRIPT = 'prepare_miss_alignment.py' # TODO: what is this script for? It is not defined in the code provided.
+    RUNNER_SCRIPT = 'run_miss_alignment.sh'
+    OUTPUT_STAR = 'miss_aligned_tilt_series.star'
 
-        self.pixelSize = None
-
-        self.inputLen = 0
-        self.inputTs = None
-        self.inputTsTable = None      # set in prerun via _getInputTsTable
-        self.n_training = 0            # set in prerun
-
-        self.trainingBestModel = None  # best epoch*.pth found after training
-        self.modelPath = None          # model actually used for inference
-
-        self._allResults = {}  # tsName -> result dict, accumulated by _output
-        self.registerOnly = self._register_output_only() # DEBUG flag
-        self.launcher_missalignment = self._args.get('launcher_missalignment', None)
-
-        self.acq = self.loadAcquisition(self._args.get('input_tiltseries', None))
-
-    
-    # ------------------------------------------------------------------
-    # Configuration / column definitions
-    # ------------------------------------------------------------------
-    def _tomogram_extra_cols(self):
-        return [
-            # Tomo specific columns
-            'rlnTomoReconstructedTomogram',
-            'rlnTomoReconstructedTomogramHalf1',
-            'rlnTomoReconstructedTomogramHalf2',
-        ]
-        
-
-    # ------------------------------------------------------------------
-    # GUI form-argument helpers
-    # ------------------------------------------------------------------
     def _get_launcher(self):
-        return self.launcher_missalignment or ProcessingPipeline.get_launcher('MISSALIGNMENT')
+        """Use the launcher that activates both Miss-Alignment and WarpTools."""
+        return self.get_launcher_arg('launcher_miss_alignment', self.PROGRAM)
 
-    def train_form_args(self):
-        """ All GUI parameters under the 'train' tab (train.n_training,
-        train.dn3.*), with the 'train.' prefix stripped. """
-        subargs = self._args.subset('train', new_prefix="")        
-        return subargs
-
-    def inference_form_args(self):
-        """ All GUI parameters under the 'infer' tab (infer.model,
-        infer.dn3.*), with the 'infer.' prefix stripped. """
-        subargs = self._args.subset('infer', new_prefix="")        
-        return subargs
-    
-
-    # ------------------------------------------------------------------
-    # Command-building helpers
-    # ------------------------------------------------------------------
     @staticmethod
-    def _strip_empty_values(argsDict):
-        """ Drop parameters left empty/None/False in the GUI so they are
-        simply omitted from the command line, letting denoise3d/predict3d
-        fall back to their own internal defaults. """
-        cleaned = {}
-        for key, value in argsDict.items():
-            if value is None:
-                continue
-            if isinstance(value, str) and value.strip() == '':
-                continue
-            if isinstance(value, bool) and not value:
-                continue
-            cleaned[key] = value
-        return cleaned
- 
-    def _build_training_args(self, inputDir, outputDir, metricsFile=None):
-        """ Build the full denoise3d argument dict: GUI params directly
-        usable on the command line (train.dn3.*) plus the internally
-        managed ones (--input, --output, --train_only, --min_selected,
-        --max_selected). If metricsFile it is used to point denoise3d
-        at the frozen copy of the metrics file inside the training folder,
-        instead of the original path which may still be growing under
-        AreTomo3's live streaming). """
-        cmdArgs = self._strip_empty_values(
-            self.train_form_args().subset('dn3', new_prefix="--"))
-
-        if metricsFile:
-            cmdArgs['--metrics_file'] = metricsFile
-
-        # Quality-metric thresholds are meaningless (and should not be
-        # passed) if no metrics file was supplied.
-        if not cmdArgs.get('--metrics_file'):
-            cmdArgs.pop('--metrics_file', None)
-            for key in self.QUALITY_METRIC_KEYS:
-                cmdArgs.pop(key, None)
- 
-        cmdArgs['--input'] = inputDir
-        cmdArgs['--output'] = outputDir
-        cmdArgs['--train_only'] = "" # This flag does not expect anything
-        # train.n_training (single GUI field) drives both selection bounds:
-        # we hand denoise3d exactly the tomograms we want it to use, so
-        # min == max == n_training.
-        cmdArgs['--min_selected'] = self.n_training
-        cmdArgs['--max_selected'] = self.n_training
- 
-        return cmdArgs
- 
-    def _build_inference_args(self, inputDir, outputDir, modelPath):
-        """ Build the full predict3d argument dict: GUI params directly
-        usable on the command line (infer.dn3.*) plus the internally
-        managed ones (--input, --output, --model). """
-        cmdArgs = self._strip_empty_values(
-            self.inference_form_args().subset('dn3', new_prefix="--"))
- 
-        cmdArgs['--input'] = inputDir
-        cmdArgs['--output'] = outputDir
-        cmdArgs['--model'] = modelPath
- 
-        return cmdArgs
-    
-
-    # ------------------------------------------------------------------
-    # Input/output folder helpers
-    # ------------------------------------------------------------------
-    # def _getInputTomTable(self):
-    #     """ Read input star file and return the 'global' table. """
-    #     inputStar = self._args['input_tomograms']
-    #     if os.path.exists(inputStar):
-    #         with StarFile(inputStar) as sf:
-    #             t = sf.getTable('global')
-    #             self.inputLen = len(t)  # Let's update the inputLen property
-    #             return t
-    #     return None
-
-    def _getInputTsTable(self):
-        """ Read input star file and return the 'global' table. """
-        inputStar = self._args['input_tiltseries']
-        if os.path.exists(inputStar):
-            with StarFile(inputStar) as sf:
-                t = sf.getTable('global')
-                self.inputLen = len(t)  # Let's update the inputLen property
-                return t
-        return None
-
-    def _getOutputTomFolder(self, tsName):
-        return FolderManager(self.join(self.outputTomDir, tsName))
-
-    def write_tomo_table(self, tableName, table, starFile):
-        self.log(f"Writing: {starFile}")
-        with StarFile(starFile, 'w') as sfOut:
-            sfOut.writeTable(tableName, table, computeFormat='left', timeStamp=True)
-    
-    def _filename(self, row):
-        """ Helper to get unique name from a tomogram row """
-        return row.rlnTomoName
-
-    
-    # ------------------------------------------------------------------
-    # Relion metadata conversion helpers
-    # ------------------------------------------------------------------    
-    def _build_tomogram_row(self, tsRow, result):
-        """ Build the output tomograms.star row for a tilt series.
- 
-        NOTE: the denoised tomogram replaces 'rlnTomoReconstructedTomogram'
-        so that downstream jobs default to the denoised version. The raw
-        (non-denoised) AreTomo3 tomogram remains available from the
-        original job's output; if a workflow needs both the raw and the
-        denoised path in the same tomograms.star, add a distinct column
-        here (e.g. 'rlnTomoReconstructedTomogramDenoised') instead of
-        overwriting.
-        """
-        tomDict = tsRow._asdict()
-        tomDict.update({
-            'rlnTomoReconstructedTomogram': result.get('rlnTomoReconstructedTomogram', ''),
-        })
-        return tomDict
-
-    # ------------------------------------------------------------------
-    # Output registration
-    # ------------------------------------------------------------------
-    def _read_csv_rows(self, csvPath):
-        with open(csvPath, newline='') as f:
-            reader = csv.DictReader(f)
-            return reader.fieldnames, list(reader)
-    
-    def _collect_existing_final_result(self, tomoRow):
-        tomoName = tomoRow.rlnTomoName
-        result = {'rlnTomoName': tomoName}
-
-        sourcePath = getattr(tomoRow, 'rlnTomoReconstructedTomogram', None)
-        if not sourcePath:
-            result['error'] = f"Missing source tomogram path for {tomoName}"
-            return result
-
-        denoisedPath = self._getOutputTomFolder("").join(os.path.basename(sourcePath))
-        if os.path.exists(denoisedPath):
-            result['rlnTomoReconstructedTomogram'] = denoisedPath
-        else:
-            result['error'] = f"Missing denoised tomogram for {tomoName}"
-
+    def _positive_int(value, name):
+        try:
+            result = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f'{name} must be an integer, received: {value!r}') from exc
+        if result <= 0:
+            raise ValueError(f'{name} must be greater than zero, received: {result}')
         return result
-    
-    def _register_existing_final_outputs(self):
-        self.inputTomTable = self._getInputTomTable()
 
-        self.log('DEBUG register-only mode: rebuilding outputs from final job folders.',
-            flush=True)
+    @staticmethod
+    def _nonnegative_int(value, name):
+        try:
+            result = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f'{name} must be an integer, received: {value!r}') from exc
+        if result < 0:
+            raise ValueError(f'{name} must be zero or greater, received: {result}')
+        return result
 
-        self._allResults = {}
+    @staticmethod
+    def _positive_float(value, name):
+        try:
+            result = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f'{name} must be numeric, received: {value!r}') from exc
+        if result <= 0:
+            raise ValueError(f'{name} must be greater than zero, received: {result}')
+        return result
 
-        for row in self.inputTomTable:
-            tomoName = row.rlnTomoName
-            result = self._collect_existing_final_result(row)
-            self._allResults[tomoName] = result
+    @classmethod
+    def _device_csv(cls, value, name):
+        """Normalize a list, comma-separated string, or space-separated string."""
+        if isinstance(value, (list, tuple)):
+            values = list(value)
+        else:
+            text = str(value or '').strip().replace(',', ' ')
+            values = text.split()
+        if not values:
+            raise ValueError(f'{name} must contain at least one CUDA device ID.')
+        devices = [cls._nonnegative_int(item, name) for item in values]
+        return ','.join(str(device) for device in devices)
 
-            if 'error' in result:
-                self.log(f"DEBUG register-only: {tomoName}: {result['error']}")
-            else:
-                self.log(f"DEBUG register-only: found final outputs for {tomoName}")
+    def _mode(self):
+        mode = str(self._args.get('mode', 'train')).strip().lower()
+        if mode not in {'train', 'infer'}:
+            raise ValueError(f"mode must be 'train' or 'infer', received: {mode!r}")
+        return mode
 
-        self._registerOutputs()
+    def _ensure_project_inputs(self, input_folder):
+        """Import the Warp project once and preserve it on resumed executions."""
+        expected = [self.join(self.FS), self.join(self.FSS), self.join(self.TS),
+                    self.join(self.TSS), self.join(self.TM)]
+        if all(os.path.exists(path) for path in expected):
+            self.log('Using the existing local Warp project for resume/re-registration.')
+            return
 
-        self.info['register_only'] = True
-        self.info['denoiset_output'] = len(
-            [r for r in self._allResults.values() if 'error' not in r])
+        present = [path for path in expected if os.path.exists(path)]
+        if present:
+            raise RuntimeError(
+                'The local Warp project is only partially populated. Remove the partial '
+                f'job output or restore the missing inputs. Existing paths: {present}'
+            )
 
-    def _registerOutputs(self):
-        """Rebuild Relion-style DenoisET outputs.
-        Outputs:
-            tomograms.star
-                Global table containing denoised tomograms, only if
-                denoising was produced.
+        # Keep all relative paths used by tomostar/XML metadata valid. Frameseries is
+        # linked, settings are copied, and mutable tilt-series/tomostar metadata is copied.
+        self._importInputs(input_folder, keys=['fs', 'fss', 'ts', 'tss', 'tm'])
 
-            failed_tomograms.star
-                Global table containing tomograms that failed.
-        """
-        self.log("Registering output STAR files.")
+    def _dataset_geometry(self):
+        """Resolve image shape, volume shape, and pixel size for XML preparation."""
+        global_table = StarFile.getTableFromFile('global', self.inputTs)
+        if len(global_table) == 0:
+            raise ValueError(f'Input tilt-series STAR is empty: {self.inputTs}')
 
-        failedStarFile = self.join('failed_tomograms.star')
-        tomogramsStarFile = self.join('tomograms.star')
+        first = global_table[0]
+        pixel_size = first.rlnTomoTiltSeriesPixelSize
+        pixel_size = self._positive_float(pixel_size, 'xml.pixel_size')
 
-        inputCols = self.inputTomTable.getColumnNames()
-        tomExtraCols = [c for c in self._tomogram_extra_cols() if c not in inputCols]
-
-        failedTable = Table(inputCols)
-        tomogramsTable = Table(inputCols + tomExtraCols)
-
-        inputByName = {row.rlnTomoName: row for row in self.inputTomTable}
-
-        for tomoName, result in self._allResults.items():
-            tomoRow = inputByName.get(tomoName, None)
-            if tomoRow is None:
-                self.log(f"WARNING: Result for unknown tomogram {tomoName}, skipping.")
-                continue
-
-            if 'error' in result:
-                failedTable.addRowValues(**tomoRow._asdict())
-                continue
-
-            tomogram = result.get('rlnTomoReconstructedTomogram', None)
-            if tomogram and os.path.exists(tomogram):   
-                finalTomoRow = self._build_tomogram_row(tomoRow, result)
-                tomogramsTable.addRowValues(**finalTomoRow)
-
-        outputNodes = []
-
-        if len(failedTable) > 0:
-            self.write_tomo_table('global', failedTable, failedStarFile)
-            outputNodes.append(
-                [failedStarFile, 'TomogramGroupMetadata.star.relion.tomo.tomograms-failed'])
-
-        self.write_tomo_table('global', tomogramsTable, tomogramsStarFile)
-        outputNodes.append([tomogramsStarFile, 'TomogramGroupMetadata.star.relion.tomo.tomograms'])
-
-        self.writeRelionOutputNodes(outputNodes)    
         
-    
-    # ------------------------------------------------------------------
-    # Training
-    # ------------------------------------------------------------------
-    def launch_training(self, tomTable):
-        """ Symlink the training subset into self.trainingDir and run
-        denoise3d in --train_only mode. Populates self.trainingBestModel
-        once training has finished. """
-        self.log(f"Training set size: {len(tomTable)} tomograms")
- 
-        trainingInputDir = self.join(self.trainingDir)
-        trainingOutputDir = self.join(self.trainingDir, 'output')  
+        ts_table = StarFile.getTableFromFile(first.rlnTomoName, first.rlnTomoTiltSeriesStarFile)
+        if len(ts_table) == 0:
+            raise ValueError(f'Tilt-series metadata is empty: {first.rlnTomoTiltSeriesStarFile}')
+        
+        movie_file = ts_table[0].rlnMicrographMovieName
+        dims = Image.get_dimensions(movie_file)
+        image_x = dims[0]
+        image_y = dims[1]
+        self.log(
+            f'Inferred original image dimensions from {movie_file}: '
+            f'{image_x} x {image_y}'
+        )
 
-        os.makedirs(trainingInputDir, exist_ok=True)
-        os.makedirs(trainingOutputDir, exist_ok=True)
+        settings_dims = WarpXml(self.join(self.TSS)).getDict('Settings', 'Tomo', 'Param')
+        
+        volume_x = settings_dims['DimensionsX']
+        volume_y = settings_dims['DimensionsY']
+        volume_z = settings_dims['DimensionsZ']
 
-        # Keep a copy of the metrics file used for this training run inside
-        # the training folder, so the entries denoise3d accepted/discarded
-        # via its own quality-based selection can be inspected later.
-        metricsFile = self.train_form_args().subset('dn3', new_prefix="").get('metrics_file', '')
-        trainingMetricsFile = None
-        if metricsFile and os.path.exists(metricsFile):
-            trainingMetricsFile = self.join(self.trainingDir, os.path.basename(metricsFile))
-            shutil.copy2(metricsFile, trainingMetricsFile)
- 
-        volumeCols = ['rlnTomoReconstructedTomogram',
-                      'rlnTomoReconstructedTomogramHalf1',
-                      'rlnTomoReconstructedTomogramHalf2']
- 
-        # --input: symlink EVN/ODD/full volumes for the training subset
-        for row in tomTable:
-            tomDict = row._asdict()
-            for col in volumeCols:
-                srcPath = os.path.abspath(tomDict[col])
-                baseName = os.path.basename(srcPath)
-                destPath = self.join(self.trainingDir, baseName)
-                if not os.path.lexists(destPath):
-                    os.symlink(srcPath, destPath)
- 
-        cmdArgs = self._build_training_args(
-            os.path.abspath(trainingInputDir),
-            os.path.abspath(trainingOutputDir),
-            metricsFile=os.path.abspath(trainingMetricsFile) if trainingMetricsFile else None)
-        launcher = self._get_launcher()
-        # denoise3d is not part of the launcher itself, so it must be
-        # prepended to the argument list before calling it.
-        argv = ['denoise3d'] + Args(cmdArgs).toList()
- 
-        self.log(f"DenoisET denoise3d argv: {launcher} {' '.join(argv)}")
-        self.call(launcher, argv)
- 
-        self.trainingBestModel = self._get_best_training_model(os.path.abspath(trainingOutputDir))
- 
-        with open(self.join(self.trainingDir, 'training_done.txt'), 'w') as f:
-            f.write(f"best_model={self.trainingBestModel}\n")
- 
-        self.info['training'] = {
-            'n_training': len(tomTable),
-            'training_stats_csv': os.path.join(trainingOutputDir, 'training_stats.csv'),
-            'best_model': self.trainingBestModel,
+        geometry = {
+            'image_x': self._positive_int(image_x, 'xml.image_size_x'),
+            'image_y': self._positive_int(image_y, 'xml.image_size_y'),
+            'volume_x': self._positive_int(volume_x, 'xml.volume_size_x'),
+            'volume_y': self._positive_int(volume_y, 'xml.volume_size_y'),
+            'volume_z': self._positive_int(volume_z, 'xml.volume_size_z'),
+            'pixel_size': pixel_size,
         }
-        self.log(f"Training finished. Best model: {self.trainingBestModel}")
- 
+        self.log(
+            'Miss-Alignment XML geometry: '
+            f"image={geometry['image_x']}x{geometry['image_y']}, "
+            f"volume={geometry['volume_x']}x{geometry['volume_y']}x"
+            f"{geometry['volume_z']}, pixel_size={geometry['pixel_size']} A/px"
+        )
+        return geometry
 
-    # ------------------------------------------------------------------
-    # Batch execution (inference)
-    # ------------------------------------------------------------------
-    def get_denoiset_proc(self, gpu):
-        def _denoiset(batch):
-            rows = batch['items']
-            batch.create()
-            tomoName = self._filename(rows[0])
-            batch.log(f"----- Starting new batch: {tomoName} -----")
- 
-            # --input: symlink the full tomogram(s) for this batch
-            baseName = None
-            for row in rows:
-                srcPath = os.path.abspath(row.rlnTomoReconstructedTomogram)
-                baseName = os.path.basename(srcPath)
-                destPath = batch.join(baseName)
-                if not os.path.lexists(destPath):
-                    os.symlink(srcPath, destPath)
- 
-            # --output: predict3d writes into an 'output' subfolder
-            outputDir = 'output'
-            os.makedirs(outputDir, exist_ok=True)
- 
-            cmdArgs = self._build_inference_args(".", outputDir, self.modelPath)
- 
-            launcher = self._get_launcher()
-            # predict3d is not part of the launcher itself, so it must be
-            # prepended to the argument list before calling it.
-            argv = ['predict3d'] + Args(cmdArgs).toList()
- 
-            t = Timer()
-            batch.log(f"DenoisET predict3d argv: {launcher} {' '.join(argv)}")
-            batch.call(launcher, argv)
- 
-            batch.info.update({
-                'denoiset_input': len(rows),
-                'denoiset_elapsed': str(t.getElapsedTime()),
-            })
- 
-            outTomogramMrc = batch.join(outputDir, baseName)
-            self.__expect(outTomogramMrc)
- 
-            result = {
-                'rlnTomoName': tomoName,
-                'rlnTomoReconstructedTomogram': outTomogramMrc,
-            }
- 
-            batch['results'] = [result]
-            batch['outputs'] = [outTomogramMrc]
-            batch.info.update({'denoiset_output': 1})
- 
-            return batch
- 
-        return _denoiset
+    def _write_prepare_script(self, batch):
+        """Write a helper executed inside the Miss-Alignment Conda environment."""
+        script_path = batch.join(self.PREPARE_SCRIPT)
+        script = r'''#!/usr/bin/env python
+        import argparse
+        from pathlib import Path
+
+        import torch
+        import yaml
+        from warpylib import TiltSeries
+
+
+        def parse_args():
+            parser = argparse.ArgumentParser()
+            parser.add_argument('--data-directory', required=True)
+            parser.add_argument('--config-input', required=True)
+            parser.add_argument('--config-output', required=True)
+            parser.add_argument('--mode', choices=('train', 'infer'), required=True)
+            parser.add_argument('--model-run-directory')
+            parser.add_argument('--image-x', type=int, required=True)
+            parser.add_argument('--image-y', type=int, required=True)
+            parser.add_argument('--volume-x', type=int, required=True)
+            parser.add_argument('--volume-y', type=int, required=True)
+            parser.add_argument('--volume-z', type=int, required=True)
+            parser.add_argument('--pixel-size', type=float, required=True)
+            return parser.parse_args()
+
+
+        def main():
+            args = parse_args()
+            data_directory = Path(args.data_directory).resolve()
+            xml_files = sorted(data_directory.glob('*.xml'))
+            if not xml_files:
+                raise RuntimeError(f'No Warp tilt-series XML files found in {data_directory}')
+
+            image_physical = torch.tensor(
+                [args.image_x * args.pixel_size, args.image_y * args.pixel_size],
+                dtype=torch.float32,
+            )
+            volume_physical = torch.tensor(
+                [
+                    args.volume_x * args.pixel_size,
+                    args.volume_y * args.pixel_size,
+                    args.volume_z * args.pixel_size,
+                ],
+                dtype=torch.float32,
+            )
+
+            for xml_file in xml_files:
+                tilt_series = TiltSeries(xml_file)
+                tilt_series.image_dimensions_physical = image_physical.clone()
+                tilt_series.volume_dimensions_physical = volume_physical.clone()
+                tilt_series.save_meta(xml_file)
+
+            config_input = Path(args.config_input).resolve()
+            config_output = Path(args.config_output).resolve()
+            with config_input.open('r', encoding='utf-8') as handle:
+                config = yaml.safe_load(handle)
+            if not isinstance(config, dict):
+                raise TypeError(f'Expected a YAML mapping in {config_input}')
+
+            if args.mode == 'train':
+                config['training_directory'] = str(data_directory)
+            else:
+                if not args.model_run_directory:
+                    raise ValueError('--model-run-directory is required in inference mode')
+                config['data_directory'] = str(data_directory)
+                config['model_run_directory'] = str(Path(args.model_run_directory).resolve())
+
+            config_output.parent.mkdir(parents=True, exist_ok=True)
+            with config_output.open('w', encoding='utf-8') as handle:
+                yaml.safe_dump(config, handle, sort_keys=False)
+
+            print(f'Updated {len(xml_files)} Warp XML files.')
+            print(f'Wrote Miss-Alignment config: {config_output}')
+
+
+        if __name__ == '__main__':
+            main()
+        '''
+        with open(script_path, 'w', encoding='utf-8') as handle:
+            handle.write(script)
+        os.chmod(script_path, os.stat(script_path).st_mode | stat.S_IXUSR)
+        return script_path
+
+    # TODO: Question what is the 'prepare_miss_alignment' command for? It is not defined in the code provided.
+    def _prepare_project(self, batch, mode, geometry):
+        config_input = self._args.get('config_file', '')
+        if not config_input:
+            raise ValueError('config_file is required.')
+        config_input = os.path.abspath(str(config_input))
+        if not os.path.isfile(config_input):
+            raise FileNotFoundError(f'Miss-Alignment config file not found: {config_input}')
+
+        config_output = os.path.abspath(self.join(self.TS, self.CONFIG_NAME))
+        prepare_script = os.path.abspath(self._write_prepare_script(batch))
+
+        args = Args({
+            'python': prepare_script,
+            '--data-directory': os.path.abspath(self.join(self.TS)),
+            '--config-input': config_input,
+            '--config-output': config_output,
+            '--mode': mode,
+            '--image-x': geometry['image_x'],
+            '--image-y': geometry['image_y'],
+            '--volume-x': geometry['volume_x'],
+            '--volume-y': geometry['volume_y'],
+            '--volume-z': geometry['volume_z'],
+            '--pixel-size': geometry['pixel_size'],
+        })
+
+        if mode == 'infer':
+            model_run_directory = self._args.get('model_run_directory', '')
+            if not model_run_directory:
+                raise ValueError('model_run_directory is required in inference mode.')
+            model_run_directory = os.path.abspath(str(model_run_directory))
+            if not os.path.isdir(model_run_directory):
+                raise FileNotFoundError(
+                    f'Miss-Alignment model run directory not found: {model_run_directory}'
+                )
+            args['--model-run-directory'] = model_run_directory
+
+        self.batch_execute(
+            'prepare_miss_alignment', batch, args, launcher=self._get_launcher()
+        )
+        return config_output
+
+    def _command_tokens(self, mode, config_file):
+        start_iteration = self._nonnegative_int(
+            self._args.get('start_at_iteration', 0), 'start_at_iteration'
+        )
+        prepare_stacks = self._positive_float(
+            self._args.get('prepare_stacks', 10.0), 'prepare_stacks'
+        )
+
+        tokens = [
+            'miss-alignment', mode,
+            '--config-file', config_file,
+            '--start-at-iteration', str(start_iteration),
+            '--prepare-stacks', str(prepare_stacks),
+        ]
+
+        if mode == 'train':
+            training_devices = self._device_csv(
+                self._args.get('training_devices', '0') or '0',
+                'training_devices',
+            )
+            reconstruction_devices = self._device_csv(
+                self._args.get('reconstruction_devices', '0,0,0') or '0,0,0',
+                'reconstruction_devices',
+            )
+            dataloaders = self._positive_int(
+                self._args.get('dataloaders_per_trainer', 5),
+                'dataloaders_per_trainer',
+            )
+            tokens.extend([
+                '--training-devices', training_devices,
+                '--reconstruction-devices', reconstruction_devices,
+                '--dataloaders-per-trainer', str(dataloaders),
+            ])
+
+        extra = str(self._args.get('extra_miss_alignment', '') or '').strip()
+        if extra:
+            tokens.extend(shlex.split(extra))
+        return tokens
+
+    def _write_runner(self, batch, mode, config_file):
+        runner_path = batch.join(self.RUNNER_SCRIPT)
+        omp_threads = self._positive_int(
+            self._args.get('omp_num_threads', 1), 'omp_num_threads'
+        )
+        mkl_threads = self._positive_int(
+            self._args.get('mkl_num_threads', 1), 'mkl_num_threads'
+        )
+        tokens = self._command_tokens(mode, config_file)
+        command = ' '.join(shlex.quote(str(token)) for token in tokens)
+
+        lines = [
+            '#!/bin/bash',
+            'set -euo pipefail',
+            f'export OMP_NUM_THREADS={omp_threads}',
+            f'export MKL_NUM_THREADS={mkl_threads}',
+        ]
+        if self.gpuList:
+            if isinstance(self.gpuList, str):
+                visible = self.gpuList.strip().replace(' ', ',')
+            else:
+                visible = ','.join(str(device) for device in self.gpuList)
+            lines.append(f'export CUDA_VISIBLE_DEVICES={shlex.quote(visible)}')
+        lines.extend([
+            f'cd {shlex.quote(os.path.abspath(self.join(self.TS)))}',
+            f'exec {command}',
+            '',
+        ])
+
+        with open(runner_path, 'w', encoding='utf-8') as handle:
+            handle.write('\n'.join(lines))
+        os.chmod(runner_path, os.stat(runner_path).st_mode | stat.S_IXUSR)
+        return runner_path
+
+    def runBatch(self, batch, **kwargs):
+        self.inputTs = kwargs['inputTs']
+        self.writeInfo()
+
+        input_folder = FolderManager(os.path.abspath(os.path.dirname(self.inputTs)))
+        self._ensure_project_inputs(input_folder)
+
+        geometry = self._dataset_geometry()
+        
+        mode = self._mode()
+        print(f"Miss-Alignment mode: {mode}")
+
+        config_file = self._prepare_project(batch, mode, geometry)
+        # runner = self._write_runner(batch, mode, config_file)
+
+        # # The launcher activates the Miss-Alignment environment, then executes
+        # # this runner. The runner owns environment variables and exact CLI quoting.
+        # self.batch_execute(
+        #     'miss_alignment',
+        #     batch,
+        #     Args({'bash': os.path.abspath(runner)}),
+        #     launcher=self._get_launcher(),
+        # )
+        # self.updateBatchInfo(batch)
+
+    def _copy_passthrough_metadata(self, batch):
+        """Create a local STAR handle while preserving initial Relion matrices."""
+        batch.mkdir('tilt_series')
+        metadata_dir = FolderManager(batch.join('tilt_series'))
+        input_table = StarFile.getTableFromFile('global', self.inputTs)
+        output_table = Table(input_table.getColumnNames())
+
+        for row in input_table:
+            row_dict = row._asdict()
+            source_star = row_dict.get('rlnTomoTiltSeriesStarFile', '')
+            if source_star and source_star != 'None' and os.path.isfile(source_star):
+                destination_star = metadata_dir.join(os.path.basename(source_star))
+                if os.path.abspath(source_star) != os.path.abspath(destination_star):
+                    shutil.copy2(source_star, destination_star)
+                row_dict['rlnTomoTiltSeriesStarFile'] = destination_star
+            output_table.addRowValues(**row_dict)
+
+        output_star = batch.join(self.OUTPUT_STAR)
+        self.write_ts_table('global', output_table, output_star)
+        return output_star
 
     def _output(self, batch):
-        """ Register output STAR files. Runs per-batch (streaming): each
-        call rewrites the aggregate tables to include this batch's result,
-        so outputs are available incrementally as each tilt series
-        finishes, without waiting for the whole input to be processed. """
-        tomoName = self._filename(batch['items'][0])
-        batch.log(f"Storing output for batch '{tomoName}'", flush=True)
- 
-        if batch.error:
-            batch.log(f"ERROR: {batch.error}")
-            self._allResults[tomoName] = {'error': batch.error}
+        output_star = self._copy_passthrough_metadata(batch)
+        output_nodes = [[
+            output_star,
+            'TomogramGroupMetadata.star.emwrap.tsalign',
+        ]]
+        self.writeRelionOutputNodes(output_nodes)
+
+        mode = self._mode()
+        config_file = self.join(self.TS, self.CONFIG_NAME)
+        files = [[output_star, 'TomogramGroupMetadata']]
+        if os.path.exists(self.join(self.TSS)):
+            files.append([self.join(self.TSS), 'WarpTiltSeriesSettings'])
+        if os.path.exists(config_file):
+            files.append([config_file, 'MissAlignmentConfig'])
+        if mode == 'train':
+            for checkpoint in sorted(glob(self.join(self.TS, 'iter*', 'model.ckpt'))):
+                files.append([checkpoint, 'MissAlignmentCheckpoint'])
         else:
-            result = batch['results'][0] if batch['results'] else {}
- 
-            def _copy(srcKey, destFolder):
-                src = result.get(srcKey, None)
-                if src is None or not os.path.exists(src):
-                    return None
-                dst = destFolder.join(os.path.basename(src))
-                if os.path.abspath(src) != os.path.abspath(dst):
-                    shutil.copy2(src, dst)
-                result[srcKey] = dst
-                return dst
- 
-            # All denoised tomograms are written into a single shared
-            # folder (self.outputTomDir), not one subfolder per tilt series.
-            tomFolder = self._getOutputTomFolder("")
-            if not os.path.exists(tomFolder.join("")):
-                tomFolder.create() 
+            for source in sorted(glob(self.join(self.TS, 'iter*', 'model_source.txt'))):
+                files.append([source, 'MissAlignmentModelSource'])
 
-            _copy('rlnTomoReconstructedTomogram', tomFolder)
-
-            batch.info['result'] = {k: v for k, v in result.items() if k != 'error'}
-            self._allResults[tomoName] = result
- 
-        batch.info['tomoName'] = tomoName
- 
-        # Rebuild and re-register the aggregate outputs now, so they
-        # reflect everything completed so far.
-        self._registerOutputs()
+        self.outputs['MissAlignment'] = {
+            'label': 'Miss-Alignment',
+            'type': 'MissAlignmentRun',
+            'info': (
+                f'Mode: {mode}; Warp project: {self.join(self.TS)}. '
+                'Relion alignment matrices remain the initial coarse alignment.'
+            ),
+            'files': files,
+        }
         self.updateBatchInfo(batch)
- 
-        if self.inputLen:
-            totalOutput = len(self.info['batches'])
-            percent = totalOutput * 100 / self.inputLen
-            batch.log(f">>> Processed {Color.green(totalOutput)} out of "
-                      f"{Color.red(self.inputLen)} "
-                      f"({Color.bold('%0.2f' % percent)} %)", flush=True)
- 
-        return batch
-   
-    # ------------------------------------------------------------------
-    # Command execution
-    # ------------------------------------------------------------------
-    def call(self, program, kwargs, logfile=None, verbose=False, cwd=True):
-        """ Run `program` with `kwargs` as arguments.
-        If cwd is True, call the program from the pipeline's working
-        directory. `kwargs` may be a dict (converted via Args), a list
-        (used as-is), or a string (shlex-split). """
-        if isinstance(kwargs, dict):
-            args = Args(kwargs).toList()
-        elif isinstance(kwargs, list):
-            args = list(kwargs)
-        elif isinstance(kwargs, str):
-            args = shlex.split(kwargs)
-        else:
-            raise Exception("Expecting dict, list or str as arguments")
- 
-        args.insert(0, program)
-        logfile = logfile or self.join('batch.log')
-        cmdStr = f"{args[0]} {' '.join(args[1:])}"
- 
-        with open(logfile, 'a') as f:
-            self.log(f"{Color.green(args[0])} {Color.bold(' '.join(args[1:]))}")
-            f.write(f"\n{cmdStr}\n")
-            f.flush()
-            popenKwargs = {'stderr': f, 'stdout': f}
-            if cwd:
-                popenKwargs['cwd'] = self.path
-            rc = subprocess.call(args, **popenKwargs)
-            if rc != 0:
-                raise subprocess.CalledProcessError(rc, args)
-    
-    def __expect(self, fileName):
-        if not os.path.exists(fileName):
-            raise Exception(f"Missing expected output: {fileName}")
 
-    # ------------------------------------------------------------------
-    # Pipeline lifecycle
-    # ------------------------------------------------------------------
-    def _wait_for_training_set(self):
-        """ Wait until enough tomograms are available for training, and
-        return the actual list of rows to train on. """
-        metricsFile = self.train_form_args().subset('dn3', new_prefix="").get('metrics_file', '')
-
-        while True:
-            if self.inputLen < self.n_training:
-                self.log(f"Waiting for enough tomograms "
-                          f"({self.inputLen}/{self.n_training})")
-            elif metricsFile:
-                # A metrics file was supplied: the training set must also
-                # comply with the configured quality thresholds, not just
-                # meet the raw tomogram count.
-                qualifyingRows = self._get_qualifying_tomograms(metricsFile)
-                self.log(f"Quality metrics: {len(qualifyingRows)}/{self.inputLen} "
-                          f"tomograms currently pass the configured "
-                          f"thresholds (need {self.n_training}).")
-                if len(qualifyingRows) >= self.n_training:
-                    return qualifyingRows[:self.n_training]
-            else:
-                return list(itertools.islice(self.inputTomTable, self.n_training))
-
-            time.sleep(30)
-            self.inputTomTable = self._getInputTomTable()
-
-    def _initialize_warp_paths(self):
-        """Initialize the Warp project paths used by MissAlignment."""
-        self.warpTomostarDir = 'warp_tomostar'
-        self.warpTiltSeriesDir = 'warp_tiltseries'
-        self.warpSettings = os.path.join(
-            self.warpTiltSeriesDir,
-            'warp_tiltseries.settings',
-        )
-
-        self.frameSeries = 'warp_frameseries'
-        self.frameSeriesSettings = f'{self.frameSeries}.settings'
-        self.mdocsDir = 'mdocs'
-
-        self.mkdir(self.warpTomostarDir)
-        self.mkdir(self.warpTiltSeriesDir)
-        self.mkdir(self.frameSeries)
-        self.mkdir(self.mdocsDir)
-
-    
-    def _build_ts_import_argv(self):
-        """Build WarpTools ts_import arguments."""
-
-        frameseries_settings = os.path.abspath(
-            self.frameSeries
-        )
-        mdocs_dir = os.path.abspath(
-            self.mdocsDir
-        )
-        output_dir = os.path.abspath(
-            self.warpTomostarDir
-        )
-
-        argv = [
-            'WarpTools',
-            'ts_import',
-            '--frameseries',
-            frameseries_settings,
-            '--tilt_exposure',
-            str(self.acq['total_dose']),
-            '--output',
-            output_dir,
-            '--mdocs',
-            mdocs_dir,
-        ]
-
-        # Recommended by the MissAlignment guide. Warp uses image intensity
-        # to determine the tilt offset.
-        argv.append('--auto_zero')
-
-        return argv
-    
-    def _importInputs(self, inputRunFolder, keys=None):
-        """ Inspect the input run folder and copy or link input folder/files
-        if necessary. If gain is present in the acquisition, it will be linked.
-
-        Args:
-            inputRunFolder: the input run folder
-            keys: input keys to import, if None, all inputs will be imported
-        """
-        print(f"{self.name}: Import inputs ", self.gain)
-        if keys is None:
-            keys = [k for k in self.INPUTS if k != self.M]  # all keys except m
-
-        if isinstance(inputRunFolder, FolderManager):
-            ifm = inputRunFolder
-        else:
-            ifm = FolderManager(inputRunFolder)
-
-        inputs = [ifm.join(self.INPUTS[k]) for k in keys]
-        if m := [fn for fn in inputs if not os.path.exists(fn)]:
-            raise Exception("Missing expected paths: " + str(m))
-
-        def _copyFolder(inputFolder):
-            baseFolder = os.path.basename(inputFolder)
-            inputFm = FolderManager(inputFolder)
-            outputFm = FolderManager(self.join(baseFolder))
-            outputFm.create()
-            for fn in inputFm.listdir():
-                inputPath = inputFm.join(fn)
-                if os.path.isdir(inputPath):
-                    if fn.endswith('logs'):
-                        outputFm.mkdir('logs')  # Don't copy logs
-                    else:
-                        outputFm.link(inputPath)
-                else:
-                    outputFm.copy(inputPath)
-    
-    def _run_ts_import(self):
-    """Generate Warp .tomostar files from frame-series and MDOC data."""
-        self._importInputs(inputFolder, keys=['fs', 'fss', 'frames', 'mdocs'])
-        
-        argv = self._build_ts_import_argv()    
-        launcher = self._get_launcher()
-
-        self.log(
-            "WarpTools ts_import command: "
-            f"{launcher} {shlex.join(argv)}"
-        )
-
-        self.call(
-            launcher,
-            argv,
-            logfile=self.join('warp_ts_import.log'),
-        )
-
-
-    def _build_create_settings_argv(self):
-        """Build WarpTools create_settings arguments."""
-
-        return [
-            'WarpTools',
-            'create_settings',
-            '--folder_data',
-            os.path.abspath(self.warpTomostarDir),
-            '--extension',
-            '*.tomostar',
-            '--folder_processing',
-            os.path.abspath(self.warpTiltSeriesDir),
-            '--output',
-            os.path.abspath(self.warpTiltSeriesSettings),
-            '--angpix',
-            f'{self.pixelSize:.6f}',
-            '--exposure',
-            str(self.acq['total_dose']),
-        ]
-
-    def _create_warp_settings(self):
-        """Create warp_tiltseries.settings."""
-        argv = self._build_create_settings_argv()
-        launcher = self._get_launcher()
-
-        self.log(
-            "WarpTools create_settings command: "
-            f"{launcher} {shlex.join(argv)}"
-        )
-
-        self.call(
-            launcher,
-            argv,
-            logfile=self.join('warp_create_settings.log'),
-        )
-
-        if not os.path.isfile(self.warpTiltSeriesSettings):
-            raise RuntimeError(
-                "WarpTools create_settings did not create the expected "
-                f"settings file: {self.warpTiltSeriesSettings}"
-            )
-
-    def _build_ts_import_alignments_argv(self):
-        """Build WarpTools ts_import_alignments arguments."""
-
-        settings_path = os.path.abspath(
-            self.warpTiltSeriesSettings
-        )
-
-        alignments_path = os.path.abspath(
-            self.imodAlignmentsDir
-        )
-
-        return [
-            'WarpTools',
-            'ts_import_alignments',
-            '--settings',
-            settings_path,
-            '--alignments',
-            alignments_path,
-            '--alignment_angpix',
-            f'{self.pixelSize:.3f}',
-        ]
-    
-    def _import_initial_alignments(self):
-        """Import the regenerated IMOD alignments into the Warp project."""
-        argv = self._build_ts_import_alignments_argv()
-        launcher = self._get_launcher()
-
-        self.log(
-            "WarpTools ts_import_alignments command: "
-            f"{launcher} {shlex.join(argv)}"
-        )
-
-        self.call(
-            launcher,
-            argv,
-            logfile=self.join('warp_import_alignments.log'),
-        )
-    
-    def _regenerate_imod_files_for_tiltseries(self, ts_name, ts_star_path, pixel_size, output_root):
-        """Generate IMOD .xf and .tlt files from a RELION 5 tilt-series STAR.
-        Parameters
-        ----------
-        ts_name : str
-            Tilt-series name from rlnTomoName.
-        ts_star_path : str
-            Path from rlnTomoTiltSeriesStarFile.
-        pixel_size : float
-            Pixel size, in Angstrom/pixel, used for the alignment shifts.
-        output_root : str
-            Root alignment directory passed later to
-            ``WarpTools ts_import_alignments --alignments``.
-        """
-        ts_star_path = os.path.abspath(ts_star_path)
-
-        imod_dir = os.path.join(output_root, f'{ts_name}_Imod')
-        os.makedirs(imod_dir, exist_ok=True)
-
-        xf_path = os.path.join(imod_dir, f'{ts_name}_st.xf')
-        tlt_path = os.path.join(imod_dir, f'{ts_name}_st.tlt')
-
-        with StarFile(ts_star_path) as star_file:
-            table_names = star_file.getTableNames()
-            tilt_table = star_file.getTable(ts_name)
-
-        if not len(tilt_table):
-            raise ValueError(f"Tilt-series STAR table is empty: {ts_star_path}")
-
-        xf_rows = []
-        tilt_angles = []
-
-        for index, tilt_row in enumerate(tilt_table):
-            xf_row = RelionStar.alignment_to_xf(tilt_row, pixel_size)
-            tilt_angle = float(tilt_row.rlnTomoYTilt)
-            xf_rows.append(xf_row)
-            tilt_angles.append(tilt_angle)
-
-        with open(xf_path, 'w', encoding='utf-8') as xf_file:
-            for a11, a12, a21, a22, dx, dy in xf_rows:
-                xf_file.write(
-                    f'{a11: .3f} '
-                    f'{a12: .3f} '
-                    f'{a21: .3f} '
-                    f'{a22: .3f} '
-                    f'{dx: .2f} '
-                    f'{dy: .2f}\n'
-                )
-
-        with open(tlt_path, 'w', encoding='utf-8') as tlt_file:
-            for tilt_angle in tilt_angles:
-                tlt_file.write(f'{tilt_angle:.6f}\n')
-
-        self.log(
-            f"Generated IMOD alignment for {ts_name}: "
-            f"{xf_path}, {tlt_path}"
-        )
-
-        return xf_path, tlt_path
-    
-    def _regenerate_imod_files(self):
-        """Generate IMOD .xf and .tlt files for every input tilt series.
-        The resulting root directory can be passed directly to:
-            WarpTools ts_import_alignments --alignments <directory>
-        """
-        
-        imodAlignmentsDir = self.join(self.imodAlignmentsDir)
-        os.makedirs(imodAlignmentsDir, exist_ok=True)
-
-        self.log(
-            "Regenerating IMOD .xf and .tlt files for all tilt series."
-        )
-
-        for row in self.inputTsTable:
-            ts_name = row.rlnTomoName
-            ts_path = row.rlnTomoTiltSeriesStarFile
-
-            # This must be the same pixel size used when the IMOD shifts were
-            # converted to RELION Angstrom shifts.
-            pixel_size = float(row.rlnTomoTiltSeriesPixelSize)
-
-            if self.pixelSize is None:
-                self.pixelSize = pixel_size
-
-            self.log(
-                f"Regenerating IMOD alignment files for "
-                f"{ts_name} ({ts_path})"
-            )
-
-            self._regenerate_imod_files_for_tiltseries(
-                ts_name=ts_name,
-                ts_star_path=ts_path,
-                pixel_size=pixel_size,
-                output_root=imodAlignmentsDir,
-            )
-    
-    
     def prerun(self):
-        self.inputTsTable = self._getInputTsTable()
-        self.inputTs =  self._args['input_tiltseries']
-        print(f"Input tilt-series: {len(self.inputTsTable)}")  
-
-        # if self.registerOnly:
-        #     self._register_existing_final_outputs()
-        #     return
-        
-       # Streaming is not supported yet. Start processing after all tilt
-        # series are available.
-
-        self._initialize_warp_paths()
-
-        # Import or link the frame-series Warp project, frames and MDOCs.
-        self._prepare_warp_inputs()
-
-        # Generate one .tomostar file per tilt series.
-        self._run_ts_import()
-        self._validate_tomostar_files()
-
-        # Generate warp_tiltseries.settings.
-        self._create_warp_settings()
-
-        # Generate the .xf and .tlt alignment files from RELION metadata.
-        self._regenerate_imod_files()
-
-        # Import the external alignment into the new Warp tilt-series project.
-        self._import_initial_alignments()
-        
-        
-        # self.mkdir(self.outputTsDir)
-        # self.mkdir(self.outputTomDir)
-        
-        # batchMgr = TsStarBatchManager(self.inputTsTable, self.tmpDir)
-        # g = self.addGenerator(batchMgr.generate)
-        
-        # self.addGpuProcessors(g, self.get_aretomo3_proc, self._output)
+        self.inputTs = self._args['input_tiltseries']
+        batch = Batch(id=self.name, path=self.path)
+        if not self._register_output_only():
+            self.runBatch(batch, inputTs=self.inputTs)
+        else:
+            self.log(
+                "Received 'register_output_only'; only registering existing outputs."
+            )
+        # self._output(batch)
 
 
 if __name__ == '__main__':
     MissAlignment.main()
+  
