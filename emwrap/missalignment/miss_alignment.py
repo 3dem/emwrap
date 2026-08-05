@@ -7,13 +7,7 @@
 # * the Free Software Foundation; either version 3 of the License, or
 # * (at your option) any later version.
 # *
-# * This program is distributed in the hope that it will be useful,
-# * but WITHOUT ANY WARRANTY; without even the implied warranty of
-# * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# * GNU General Public License for more details.
-# *
 # **************************************************************************
-
 
 import os
 import shlex
@@ -84,10 +78,10 @@ class MissAlignment(WarpBasePipeline):
     """
     
     name = 'emw-missalignment'
-    PROGRAM = 'MISS_ALIGNMENT'
+    PROGRAM = 'MISSALIGNMENT'
 
     CONFIG_NAME = 'miss_alignment_config.yaml'
-    PREPARE_SCRIPT = 'prepare_miss_alignment.py' # TODO: what is this script for? It is not defined in the code provided.
+    UPDATE_SCRIPT = 'update_warp_xml.py'
     RUNNER_SCRIPT = 'run_miss_alignment.sh'
     OUTPUT_STAR = 'miss_aligned_tilt_series.star'
 
@@ -165,16 +159,18 @@ class MissAlignment(WarpBasePipeline):
 
     def _dataset_geometry(self):
         """Resolve image shape, volume shape, and pixel size for XML preparation."""
+        
         global_table = StarFile.getTableFromFile('global', self.inputTs)
         if len(global_table) == 0:
             raise ValueError(f'Input tilt-series STAR is empty: {self.inputTs}')
 
         first = global_table[0]
+       
         pixel_size = first.rlnTomoTiltSeriesPixelSize
         pixel_size = self._positive_float(pixel_size, 'xml.pixel_size')
 
-        
         ts_table = StarFile.getTableFromFile(first.rlnTomoName, first.rlnTomoTiltSeriesStarFile)
+
         if len(ts_table) == 0:
             raise ValueError(f'Tilt-series metadata is empty: {first.rlnTomoTiltSeriesStarFile}')
         
@@ -182,13 +178,13 @@ class MissAlignment(WarpBasePipeline):
         dims = Image.get_dimensions(movie_file)
         image_x = dims[0]
         image_y = dims[1]
-        self.log(
-            f'Inferred original image dimensions from {movie_file}: '
-            f'{image_x} x {image_y}'
-        )
+        self.log(f'Inferred original image dimensions from {movie_file}: '
+                f'{image_x} x {image_y}')
 
-        settings_dims = WarpXml(self.join(self.TSS)).getDict('Settings', 'Tomo', 'Param')
-        
+        settings_dims = WarpXml(self.join(self.TSS)).getDict(
+            'Settings', 'Tomo', 'Param'
+        )
+       
         volume_x = settings_dims['DimensionsX']
         volume_y = settings_dims['DimensionsY']
         volume_z = settings_dims['DimensionsZ']
@@ -209,109 +205,36 @@ class MissAlignment(WarpBasePipeline):
         )
         return geometry
 
-    def _write_prepare_script(self, batch):
-        """Write a helper executed inside the Miss-Alignment Conda environment."""
-        script_path = batch.join(self.PREPARE_SCRIPT)
-        script = r'''#!/usr/bin/env python
-        import argparse
-        from pathlib import Path
 
-        import torch
-        import yaml
-        from warpylib import TiltSeries
-
-
-        def parse_args():
-            parser = argparse.ArgumentParser()
-            parser.add_argument('--data-directory', required=True)
-            parser.add_argument('--config-input', required=True)
-            parser.add_argument('--config-output', required=True)
-            parser.add_argument('--mode', choices=('train', 'infer'), required=True)
-            parser.add_argument('--model-run-directory')
-            parser.add_argument('--image-x', type=int, required=True)
-            parser.add_argument('--image-y', type=int, required=True)
-            parser.add_argument('--volume-x', type=int, required=True)
-            parser.add_argument('--volume-y', type=int, required=True)
-            parser.add_argument('--volume-z', type=int, required=True)
-            parser.add_argument('--pixel-size', type=float, required=True)
-            return parser.parse_args()
-
-
-        def main():
-            args = parse_args()
-            data_directory = Path(args.data_directory).resolve()
-            xml_files = sorted(data_directory.glob('*.xml'))
-            if not xml_files:
-                raise RuntimeError(f'No Warp tilt-series XML files found in {data_directory}')
-
-            image_physical = torch.tensor(
-                [args.image_x * args.pixel_size, args.image_y * args.pixel_size],
-                dtype=torch.float32,
+    def _update_warp_xml_script(self):
+        """Return the installed standalone Warp XML update helper."""
+        script_path = os.path.abspath(
+            os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                self.UPDATE_SCRIPT,
             )
-            volume_physical = torch.tensor(
-                [
-                    args.volume_x * args.pixel_size,
-                    args.volume_y * args.pixel_size,
-                    args.volume_z * args.pixel_size,
-                ],
-                dtype=torch.float32,
+        )
+        if not os.path.isfile(script_path):
+            raise FileNotFoundError(
+                'Warp XML update helper not found. Install '
+                f'{self.UPDATE_SCRIPT} beside {os.path.basename(__file__)}: '
+                f'{script_path}'
             )
-
-            for xml_file in xml_files:
-                tilt_series = TiltSeries(xml_file)
-                tilt_series.image_dimensions_physical = image_physical.clone()
-                tilt_series.volume_dimensions_physical = volume_physical.clone()
-                tilt_series.save_meta(xml_file)
-
-            config_input = Path(args.config_input).resolve()
-            config_output = Path(args.config_output).resolve()
-            with config_input.open('r', encoding='utf-8') as handle:
-                config = yaml.safe_load(handle)
-            if not isinstance(config, dict):
-                raise TypeError(f'Expected a YAML mapping in {config_input}')
-
-            if args.mode == 'train':
-                config['training_directory'] = str(data_directory)
-            else:
-                if not args.model_run_directory:
-                    raise ValueError('--model-run-directory is required in inference mode')
-                config['data_directory'] = str(data_directory)
-                config['model_run_directory'] = str(Path(args.model_run_directory).resolve())
-
-            config_output.parent.mkdir(parents=True, exist_ok=True)
-            with config_output.open('w', encoding='utf-8') as handle:
-                yaml.safe_dump(config, handle, sort_keys=False)
-
-            print(f'Updated {len(xml_files)} Warp XML files.')
-            print(f'Wrote Miss-Alignment config: {config_output}')
-
-
-        if __name__ == '__main__':
-            main()
-        '''
-        with open(script_path, 'w', encoding='utf-8') as handle:
-            handle.write(script)
-        os.chmod(script_path, os.stat(script_path).st_mode | stat.S_IXUSR)
         return script_path
 
-    # TODO: Question what is the 'prepare_miss_alignment' command for? It is not defined in the code provided.
-    def _prepare_project(self, batch, mode, geometry):
-        config_input = self._args.get('config_file', '')
-        if not config_input:
-            raise ValueError('config_file is required.')
-        config_input = os.path.abspath(str(config_input))
-        if not os.path.isfile(config_input):
-            raise FileNotFoundError(f'Miss-Alignment config file not found: {config_input}')
+    def _update_warp_xmls(self, batch, geometry):
+        """Run ``update_warp_xml.py`` in the Miss-Alignment environment."""
+        script_path = self._update_warp_xml_script()
+        xml_directory = os.path.abspath(self.join(self.TS))
 
-        config_output = os.path.abspath(self.join(self.TS, self.CONFIG_NAME))
-        prepare_script = os.path.abspath(self._write_prepare_script(batch))
+        if not os.path.isdir(xml_directory):
+            raise NotADirectoryError(
+                f'Warp tilt-series directory not found: {xml_directory}'
+            )
 
         args = Args({
-            'python': prepare_script,
-            '--data-directory': os.path.abspath(self.join(self.TS)),
-            '--config-input': config_input,
-            '--config-output': config_output,
-            '--mode': mode,
+            'python': script_path,
+            '--xml-directory': xml_directory,
             '--image-x': geometry['image_x'],
             '--image-y': geometry['image_y'],
             '--volume-x': geometry['volume_x'],
@@ -320,21 +243,17 @@ class MissAlignment(WarpBasePipeline):
             '--pixel-size': geometry['pixel_size'],
         })
 
-        if mode == 'infer':
-            model_run_directory = self._args.get('model_run_directory', '')
-            if not model_run_directory:
-                raise ValueError('model_run_directory is required in inference mode.')
-            model_run_directory = os.path.abspath(str(model_run_directory))
-            if not os.path.isdir(model_run_directory):
-                raise FileNotFoundError(
-                    f'Miss-Alignment model run directory not found: {model_run_directory}'
-                )
-            args['--model-run-directory'] = model_run_directory
-
         self.batch_execute(
-            'prepare_miss_alignment', batch, args, launcher=self._get_launcher()
+            'update_warp_xml',
+            batch,
+            args,
+            launcher=self._get_launcher(),
         )
-        return config_output
+
+    def _prepare_project(self, batch, geometry):
+        """Prepare Warp XML metadata required by Miss-Alignment.
+        """
+        self._update_warp_xmls(batch, geometry)
 
     def _command_tokens(self, mode, config_file):
         start_iteration = self._nonnegative_int(
@@ -416,12 +335,12 @@ class MissAlignment(WarpBasePipeline):
         input_folder = FolderManager(os.path.abspath(os.path.dirname(self.inputTs)))
         self._ensure_project_inputs(input_folder)
 
-        geometry = self._dataset_geometry()
-        
         mode = self._mode()
-        print(f"Miss-Alignment mode: {mode}")
+        self.log(f'Miss-Alignment mode: {mode}')
+        geometry = self._dataset_geometry()
 
-        config_file = self._prepare_project(batch, mode, geometry)
+        self._prepare_project(batch, geometry)
+
         # runner = self._write_runner(batch, mode, config_file)
 
         # # The launcher activates the Miss-Alignment environment, then executes
@@ -497,9 +416,8 @@ class MissAlignment(WarpBasePipeline):
             self.log(
                 "Received 'register_output_only'; only registering existing outputs."
             )
-        # self._output(batch)
+        self._output(batch)
 
 
 if __name__ == '__main__':
     MissAlignment.main()
-  
