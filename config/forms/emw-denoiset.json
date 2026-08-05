@@ -167,7 +167,7 @@
                     "paramClass": "Group",
                     "params": [
                         {
-                            "name": "infer.model",
+                            "name": "infer.dn3.model",
                             "label": "Pretrained model (optional):",
                             "default": "",
                             "paramClass": "PathParam",

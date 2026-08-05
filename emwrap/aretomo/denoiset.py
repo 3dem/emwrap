@@ -16,14 +16,12 @@
 
 import os
 import time
-import shlex
 import shutil
-import subprocess
 import csv
 import itertools
 
 from emtools.utils import Color, FolderManager, Timer
-from emtools.jobs import BatchManager, Args
+from emtools.jobs import BatchManager, Args, Batch
 from emtools.metadata import StarFile, Table, StarMonitor
 
 from emwrap.base import ProcessingPipeline
@@ -95,6 +93,7 @@ class DenoisET(ProcessingPipeline):
 
         self.trainingBestModel = None  # best epoch*.pth found after training
         self.modelPath = None          # model actually used for inference
+        self.metricsFile = None        # metrics file actually used for training
 
         self._allResults = {}  # tsName -> result dict, accumulated by _output
         self.registerOnly = self._register_output_only() # DEBUG flag
@@ -114,44 +113,11 @@ class DenoisET(ProcessingPipeline):
         
 
     # ------------------------------------------------------------------
-    # GUI form-argument helpers
+    # Command-building helpers
     # ------------------------------------------------------------------
     def _get_launcher(self):
         return self.launcher_denoiset or ProcessingPipeline.get_launcher('DENOISET')
 
-    def train_form_args(self):
-        """ All GUI parameters under the 'train' tab (train.n_training,
-        train.dn3.*), with the 'train.' prefix stripped. """
-        subargs = self._args.subset('train', new_prefix="")        
-        return subargs
-
-    def inference_form_args(self):
-        """ All GUI parameters under the 'infer' tab (infer.model,
-        infer.dn3.*), with the 'infer.' prefix stripped. """
-        subargs = self._args.subset('infer', new_prefix="")        
-        return subargs
-    
-
-    # ------------------------------------------------------------------
-    # Command-building helpers
-    # ------------------------------------------------------------------
-    # LOOK OUT: Be carefull if False should be ommited in all cases
-    @staticmethod
-    def _strip_empty_values(argsDict):
-        """ Drop parameters left empty/None/False in the GUI so they are
-        simply omitted from the command line, letting denoise3d/predict3d
-        fall back to their own internal defaults. """
-        cleaned = {}
-        for key, value in argsDict.items():
-            if value is None:
-                continue
-            if isinstance(value, str) and value.strip() == '':
-                continue
-            if isinstance(value, bool) and not value:
-                continue
-            cleaned[key] = value
-        return cleaned
- 
     def _build_training_args(self, inputDir, outputDir, metricsFile=None):
         """ Build the full denoise3d argument dict: GUI params directly
         usable on the command line (train.dn3.*) plus the internally
@@ -160,8 +126,8 @@ class DenoisET(ProcessingPipeline):
         at the frozen copy of the metrics file inside the training folder,
         instead of the original path which may still be growing under
         AreTomo3's live streaming). """
-        cmdArgs = self._strip_empty_values(
-            self.train_form_args().subset('dn3', new_prefix="--"))
+        cmdArgs = self._args.subset(
+            'train.dn3', new_prefix="--", filters=['remove_empty', 'remove_false'])
 
         if metricsFile:
             cmdArgs['--metrics_file'] = metricsFile
@@ -188,8 +154,8 @@ class DenoisET(ProcessingPipeline):
         """ Build the full predict3d argument dict: GUI params directly
         usable on the command line (infer.dn3.*) plus the internally
         managed ones (--input, --output, --model). """
-        cmdArgs = self._strip_empty_values(
-            self.inference_form_args().subset('dn3', new_prefix="--"))
+        cmdArgs = self._args.subset(
+            'infer.dn3', new_prefix="--", filters=['remove_empty', 'remove_false'])
  
         cmdArgs['--input'] = inputDir
         cmdArgs['--output'] = outputDir
@@ -363,9 +329,7 @@ class DenoisET(ProcessingPipeline):
         epochCol = fieldnames[0]
         rows = sorted(rows, key=lambda r: int(r[epochCol]))
  
-        chThreshold = float(
-            self.train_form_args().subset('dn3', new_prefix="")
-                .get('ch_threshold', 0.034))
+        chThreshold = float(self._args.get('train.dn3.ch_threshold', 0.034))
  
         bestRow = rows[0]
         for i, row in enumerate(rows):
@@ -397,7 +361,7 @@ class DenoisET(ProcessingPipeline):
         # Keep a copy of the metrics file used for this training run inside
         # the training folder, so the entries denoise3d accepted/discarded
         # via its own quality-based selection can be inspected later.
-        metricsFile = self.train_form_args().subset('dn3', new_prefix="").get('metrics_file', '')
+        metricsFile = self._args.get('train.dn3.metrics_file', '')
         trainingMetricsFile = None
         if metricsFile and os.path.exists(metricsFile):
             trainingMetricsFile = self.join(self.trainingDir, os.path.basename(metricsFile))
@@ -425,9 +389,10 @@ class DenoisET(ProcessingPipeline):
         # denoise3d is not part of the launcher itself, so it must be
         # prepended to the argument list before calling it.
         argv = ['denoise3d'] + Args(cmdArgs).toList()
- 
-        self.log(f"DenoisET denoise3d argv: {launcher} {' '.join(argv)}")
-        self.call(launcher, argv)
+
+        trainingBatch = Batch(id='training', path=self.path)
+        trainingBatch.log(f"DenoisET denoise3d argv: {launcher} {' '.join(argv)}")
+        trainingBatch.call(launcher, argv)
  
         self.trainingBestModel = self._get_best_training_model(os.path.abspath(trainingOutputDir))
  
@@ -548,39 +513,6 @@ class DenoisET(ProcessingPipeline):
  
         return batch
 
-   
-    # ------------------------------------------------------------------
-    # Command execution
-    # ------------------------------------------------------------------
-    def call(self, program, kwargs, logfile=None, verbose=False, cwd=True):
-        """ Run `program` with `kwargs` as arguments.
-        If cwd is True, call the program from the pipeline's working
-        directory. `kwargs` may be a dict (converted via Args), a list
-        (used as-is), or a string (shlex-split). """
-        if isinstance(kwargs, dict):
-            args = Args(kwargs).toList()
-        elif isinstance(kwargs, list):
-            args = list(kwargs)
-        elif isinstance(kwargs, str):
-            args = shlex.split(kwargs)
-        else:
-            raise Exception("Expecting dict, list or str as arguments")
- 
-        args.insert(0, program)
-        logfile = logfile or self.join('batch.log')
-        cmdStr = f"{args[0]} {' '.join(args[1:])}"
- 
-        with open(logfile, 'a') as f:
-            self.log(f"{Color.green(args[0])} {Color.bold(' '.join(args[1:]))}")
-            f.write(f"\n{cmdStr}\n")
-            f.flush()
-            popenKwargs = {'stderr': f, 'stdout': f}
-            if cwd:
-                popenKwargs['cwd'] = self.path
-            rc = subprocess.call(args, **popenKwargs)
-            if rc != 0:
-                raise subprocess.CalledProcessError(rc, args)
-    
     def __expect(self, fileName):
         if not os.path.exists(fileName):
             raise Exception(f"Missing expected output: {fileName}")
@@ -696,25 +628,30 @@ class DenoisET(ProcessingPipeline):
 
         return True
 
-    def _get_qualifying_tomograms(self, metricsFile):
+    def _get_qualifying_tomograms(self, tomograms):
         """ Return the list of currently-known input tomogram rows that
         have a matching entry in metricsFile and pass the configured
-        quality thresholds. """
-        if not os.path.exists(metricsFile):
-            self.log(f"WARNING: metrics file not found, skipping quality "
-                      f"filtering: {metricsFile}")
-            return list(self.inputTomTable)
+        quality thresholds. 
+        This method assumes that metricsFiles was passed and exists.
 
-        fieldnames, rows = self._read_csv_rows(metricsFile)
+        Args:
+            tomograms: list of tomogram rows to filter
+
+        Returns:
+            list of qualifying tomogram rows, or the original list if there is any error.
+        """
+        
+        fieldnames, rows = self._read_csv_rows(self.metricsFile)
         nameCol = self._find_csv_column(fieldnames, [self.TIlT_SERIES_COLUMN])
+
         if nameCol is None:
             self.log("WARNING: could not identify the tilt-series name "
                       "column in the metrics file, skipping quality "
                       "filtering.")
-            return list(self.inputTomTable)
+            return tomograms
 
         metricsByName = {self._strip_metrics_name(row[nameCol]): row for row in rows}
-        thresholdArgs = self.train_form_args().subset('dn3', new_prefix="")
+        thresholdArgs = self._args.subset('train.dn3', new_prefix="")
 
         tiltAxisCol = self._find_csv_column(fieldnames, [self.TILT_AXIS_COLUMN])
         medianTiltAxis = None
@@ -732,40 +669,41 @@ class DenoisET(ProcessingPipeline):
                       "thickness/global_shift quality checks will be skipped.")
 
         qualifying = []
-        for row in self.inputTomTable:
-            metricsRow = metricsByName.get(row.rlnTomoName)
-            if metricsRow is None:
-                continue  # no metrics entry yet for this tomogram
-            if self._passes_quality_thresholds(metricsRow, fieldnames, thresholdArgs,
+        for row in tomograms:
+            if metricsRow := metricsByName.get(row.rlnTomoName):
+                if self._passes_quality_thresholds(metricsRow, fieldnames, thresholdArgs,
                                                 medianTiltAxis, pixelSize):
-                qualifying.append(row)
+                    qualifying.append(row)
 
         return qualifying
 
     def _wait_for_training_set(self):
         """ Wait until enough tomograms are available for training, and
         return the actual list of rows to train on. """
-        metricsFile = self.train_form_args().subset('dn3', new_prefix="").get('metrics_file', '')
 
-        while True:
-            if self.inputLen < self.n_training:
-                self.log(f"Waiting for enough tomograms "
-                          f"({self.inputLen}/{self.n_training})")
-            elif metricsFile:
+        def _get_training_rows():
+            rows = [row for row in self._getInputTomTable()]
+            n = len(rows)
+
+            if self.metricsFile:
                 # A metrics file was supplied: the training set must also
                 # comply with the configured quality thresholds, not just
-                # meet the raw tomogram count.
-                qualifyingRows = self._get_qualifying_tomograms(metricsFile)
-                self.log(f"Quality metrics: {len(qualifyingRows)}/{self.inputLen} "
+                # meet the raw tomogram count.                
+                rows = self._get_qualifying_tomograms(rows)
+                self.log(f"Quality metrics: {len(rows)}/{n} "
                           f"tomograms currently pass the configured "
-                          f"thresholds (need {self.n_training}).")
-                if len(qualifyingRows) >= self.n_training:
-                    return qualifyingRows[:self.n_training]
-            else:
-                return list(itertools.islice(self.inputTomTable, self.n_training))
+                          f"thresholds (need {self.n_training}).")  
 
+            return rows[:self.n_training]
+
+        rows = _get_training_rows()
+
+        while len(rows) < self.n_training:            
+            self.log(f"Waiting for enough tomograms ({len(rows)}/{self.n_training})")            
             time.sleep(30)
-            self.inputTomTable = self._getInputTomTable()
+            rows = _get_training_rows()
+
+        return rows
     
     def prerun(self):
         self.inputToms = self._args['input_tomograms']
@@ -778,25 +716,29 @@ class DenoisET(ProcessingPipeline):
         self.inputTomTable = self._wait_for_input_table()
         self.log(f"Found input tomograms: {len(self.inputTomTable)}")
 
-        # infer.model, if set and pointing to an existing file, means the
+        self.metricsFile = self._args.get('train.dn3.metrics_file', '')
+        if not os.path.exists(self.metricsFile):
+            raise Exception(f"Metrics file not found: {self.metricsFile}")
+
+        # infer.dn3.model, if set and pointing to an existing file, means the
         # user wants to run inference only with that model, skipping
         # training entirely.
-        userModel = self.inference_form_args().get('model', '')
-        if userModel and os.path.exists(userModel):
+        if userModel := self._args.get('infer.dn3.model', ''):
+            if not os.path.exists(userModel):
+                raise Exception(f"Selected model not found: {userModel}")
+
             self.log(f"Pre-trained model selected, skipping training: {userModel}")
             self.modelPath = userModel
+        
         else:
-            if userModel:
-                self.log(f"WARNING: selected model not found ({userModel}), "
-                          f"training a new model instead.")
-
             trainingSubset = self._wait_for_training_set()
 
             self.log(f"Starting training with {len(trainingSubset)} tomograms")
             self.launch_training(trainingSubset)
 
             self.modelPath = self.trainingBestModel
-            self.log(f"Using model for inference: {self.modelPath}")
+            
+        self.log(f"Using model for inference: {self.modelPath}")
  
         self.mkdir(self.outputTomDir)
  
