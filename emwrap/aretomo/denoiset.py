@@ -16,14 +16,12 @@
 
 import os
 import time
-import shlex
 import shutil
-import subprocess
 import csv
 import itertools
 
 from emtools.utils import Color, FolderManager, Timer
-from emtools.jobs import BatchManager, Args
+from emtools.jobs import BatchManager, Args, Batch
 from emtools.metadata import StarFile, Table, StarMonitor
 
 from emwrap.base import ProcessingPipeline
@@ -114,44 +112,11 @@ class DenoisET(ProcessingPipeline):
         
 
     # ------------------------------------------------------------------
-    # GUI form-argument helpers
+    # Command-building helpers
     # ------------------------------------------------------------------
     def _get_launcher(self):
         return self.launcher_denoiset or ProcessingPipeline.get_launcher('DENOISET')
 
-    def train_form_args(self):
-        """ All GUI parameters under the 'train' tab (train.n_training,
-        train.dn3.*), with the 'train.' prefix stripped. """
-        subargs = self._args.subset('train', new_prefix="")        
-        return subargs
-
-    def inference_form_args(self):
-        """ All GUI parameters under the 'infer' tab (infer.model,
-        infer.dn3.*), with the 'infer.' prefix stripped. """
-        subargs = self._args.subset('infer', new_prefix="")        
-        return subargs
-    
-
-    # ------------------------------------------------------------------
-    # Command-building helpers
-    # ------------------------------------------------------------------
-    # LOOK OUT: Be carefull if False should be ommited in all cases
-    @staticmethod
-    def _strip_empty_values(argsDict):
-        """ Drop parameters left empty/None/False in the GUI so they are
-        simply omitted from the command line, letting denoise3d/predict3d
-        fall back to their own internal defaults. """
-        cleaned = {}
-        for key, value in argsDict.items():
-            if value is None:
-                continue
-            if isinstance(value, str) and value.strip() == '':
-                continue
-            if isinstance(value, bool) and not value:
-                continue
-            cleaned[key] = value
-        return cleaned
- 
     def _build_training_args(self, inputDir, outputDir, metricsFile=None):
         """ Build the full denoise3d argument dict: GUI params directly
         usable on the command line (train.dn3.*) plus the internally
@@ -160,8 +125,8 @@ class DenoisET(ProcessingPipeline):
         at the frozen copy of the metrics file inside the training folder,
         instead of the original path which may still be growing under
         AreTomo3's live streaming). """
-        cmdArgs = self._strip_empty_values(
-            self.train_form_args().subset('dn3', new_prefix="--"))
+        cmdArgs = self._args.subset(
+            'train.dn3', new_prefix="--", filters=['remove_empty', 'remove_false'])
 
         if metricsFile:
             cmdArgs['--metrics_file'] = metricsFile
@@ -188,8 +153,8 @@ class DenoisET(ProcessingPipeline):
         """ Build the full predict3d argument dict: GUI params directly
         usable on the command line (infer.dn3.*) plus the internally
         managed ones (--input, --output, --model). """
-        cmdArgs = self._strip_empty_values(
-            self.inference_form_args().subset('dn3', new_prefix="--"))
+        cmdArgs = self._args.subset(
+            'infer.dn3', new_prefix="--", filters=['remove_empty', 'remove_false'])
  
         cmdArgs['--input'] = inputDir
         cmdArgs['--output'] = outputDir
@@ -363,9 +328,7 @@ class DenoisET(ProcessingPipeline):
         epochCol = fieldnames[0]
         rows = sorted(rows, key=lambda r: int(r[epochCol]))
  
-        chThreshold = float(
-            self.train_form_args().subset('dn3', new_prefix="")
-                .get('ch_threshold', 0.034))
+        chThreshold = float(self._args.get('train.dn3.ch_threshold', 0.034))
  
         bestRow = rows[0]
         for i, row in enumerate(rows):
@@ -397,7 +360,7 @@ class DenoisET(ProcessingPipeline):
         # Keep a copy of the metrics file used for this training run inside
         # the training folder, so the entries denoise3d accepted/discarded
         # via its own quality-based selection can be inspected later.
-        metricsFile = self.train_form_args().subset('dn3', new_prefix="").get('metrics_file', '')
+        metricsFile = self._args.get('train.dn3.metrics_file', '')
         trainingMetricsFile = None
         if metricsFile and os.path.exists(metricsFile):
             trainingMetricsFile = self.join(self.trainingDir, os.path.basename(metricsFile))
@@ -425,9 +388,10 @@ class DenoisET(ProcessingPipeline):
         # denoise3d is not part of the launcher itself, so it must be
         # prepended to the argument list before calling it.
         argv = ['denoise3d'] + Args(cmdArgs).toList()
- 
-        self.log(f"DenoisET denoise3d argv: {launcher} {' '.join(argv)}")
-        self.call(launcher, argv)
+
+        trainingBatch = Batch(id='training', path=self.path)
+        trainingBatch.log(f"DenoisET denoise3d argv: {launcher} {' '.join(argv)}")
+        trainingBatch.call(launcher, argv)
  
         self.trainingBestModel = self._get_best_training_model(os.path.abspath(trainingOutputDir))
  
@@ -548,39 +512,6 @@ class DenoisET(ProcessingPipeline):
  
         return batch
 
-   
-    # ------------------------------------------------------------------
-    # Command execution
-    # ------------------------------------------------------------------
-    def call(self, program, kwargs, logfile=None, verbose=False, cwd=True):
-        """ Run `program` with `kwargs` as arguments.
-        If cwd is True, call the program from the pipeline's working
-        directory. `kwargs` may be a dict (converted via Args), a list
-        (used as-is), or a string (shlex-split). """
-        if isinstance(kwargs, dict):
-            args = Args(kwargs).toList()
-        elif isinstance(kwargs, list):
-            args = list(kwargs)
-        elif isinstance(kwargs, str):
-            args = shlex.split(kwargs)
-        else:
-            raise Exception("Expecting dict, list or str as arguments")
- 
-        args.insert(0, program)
-        logfile = logfile or self.join('batch.log')
-        cmdStr = f"{args[0]} {' '.join(args[1:])}"
- 
-        with open(logfile, 'a') as f:
-            self.log(f"{Color.green(args[0])} {Color.bold(' '.join(args[1:]))}")
-            f.write(f"\n{cmdStr}\n")
-            f.flush()
-            popenKwargs = {'stderr': f, 'stdout': f}
-            if cwd:
-                popenKwargs['cwd'] = self.path
-            rc = subprocess.call(args, **popenKwargs)
-            if rc != 0:
-                raise subprocess.CalledProcessError(rc, args)
-    
     def __expect(self, fileName):
         if not os.path.exists(fileName):
             raise Exception(f"Missing expected output: {fileName}")
@@ -714,7 +645,7 @@ class DenoisET(ProcessingPipeline):
             return list(self.inputTomTable)
 
         metricsByName = {self._strip_metrics_name(row[nameCol]): row for row in rows}
-        thresholdArgs = self.train_form_args().subset('dn3', new_prefix="")
+        thresholdArgs = self._args.subset('train.dn3', new_prefix="")
 
         tiltAxisCol = self._find_csv_column(fieldnames, [self.TILT_AXIS_COLUMN])
         medianTiltAxis = None
@@ -745,7 +676,7 @@ class DenoisET(ProcessingPipeline):
     def _wait_for_training_set(self):
         """ Wait until enough tomograms are available for training, and
         return the actual list of rows to train on. """
-        metricsFile = self.train_form_args().subset('dn3', new_prefix="").get('metrics_file', '')
+        metricsFile = self._args.get('train.dn3.metrics_file', '')
 
         while True:
             if self.inputLen < self.n_training:
@@ -781,7 +712,7 @@ class DenoisET(ProcessingPipeline):
         # infer.model, if set and pointing to an existing file, means the
         # user wants to run inference only with that model, skipping
         # training entirely.
-        userModel = self.inference_form_args().get('model', '')
+        userModel = self._args.get('infer.model', '')
         if userModel and os.path.exists(userModel):
             self.log(f"Pre-trained model selected, skipping training: {userModel}")
             self.modelPath = userModel
