@@ -321,23 +321,35 @@ class DenoisET(ProcessingPipeline):
     # Training
     # ------------------------------------------------------------------
     def _get_best_training_model(self, trainingOutputDir):
-        """ Parse training_stats.csv and return the path to the model from
-        the epoch immediately BEFORE ch_mean (the checkerboard-artifact
-        metric) first reaches/exceeds --ch_threshold. Training itself
-        stops once that threshold is crossed specifically to avoid
-        checkerboard/overdenoising artifacts, so the last epoch below
-        threshold -- not the epoch with the single lowest ch_mean -- is
-        the safe model to use. The epoch number is read from the first
-        column of the CSV. """
+        """ Parse training_stats.csv and return the copied best model path
+        from the epoch immediately BEFORE ch_mean (the checkerboard-artifact
+        metric) first reaches/exceeds --ch_threshold. Training itself stops
+        once that threshold is crossed specifically to avoid checkerboard/
+        overdenoising artifacts, so the last epoch below threshold -- not the
+        epoch with the single lowest ch_mean -- is the safe model to use.
+
+        The selected model is copied into the top-level model/ directory and
+        the copied path is returned so self.trainingBestModel always points to
+        the user-facing copy. The epoch number is read from the first column
+        of the CSV.
+        """
+        def _copy_best_model_to_model_dir(bestModelPath):
+            modelDir = self.join('model')
+            os.makedirs(modelDir, exist_ok=True)
+            copiedModelPath = os.path.join(modelDir, os.path.basename(bestModelPath))
+            shutil.copy2(bestModelPath, copiedModelPath)
+            self.log(f"Copied best model to: {copiedModelPath}")
+            return copiedModelPath
+
         statsCsv = os.path.join(trainingOutputDir, 'training_stats.csv')
         self.__expect(statsCsv)
- 
+
         fieldnames, rows = self._read_csv_rows(statsCsv)
         epochCol = fieldnames[0]
         rows = sorted(rows, key=lambda r: int(r[epochCol]))
- 
+
         chThreshold = float(self._args.get('train.dn3.ch_threshold', 0.034))
- 
+
         bestRow = rows[0]
         for i, row in enumerate(rows):
             if float(row['ch_mean']) >= chThreshold:
@@ -347,18 +359,20 @@ class DenoisET(ProcessingPipeline):
                 bestRow = rows[i - 1] if i > 0 else row
                 break
             bestRow = row  # keep advancing in case threshold is never hit
- 
+
         epoch = bestRow[epochCol]
         modelPath = os.path.join(trainingOutputDir, f'epoch{epoch}.pth')
         self.__expect(modelPath)
-        return modelPath  
+
+        self.trainingBestModel = _copy_best_model_to_model_dir(modelPath)
+        return self.trainingBestModel
 
     def launch_training(self, tomTable):
         """ Symlink the training subset into self.trainingDir and run
         denoise3d in --train_only mode. Populates self.trainingBestModel
         once training has finished. """
         self.log(f"Training set size: {len(tomTable)} tomograms")
- 
+
         trainingInputDir = self.join(self.trainingDir)
         trainingOutputDir = self.join(self.trainingDir, 'output')  
 
@@ -373,11 +387,11 @@ class DenoisET(ProcessingPipeline):
         if metricsFile and os.path.exists(metricsFile):
             trainingMetricsFile = self.join(self.trainingDir, os.path.basename(metricsFile))
             self._write_filtered_metrics_file(metricsFile, trainingMetricsFile, tomTable)
- 
+
         volumeCols = ['rlnTomoReconstructedTomogram',
                       'rlnTomoReconstructedTomogramHalf1',
                       'rlnTomoReconstructedTomogramHalf2']
- 
+
         # --input: symlink EVN/ODD/full volumes for the training subset
         for row in tomTable:
             tomDict = row._asdict()
@@ -387,7 +401,7 @@ class DenoisET(ProcessingPipeline):
                 destPath = self.join(self.trainingDir, baseName)
                 if not os.path.lexists(destPath):
                     os.symlink(srcPath, destPath)
- 
+
         cmdArgs = self._build_training_args(
             os.path.abspath(trainingInputDir),
             os.path.abspath(trainingOutputDir),
@@ -400,19 +414,18 @@ class DenoisET(ProcessingPipeline):
         trainingBatch = Batch(id='training', path=self.path)
         trainingBatch.log(f"DenoisET denoise3d argv: {launcher} {' '.join(argv)}")
         trainingBatch.call(launcher, argv)
- 
+
         self.trainingBestModel = self._get_best_training_model(os.path.abspath(trainingOutputDir))
- 
+
         with open(self.join(self.trainingDir, 'training_done.txt'), 'w') as f:
             f.write(f"best_model={self.trainingBestModel}\n")
- 
+
         self.info['training'] = {
             'n_training': len(tomTable),
             'training_stats_csv': os.path.join(trainingOutputDir, 'training_stats.csv'),
             'best_model': self.trainingBestModel,
         }
         self.log(f"Training finished. Best model: {self.trainingBestModel}")
- 
 
     # ------------------------------------------------------------------
     # Batch execution (inference)
@@ -733,7 +746,7 @@ class DenoisET(ProcessingPipeline):
         if mode == self.MODE_INFER_ONLY:
             self.modelPath = self._args.get('infer.dn3.model', '')
             if not self.modelPath:
-                raise Exception("Infer-only mode requires infer.dn3.model to be set.")
+                raise Exception("Infer-only mode requires Inference - Pretrained model to be set.")
             if not os.path.exists(self.modelPath):
                 raise Exception(f"Selected model not found: {self.modelPath}")
             self.log(f"Infer-only mode selected, using model: {self.modelPath}")
