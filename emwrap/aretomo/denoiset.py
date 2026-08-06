@@ -125,6 +125,9 @@ class DenoisET(ProcessingPipeline):
     def _get_mode(self):
         return int(self._args.get('mode', self.MODE_TRAIN_AND_INFER))
 
+    def _get_args(self, prefix):
+        return self._args.subset(prefix, new_prefix="--", filters=['remove_empty', 'remove_false'])
+
     def _build_training_args(self, inputDir, outputDir, metricsFile=None):
         """ Build the full denoise3d argument dict: GUI params directly
         usable on the command line (train.dn3.*) plus the internally
@@ -133,18 +136,9 @@ class DenoisET(ProcessingPipeline):
         at the frozen copy of the metrics file inside the training folder,
         instead of the original path which may still be growing under
         AreTomo3's live streaming). """
-        cmdArgs = self._args.subset(
-            'train.dn3', new_prefix="--", filters=['remove_empty', 'remove_false'])
-
+        cmdArgs = self._get_args('train.dn3')
         if metricsFile:
             cmdArgs['--metrics_file'] = metricsFile
-
-        # Quality-metric thresholds are meaningless (and should not be
-        # passed) if no metrics file was supplied.
-        if not cmdArgs.get('--metrics_file'):
-            cmdArgs.pop('--metrics_file', None)
-            for key in self.QUALITY_METRIC_KEYS:
-                cmdArgs.pop(key, None)
  
         cmdArgs['--input'] = inputDir
         cmdArgs['--output'] = outputDir
@@ -156,21 +150,7 @@ class DenoisET(ProcessingPipeline):
         cmdArgs['--max_selected'] = self.n_training
  
         return cmdArgs
- 
-    def _build_inference_args(self, inputDir, outputDir, modelPath):
-        """ Build the full predict3d argument dict: GUI params directly
-        usable on the command line (infer.dn3.*) plus the internally
-        managed ones (--input, --output, --model). """
-        cmdArgs = self._args.subset(
-            'infer.dn3', new_prefix="--", filters=['remove_empty', 'remove_false'])
- 
-        cmdArgs['--input'] = inputDir
-        cmdArgs['--output'] = outputDir
-        cmdArgs['--model'] = modelPath
- 
-        return cmdArgs
     
-
     # ------------------------------------------------------------------
     # Input/output folder helpers
     # ------------------------------------------------------------------
@@ -456,8 +436,14 @@ class DenoisET(ProcessingPipeline):
             # --output: predict3d writes into an 'output' subfolder
             outputDir = 'output'
             os.makedirs(outputDir, exist_ok=True)
- 
-            cmdArgs = self._build_inference_args(".", outputDir, self.modelPath)
+
+            # Build inference arguments
+            cmdArgs = self._get_args('infer.dn3')
+            cmdArgs.update({
+                '--input': '.',
+                '--output': outputDir,
+                '--model': batch.link(self.modelPath),
+            })
  
             launcher = self._get_launcher()
             # predict3d is not part of the launcher itself, so it must be

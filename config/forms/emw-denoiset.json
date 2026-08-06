@@ -3,7 +3,7 @@
     "help": "Wrapper to run DenoisET (Noise2Noise denoising for cryoET) training and inference. \n\n*REFERENCES*:\n[[https://github.com/apeck12/denoiset][DenoisET]]",
     "sections": [
         {
-            "label": "Input and Training",
+            "label": "Input",
             "params": [
                 {
                     "label": "Input",
@@ -29,7 +29,12 @@
                             "help": "Select the mode of operation for the denoising process. Train and inference by default. Train only will train a model without performing inference. Infer only will use an existing model to denoise tomograms."
                         }
                     ]
-                },
+                }
+            ]
+        },
+        {
+            "label": "Training",
+            "params": [
                 {
                     "label": "Training set selection",
                     "paramClass": "Group",
@@ -172,7 +177,7 @@
             ]
         },
         {
-            "label": "Inference and Compute",
+            "label": "Inference",
             "params": [
                 {
                     "label": "Model",
