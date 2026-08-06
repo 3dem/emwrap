@@ -44,6 +44,10 @@ class DenoisET(ProcessingPipeline):
     
     name = 'emw-denoiset'
 
+    MODE_TRAIN_AND_INFER = 0
+    MODE_TRAIN_ONLY = 1
+    MODE_INFER_ONLY = 2
+
     # Quality-metric flags that only make sense when a metrics file is
     # supplied; stripped from the command otherwise.
     QUALITY_METRIC_KEYS = (
@@ -117,6 +121,9 @@ class DenoisET(ProcessingPipeline):
     # ------------------------------------------------------------------
     def _get_launcher(self):
         return self.launcher_denoiset or ProcessingPipeline.get_launcher('DENOISET')
+
+    def _get_mode(self):
+        return int(self._args.get('mode', self.MODE_TRAIN_AND_INFER))
 
     def _build_training_args(self, inputDir, outputDir, metricsFile=None):
         """ Build the full denoise3d argument dict: GUI params directly
@@ -217,7 +224,27 @@ class DenoisET(ProcessingPipeline):
         with open(csvPath, newline='') as f:
             reader = csv.DictReader(f)
             return reader.fieldnames, list(reader)
-    
+
+    def _write_filtered_metrics_file(self, sourceCsv, targetCsv, tomRows):
+        """Write a metrics CSV containing only rows for the selected
+        training tomograms."""
+        fieldnames, rows = self._read_csv_rows(sourceCsv)
+        nameCol = self._find_csv_column(fieldnames, [self.TIlT_SERIES_COLUMN])
+        if nameCol is None:
+            shutil.copy2(sourceCsv, targetCsv)
+            return
+
+        selectedNames = {row.rlnTomoName for row in tomRows}
+        filteredRows = [
+            row for row in rows
+            if self._strip_metrics_name(row.get(nameCol, "")) in selectedNames
+        ]
+
+        with open(targetCsv, "w", newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(filteredRows)
+
     def _collect_existing_final_result(self, tomoRow):
         tomoName = tomoRow.rlnTomoName
         result = {'rlnTomoName': tomoName}
@@ -365,7 +392,7 @@ class DenoisET(ProcessingPipeline):
         trainingMetricsFile = None
         if metricsFile and os.path.exists(metricsFile):
             trainingMetricsFile = self.join(self.trainingDir, os.path.basename(metricsFile))
-            shutil.copy2(metricsFile, trainingMetricsFile)
+            self._write_filtered_metrics_file(metricsFile, trainingMetricsFile, tomTable)
  
         volumeCols = ['rlnTomoReconstructedTomogram',
                       'rlnTomoReconstructedTomogramHalf1',
@@ -708,40 +735,43 @@ class DenoisET(ProcessingPipeline):
     def prerun(self):
         self.inputToms = self._args['input_tomograms']
         self.n_training = int(self._args['train.n_training'])
- 
+        mode = self._get_mode()
+
         if self.registerOnly:
             self._register_existing_final_outputs()
             return
- 
+
         self.inputTomTable = self._wait_for_input_table()
         self.log(f"Found input tomograms: {len(self.inputTomTable)}")
 
-        self.metricsFile = self._args.get('train.dn3.metrics_file', '')
-        if not os.path.exists(self.metricsFile):
-            raise Exception(f"Metrics file not found: {self.metricsFile}")
+        if mode == self.MODE_INFER_ONLY:
+            self.modelPath = self._args.get('infer.dn3.model', '')
+            if not self.modelPath:
+                raise Exception("Infer-only mode requires infer.dn3.model to be set.")
+            if not os.path.exists(self.modelPath):
+                raise Exception(f"Selected model not found: {self.modelPath}")
+            self.log(f"Infer-only mode selected, using model: {self.modelPath}")
 
-        # infer.dn3.model, if set and pointing to an existing file, means the
-        # user wants to run inference only with that model, skipping
-        # training entirely.
-        if userModel := self._args.get('infer.dn3.model', ''):
-            if not os.path.exists(userModel):
-                raise Exception(f"Selected model not found: {userModel}")
-
-            self.log(f"Pre-trained model selected, skipping training: {userModel}")
-            self.modelPath = userModel
-        
         else:
+            self.metricsFile = self._args.get('train.dn3.metrics_file', '')
+            if self.metricsFile and not os.path.exists(self.metricsFile):
+                raise Exception(f"Metrics file not found: {self.metricsFile}")
+
             trainingSubset = self._wait_for_training_set()
 
             self.log(f"Starting training with {len(trainingSubset)} tomograms")
             self.launch_training(trainingSubset)
 
             self.modelPath = self.trainingBestModel
-            
+
+            if mode == self.MODE_TRAIN_ONLY:
+                self.log(f"Training-only mode finished. Best model: {self.modelPath}")
+                return
+
         self.log(f"Using model for inference: {self.modelPath}")
- 
+
         self.mkdir(self.outputTomDir)
- 
+
         monitor = StarMonitor(self.inputToms, 'global',
                                lambda row: row.rlnTomoName, timeout=30)
         batchMgr = BatchManager(1, monitor.newItems(), self.tmpDir,
