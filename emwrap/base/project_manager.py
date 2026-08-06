@@ -46,15 +46,15 @@ class ProjectManager(FolderManager):
             create: Create a new project if it does not exist.
             verbose: Verbosity level.
         """
+        path = os.path.abspath(os.path.expanduser(path))
         FolderManager.__init__(self, path)
-        apath = os.path.abspath(path)
         self._verbose = verbose
 
         if not self.exists():
-            raise Exception(f"Project path '{apath}' does not exist")
+            raise Exception(f"Project path '{path}' does not exist")
 
         if self.exists(self.pipeline_star):
-            self.log(f"ProjectManager::: Loading project from: {apath}")
+            self.log(f"ProjectManager::: Loading project from: {path}")
             self._wf = RelionStar.pipeline_to_workflow(self.pipeline_star)
             
         elif create:
