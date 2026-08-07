@@ -1,7 +1,6 @@
 #!/bin/bash
 
-export SBGRID_SHRC=/programs/sbgrid-sj-hpc.shrc
-
-source $SBGRID_SHRC && module load -s conda3/202402 && conda activate /hpcf/authorized_apps/cryo_apps/miss-alignment
+. /hpcf/authorized_apps/cryo_apps/miniconda3/etc/profile.d/conda.sh
+conda activate miss-alignment
 
 "$@"

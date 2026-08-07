@@ -207,7 +207,7 @@ class MissAlignment(WarpBasePipeline):
 
 
     def _update_warp_xml_script(self):
-        """Return the installed standalone Warp XML update helper."""
+        """Return the standalone Warp XML update helper."""
         script_path = os.path.abspath(
             os.path.join(
                 os.path.dirname(os.path.abspath(__file__)),
@@ -223,7 +223,7 @@ class MissAlignment(WarpBasePipeline):
         return script_path
 
     def _update_warp_xmls(self, batch, geometry):
-        """Run ``update_warp_xml.py`` in the Miss-Alignment environment."""
+        """Prepare Warp XML metadata required by Miss-Alignment. Run update_warp_xml.py in the Miss-Alignment environment."""
         script_path = self._update_warp_xml_script()
         xml_directory = os.path.abspath(self.join(self.TS))
 
@@ -249,11 +249,6 @@ class MissAlignment(WarpBasePipeline):
             args,
             launcher=self._get_launcher(),
         )
-
-    def _prepare_project(self, batch, geometry):
-        """Prepare Warp XML metadata required by Miss-Alignment.
-        """
-        self._update_warp_xmls(batch, geometry)
 
     def _command_tokens(self, mode, config_file):
         start_iteration = self._nonnegative_int(
@@ -339,7 +334,7 @@ class MissAlignment(WarpBasePipeline):
         self.log(f'Miss-Alignment mode: {mode}')
         geometry = self._dataset_geometry()
 
-        self._prepare_project(batch, geometry)
+        self._update_warp_xmls(batch, geometry)
 
         # runner = self._write_runner(batch, mode, config_file)
 

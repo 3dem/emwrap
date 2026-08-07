@@ -8,20 +8,6 @@ import torch
 from warpylib import TiltSeries
 
 
-def positive_int(value):
-    value = int(value)
-    if value <= 0:
-        raise argparse.ArgumentTypeError('value must be greater than zero')
-    return value
-
-
-def positive_float(value):
-    value = float(value)
-    if value <= 0:
-        raise argparse.ArgumentTypeError('value must be greater than zero')
-    return value
-
-
 def parse_args():
     parser = argparse.ArgumentParser(
         description=(
@@ -34,12 +20,12 @@ def parse_args():
         required=True,
         help='Directory containing Warp tilt-series XML files.',
     )
-    parser.add_argument('--image-x', type=positive_int, required=True)
-    parser.add_argument('--image-y', type=positive_int, required=True)
-    parser.add_argument('--volume-x', type=positive_int, required=True)
-    parser.add_argument('--volume-y', type=positive_int, required=True)
-    parser.add_argument('--volume-z', type=positive_int, required=True)
-    parser.add_argument('--pixel-size', type=positive_float, required=True)
+    parser.add_argument('--image-x', type=int, required=True)
+    parser.add_argument('--image-y', type=int, required=True)
+    parser.add_argument('--volume-x', type=int, required=True)
+    parser.add_argument('--volume-y', type=int, required=True)
+    parser.add_argument('--volume-z', type=int, required=True)
+    parser.add_argument('--pixel-size', type=float, required=True)
     return parser.parse_args()
 
 
