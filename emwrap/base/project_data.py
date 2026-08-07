@@ -327,6 +327,14 @@ class ProjectData(FolderManager):
 
     def _computeJobInfo(self, jobId, jobFiles):
         jobStarFile = jobFiles[0]
+
+        if not os.path.exists(jobStarFile):
+            return {
+                'inputs': [],
+                'outputs': [],
+                'status': self.STATUS_FAILED
+            }
+
         self._debug(f"{Color.cyan('JOB')}: {Color.red('Computing')} info for {Color.bold(jobStarFile)}")
 
         params = RelionStar.read_jobstar(jobStarFile)

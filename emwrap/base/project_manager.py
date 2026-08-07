@@ -46,15 +46,15 @@ class ProjectManager(FolderManager):
             create: Create a new project if it does not exist.
             verbose: Verbosity level.
         """
+        path = os.path.abspath(os.path.expanduser(path))
         FolderManager.__init__(self, path)
-        apath = os.path.abspath(path)
         self._verbose = verbose
 
         if not self.exists():
-            raise Exception(f"Project path '{apath}' does not exist")
+            raise Exception(f"Project path '{path}' does not exist")
 
         if self.exists(self.pipeline_star):
-            self.log(f"ProjectManager::: Loading project from: {apath}")
+            self.log(f"ProjectManager::: Loading project from: {path}")
             self._wf = RelionStar.pipeline_to_workflow(self.pipeline_star)
             
         elif create:
@@ -555,21 +555,25 @@ class ProjectManager(FolderManager):
 
         cpus = _load_cpus(gpus)
 
-        if gpus > 0:
-            cpus = max(cpus, gpus * 10)
+        gpu_type = qparams.get('gpu_type', 'any')
 
-        if cpus == 0:
-            raise Exception("Neither CPUs nor GPUs are set. Please set at least one of them.")
+        if gpus > 0:
+            # FIXME: Move all this cluster dependent logic to a separate function
+            # that could be configured by a environment variable or a config file.            
+            cores_per_gpu = {'cryo_core': 12, 'gpu_rtx': 30}.get(qname, {'A100': 12}.get(gpu_type, 10))
+            cpus = max(cpus, gpus * cores_per_gpu)
 
         if gpus:
             # FIXME: Use emgoat for a more general interaction with HPC
             mig = ':mig=2' if qparams.get('mig', False) else ''
             gpu_line = f'#BSUB -gpu "num={gpus}/host:mode=shared{mig}"'
-            gpu_type = qparams.get('gpu_type', 'any')
             if gpu_type != 'any':
                 gpu_line += f'\n#BSUB -R {gpu_type.lower()}'
         else:
             gpu_line = ''
+
+        if cpus == 0:
+            raise Exception("Neither CPUs nor GPUs are set. Please set at least one of them.")
 
         qparams.update({
             'queue_name': qname,
