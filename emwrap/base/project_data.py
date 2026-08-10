@@ -54,6 +54,20 @@ class ProjectData(FolderManager):
 
     JOB_STATUS_ACTIVE = [STATUS_LAUNCHED, STATUS_RUNNING, STATUS_SCHEDULED]
 
+    JOB_STATUS_TERMINAL = [STATUS_SUCCEEDED, STATUS_FAILED, STATUS_ABORTED]
+
+    # Emwrap-specific statuses Relion stores as Scheduled in default_pipeline.star
+    JOB_STATUS_EMWRAP = [STATUS_SAVED, STATUS_LAUNCHED]
+
+    # Check terminal RELION markers before RUNNING; stale RUNNING must not
+    # mask EXIT_* files left by a finished or aborted worker process.
+    JOB_STATUS_FILE_ORDER = (
+        'RELION_JOB_EXIT_SUCCESS',
+        'RELION_JOB_EXIT_FAILURE',
+        'RELION_JOB_EXIT_ABORTED',
+        'RELION_JOB_RUNNING',
+    )
+
     def __init__(self, project):
         FolderManager.__init__(self, project.path)
         self._project = project
@@ -91,34 +105,42 @@ class ProjectData(FolderManager):
         self.restoreJobStatuses()
 
     def _statusFromRelionFiles(self, job_id):
-        for statusFile, status in self.JOB_STATUS_FILES.items():
+        for statusFile in self.JOB_STATUS_FILE_ORDER:
             if self.exists(job_id, statusFile):
-                return status
+                return self.JOB_STATUS_FILES[statusFile]
         return None
 
     def _resolveJobStatus(self, job):
         """ Resolve canonical status: project.json intent > RELION files > pipeline.star."""
         cached_status = self._jobs.get(job.id, {}).get('status')
         relion_status = self._statusFromRelionFiles(job.id)
+        pipeline_status = job['status']
 
         # Saved in project.json overrides stale terminal RELION markers after re-save
         if cached_status == self.STATUS_SAVED:
             if relion_status == self.STATUS_RUNNING:
                 return relion_status
-            if relion_status in (self.STATUS_SUCCEEDED, self.STATUS_FAILED,
-                                 self.STATUS_ABORTED):
-                return cached_status
-            if relion_status is None:
+            return cached_status
+
+        # Actual completion markers on disk always win over cached active status
+        if relion_status in self.JOB_STATUS_TERMINAL:
+            return relion_status
+
+        # User-set terminal status beats a stale RELION_JOB_RUNNING left behind
+        # when a worker exited without updating its marker files.
+        if cached_status in self.JOB_STATUS_TERMINAL:
+            if relion_status == self.STATUS_RUNNING or relion_status is None:
                 return cached_status
 
         if relion_status:
             return relion_status
 
-        pipeline_status = job['status']
-
-        # default_pipeline.star maps Saved/Launched to Scheduled; recover from cache
-        if pipeline_status == self.STATUS_SCHEDULED and cached_status:
-            return cached_status
+        # Relion pipeline stores Saved/Launched as Scheduled; recover emwrap status.
+        if pipeline_status == self.STATUS_SCHEDULED:
+            if cached_status in self.JOB_STATUS_EMWRAP:
+                return cached_status
+            if self.exists(job.id, 'job.star'):
+                return self.STATUS_SAVED
 
         return pipeline_status
 
@@ -127,6 +149,19 @@ class ProjectData(FolderManager):
             path = self.join(job_id, statusFile)
             if os.path.exists(path):
                 os.remove(path)
+
+    def _signalJobAbort(self, job_id):
+        """Ask a running worker to abort using Relion's marker convention."""
+        job_dir = self.join(job_id)
+        if os.path.isdir(job_dir):
+            with open(os.path.join(job_dir, 'RELION_JOB_ABORT_NOW'), 'w'):
+                pass
+
+    def _writeJobRelionStatus(self, job_id, suffix):
+        """Replace RELION job status markers with a single terminal marker."""
+        job_dir = self.join(job_id)
+        if os.path.isdir(job_dir):
+            ProcessingPipeline.output_file(suffix, job_dir)
 
     def _removeJobOutput(self, job, output_id):
         """Remove one output from the workflow graph and project.json cache."""
@@ -274,10 +309,13 @@ class ProjectData(FolderManager):
                         'info': f'{n} items, {ps:0.1f} Å/px, bin: {binning:0.1f}'
                     }
                 elif filepath.endswith('optimisation_set.star'):
-                    t = None
                     with StarFile(filepath, 'r') as sf:
-                        allTables = sf.getTableNames()
-                        t = sf.getTable(allTables[0])
+                        table_names = sf.getTableNames()
+                        table_name = (
+                            'optimisation_set' if 'optimisation_set' in table_names
+                            else table_names[0]
+                        )
+                        t = sf.getTable(table_name)
 
                     cols = {
                         'rlnTomoParticlesFile': 'particles',
@@ -285,9 +323,13 @@ class ProjectData(FolderManager):
                     }
                     info = {}
                     for col, tableName in cols.items():
-                        v = getattr(t[0], col)
-                        with StarFile(v, 'r') as sf:
-                            info[col] = {'size': sf.getTableSize(tableName), 'table': sf.getTableInfo(tableName)}
+                        linked_path = getattr(t[0], col)
+                        star_path = self.join(linked_path)
+                        with StarFile(star_path, 'r') as sf:
+                            info[col] = {
+                                'size': sf.getTableSize(tableName),
+                                'table': sf.getTableInfo(tableName),
+                            }
 
                     # TODO: Check if there are TomoParticles
                     ptsInfo = info['rlnTomoParticlesFile']
@@ -436,8 +478,12 @@ class ProjectData(FolderManager):
                     self._removeJobOutput(job, output.id)
 
         status = self._resolveJobStatus(job)
-        job['status'] = status
         cached = self._jobs.get(job.id, {})
+        cached_status = cached.get('status')
+        if (status == self.STATUS_SCHEDULED
+                and cached_status in self.JOB_STATUS_EMWRAP):
+            status = cached_status
+        job['status'] = status
         if cached.get('status') != status:
             info = dict(cached) if cached else dict(jobInfo)
             info['status'] = status
