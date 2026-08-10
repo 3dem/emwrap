@@ -22,7 +22,6 @@ from emtools.utils import FolderManager
 
 from emwrap.warp.warp import WarpBasePipeline
 
-
 class MissAlignment(WarpBasePipeline):
     """Run Miss-Alignment on a Warp project produced by coarse TS alignment.
 
@@ -82,7 +81,7 @@ class MissAlignment(WarpBasePipeline):
 
     CONFIG_NAME = 'miss_alignment_config.yaml'
     UPDATE_SCRIPT = 'update_warp_xml.py'
-    RUNNER_SCRIPT = 'run_miss_alignment.sh'
+    CONFIG_TEMPLATE = 'config_template.yaml'
     OUTPUT_STAR = 'miss_aligned_tilt_series.star'
 
     def _get_launcher(self):
@@ -174,11 +173,11 @@ class MissAlignment(WarpBasePipeline):
         if len(ts_table) == 0:
             raise ValueError(f'Tilt-series metadata is empty: {first.rlnTomoTiltSeriesStarFile}')
         
-        movie_file = ts_table[0].rlnMicrographMovieName
-        dims = Image.get_dimensions(movie_file)
+        mic_file = ts_table[0].rlnMicrographName
+        dims = Image.get_dimensions(mic_file)
         image_x = dims[0]
         image_y = dims[1]
-        self.log(f'Inferred original image dimensions from {movie_file}: '
+        self.log(f'Inferred original image dimensions from {mic_file}: '
                 f'{image_x} x {image_y}')
 
         settings_dims = WarpXml(self.join(self.TSS)).getDict(
@@ -204,7 +203,6 @@ class MissAlignment(WarpBasePipeline):
             f"{geometry['volume_z']}, pixel_size={geometry['pixel_size']} A/px"
         )
         return geometry
-
 
     def _update_warp_xml_script(self):
         """Return the standalone Warp XML update helper."""
@@ -250,78 +248,130 @@ class MissAlignment(WarpBasePipeline):
             launcher=self._get_launcher(),
         )
 
-    def _command_tokens(self, mode, config_file):
-        start_iteration = self._nonnegative_int(
-            self._args.get('start_at_iteration', 0), 'start_at_iteration'
-        )
-        prepare_stacks = self._positive_float(
-            self._args.get('prepare_stacks', 10.0), 'prepare_stacks'
-        )
-
-        tokens = [
-            'miss-alignment', mode,
-            '--config-file', config_file,
-            '--start-at-iteration', str(start_iteration),
-            '--prepare-stacks', str(prepare_stacks),
-        ]
-
-        if mode == 'train':
-            training_devices = self._device_csv(
-                self._args.get('training_devices', '0') or '0',
-                'training_devices',
+    def _config_template_path(self):
+        """Return the bundled Miss-Alignment config template."""
+        config_template = os.path.abspath(
+            os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                self.CONFIG_TEMPLATE,
             )
-            reconstruction_devices = self._device_csv(
-                self._args.get('reconstruction_devices', '0,0,0') or '0,0,0',
-                'reconstruction_devices',
-            )
-            dataloaders = self._positive_int(
-                self._args.get('dataloaders_per_trainer', 5),
-                'dataloaders_per_trainer',
-            )
-            tokens.extend([
-                '--training-devices', training_devices,
-                '--reconstruction-devices', reconstruction_devices,
-                '--dataloaders-per-trainer', str(dataloaders),
-            ])
-
-        extra = str(self._args.get('extra_miss_alignment', '') or '').strip()
-        if extra:
-            tokens.extend(shlex.split(extra))
-        return tokens
-
-    def _write_runner(self, batch, mode, config_file):
-        runner_path = batch.join(self.RUNNER_SCRIPT)
-        omp_threads = self._positive_int(
-            self._args.get('omp_num_threads', 1), 'omp_num_threads'
         )
-        mkl_threads = self._positive_int(
-            self._args.get('mkl_num_threads', 1), 'mkl_num_threads'
-        )
-        tokens = self._command_tokens(mode, config_file)
-        command = ' '.join(shlex.quote(str(token)) for token in tokens)
+        if not os.path.isfile(config_template):
+            raise FileNotFoundError(
+                'Miss-Alignment config template not found. Install '
+                f'{self.CONFIG_TEMPLATE} beside {os.path.basename(__file__)}: '
+                f'{config_template}'
+            )
+        return config_template
 
-        lines = [
-            '#!/bin/bash',
-            'set -euo pipefail',
-            f'export OMP_NUM_THREADS={omp_threads}',
-            f'export MKL_NUM_THREADS={mkl_threads}',
-        ]
+    def _update_config_yaml(self):
+        """Copy and update the Miss-Alignment YAML configuration."""
+        config_template = self._config_template_path()
+        config_file = os.path.abspath(self.join(self.TS, self.CONFIG_NAME))
+        training_directory = os.path.abspath(self.join(self.TS))
+        batch_size = 1
+        # self._positive_int(
+            # self._args.get('tilt_series_alignment.batch_size', 32) or 32,
+            # 'tilt_series_alignment.batch_size',
+        # )
+
+        shutil.copy2(config_template, config_file)
+
+        with open(config_file, 'r', encoding='utf-8') as handle:
+            lines = handle.readlines()
+
+        section = None
+        training_directory_updated = False
+        data_loading_batch_size_updated = False
+        alignment_batch_size_updated = False
+
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+
+            if line and not line[0].isspace() and stripped.endswith(':'):
+                section = stripped[:-1]
+                continue
+
+            if section == 'general' and stripped.startswith('training_directory:'):
+                indent = line[:len(line) - len(line.lstrip())]
+                lines[i] = f'{indent}training_directory: {training_directory}\n'
+                training_directory_updated = True
+            elif (section == 'data_loading' and stripped.startswith('batch_size:')):
+                indent = line[:len(line) - len(line.lstrip())]
+                lines[i] = f'{indent}batch_size: {batch_size}\n'
+                data_loading_batch_size_updated = True
+            elif (section == 'tilt_series_alignment' and stripped.startswith('batch_size:')):
+                indent = line[:len(line) - len(line.lstrip())]
+                lines[i] = f'{indent}batch_size: {batch_size}\n'
+                alignment_batch_size_updated = True
+
+        if not training_directory_updated:
+            raise ValueError(
+                f'Could not find general.training_directory in {config_template}'
+            )
+        if not alignment_batch_size_updated:
+            raise ValueError(
+                f'Could not find batch_size in {config_template}'
+            )
+        if not data_loading_batch_size_updated:
+            raise ValueError(
+                f'Could not find data_loading.batch_size in {config_template}'
+            )
+
+        with open(config_file, 'w', encoding='utf-8') as handle:
+            handle.writelines(lines)
+
+        self.log(
+            'Miss-Alignment config updated: '
+            f'training_directory={training_directory}, '
+            f'batch_size={batch_size}'
+        )
+        return config_file
+
+    def _run_miss_alignment(self, batch, mode, config_file):
+        """Run a simple single-GPU Miss-Alignment test."""
+
+        # Temporary hard-coded values for initial testing.
+        start_iteration = 0
+        prepare_stacks = 5.0
+        training_devices = '0'
+        reconstruction_devices = '0,0,0'
+        dataloaders = 1
+        omp_threads = 1
+        mkl_threads = 1
+
+        # Physical GPU assigned by EMHub.
         if self.gpuList:
             if isinstance(self.gpuList, str):
-                visible = self.gpuList.strip().replace(' ', ',')
+                visible_devices = self.gpuList.strip().replace(' ', ',')
             else:
-                visible = ','.join(str(device) for device in self.gpuList)
-            lines.append(f'export CUDA_VISIBLE_DEVICES={shlex.quote(visible)}')
-        lines.extend([
-            f'cd {shlex.quote(os.path.abspath(self.join(self.TS)))}',
-            f'exec {command}',
-            '',
-        ])
+                visible_devices = ','.join(str(device) for device in self.gpuList)
+        else:
+            visible_devices = '0'
 
-        with open(runner_path, 'w', encoding='utf-8') as handle:
-            handle.write('\n'.join(lines))
-        os.chmod(runner_path, os.stat(runner_path).st_mode | stat.S_IXUSR)
-        return runner_path
+        args = Args({
+            'env': '',
+            f'OMP_NUM_THREADS={omp_threads}': '',
+            f'MKL_NUM_THREADS={mkl_threads}': '',
+            f'CUDA_VISIBLE_DEVICES={visible_devices}': '',
+            'miss-alignment': '',
+            mode: '',
+            '--config-file': config_file,
+            '--training-devices': training_devices,
+            '--reconstruction-devices': reconstruction_devices,
+            '--dataloaders-per-trainer': dataloaders,
+            '--start-at-iteration': start_iteration,
+            '--prepare-stacks': prepare_stacks,
+        })
+
+        print('Miss-Alignment args:', args)
+
+        self.batch_execute(
+            'miss_alignment',
+            batch,
+            args,
+            launcher=self._get_launcher(),
+        )
 
     def runBatch(self, batch, **kwargs):
         self.inputTs = kwargs['inputTs']
@@ -335,18 +385,10 @@ class MissAlignment(WarpBasePipeline):
         geometry = self._dataset_geometry()
 
         self._update_warp_xmls(batch, geometry)
+        config_file = self._update_config_yaml()
 
-        # runner = self._write_runner(batch, mode, config_file)
-
-        # # The launcher activates the Miss-Alignment environment, then executes
-        # # this runner. The runner owns environment variables and exact CLI quoting.
-        # self.batch_execute(
-        #     'miss_alignment',
-        #     batch,
-        #     Args({'bash': os.path.abspath(runner)}),
-        #     launcher=self._get_launcher(),
-        # )
-        # self.updateBatchInfo(batch)
+        self._run_miss_alignment(batch, mode, config_file)
+        self.updateBatchInfo(batch)
 
     def _copy_passthrough_metadata(self, batch):
         """Create a local STAR handle while preserving initial Relion matrices."""
@@ -412,7 +454,6 @@ class MissAlignment(WarpBasePipeline):
                 "Received 'register_output_only'; only registering existing outputs."
             )
         self._output(batch)
-
 
 if __name__ == '__main__':
     MissAlignment.main()
