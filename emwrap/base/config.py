@@ -57,6 +57,10 @@ class ProcessingConfig:
         return data_path
 
     @classmethod
+    def get_packages(cls):
+        return cls._get_config().get('packages')
+
+    @classmethod
     def get_queues(cls):
         return cls._get_config('queues')
 
