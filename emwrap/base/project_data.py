@@ -309,13 +309,12 @@ class ProjectData(FolderManager):
                         'info': f'{n} items, {ps:0.1f} Å/px, bin: {binning:0.1f}'
                     }
                 elif filepath.endswith('optimisation_set.star'):
-                    with StarFile(filepath, 'r') as sf:
-                        table_names = sf.getTableNames()
-                        table_name = (
-                            'optimisation_set' if 'optimisation_set' in table_names
-                            else table_names[0]
+                    if not RelionStar.isTomoOptimisationSet(filepath):
+                        raise Exception(
+                            f"{filepath} is not a compliant tomography "
+                            "optimisation_set STAR file."
                         )
-                        t = sf.getTable(table_name)
+                    t = RelionStar.readTomoOptimisationSet(filepath)
 
                     cols = {
                         'rlnTomoParticlesFile': 'particles',
