@@ -29,6 +29,11 @@ export EMWRAP_CONFIG=$(cat <<EOF
             "label": "Warp Aretomo",
             "output": "WarpTsAlign"
         },
+        "emw-warp-tsalign": {
+            "launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_tsalign",
+            "label": "Warp TS Align",
+            "output": "WarpTsAlign"
+        },
         "emw-warp-ctfrec": {
             "launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_ctfrec",
             "label": "Warp CTF and Reconstruction",
