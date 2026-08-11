@@ -4,53 +4,208 @@
     "help": "Wrapper to run miss-alignment for tilt-series alignment improvement. \n\n*REFERENCES*:\n[[https://github.com/warpem/miss-alignment/tree/main][miss-alignment]]",
     "sections": [
         {
-            "label": "Import",
+            "label": "Input",
             "params": [
                 {
-                    "name": "input_tiltseries",
-                    "label": "Input tilt series:",
-                    "pattern": "",
-                    "help": "STAR file with input tilt-series",
-                    "paramClass": "PathParam",
-                    "pointerClass": "TiltSeriesAligned"
+                    "label": "Input",
+                    "paramClass": "Group",
+                    "params": [
+                        {
+                            "name": "input_tiltseries",
+                            "label": "Input tilt series (STAR):",
+                            "paramClass": "PathParam",
+                            "pointerClass": "TiltSeriesAligned",
+                            "help": "STAR file with input tilt-series"
+                        }, 
+                        {
+                            "name": "mode",
+                            "label": "Mode",
+                            "paramClass": "EnumParam",
+                            "choices": {
+                                "0": "Train & Infer",
+                                "1": "Train only",
+                                "2": "Infer only"
+                            }, 
+                            "default": "0",
+                            "help": "Select the mode of operation for the denoising process. Train and inference by default. Train only will train a model without performing inference. Infer only will use an existing model to denoise tomograms."
+                        }
+                    ]
                 }
             ]
         },
         {
-            "label": "Miss-alignment",
+            "label": "Training",
             "params": [
                 {
-                    "name": "ts_aretomo.angpix",
-                    "label": "Output pixel size (A/pix)",
-                    "paramClass": "FloatParam",
-                    "help": "Rescale tilt images to this pixel size; normally 10–15 A for cryo data; leave out to keep the original pixel size."
+                    "label": "Training set selection",
+                    "paramClass": "Group",
+                    "params": [
+                        {
+                            "name": "train.n_training",
+                            "label": "Training set size:",
+                            "default": "10",
+                            "paramClass": "IntParam",
+                            "help": "Number of tilt series to use for training."
+                        }
+                    ]
                 },
                 {
-                    "name": "ts_aretomo.alignz",
-                    "label": "Align Z (A)",
-                    "default": 1800,
-                    "paramClass": "FloatParam",
-                    "help": "REQUIRED Value for AreTomo's AlignZ parameter in Angstroms (will be auto-converted to binned pixels), i.e. the thickness of the reconstructed tomogram used for alignments."
+                    "label": "Configure training (.yaml configuration file)",
+                    "paramClass": "Group",
+                    "collapsed": true,
+                    "params": [
+                        {
+                            "name": "train.yml.apply_ctf",
+                            "label": "Apply CTF correction:",
+                            "default": false,
+                            "paramClass": "BoolParam",
+                            "help": "(apply_ctf) Apply CTF correction during training. Leave False; enabling CTF doubles processing time with no benefit to alignment"
+                        },
+                        {
+                            "name": "train.yml.iterations_anchoring",
+                            "label": "Number of anchoring iterations:",
+                            "default": 2,
+                            "paramClass": "IntParam",
+                            "help": "iteration_setting: Determines the number of anchoring iterations (iterative)."
+                        },   
+                        {
+                            "name": "train.yml.iterations_global",
+                            "label": "Number of global iterations:",
+                            "default": 2,
+                            "paramClass": "IntParam",
+                            "help": "iteration_setting: Determines the number of global iterations (single pass)."
+                        },
+                        {
+                            "name": "train.yml.iterations_spline",
+                            "label": "Number of spline iterations:",
+                            "default": 4,
+                            "paramClass": "IntParam",
+                            "help": "iteration_setting: Determines the number of spline/local refinements iterations (coarse-to-fine)."
+                        },
+                        {
+                            "name": "train.yml.learning_rate",
+                            "label": "Learning rate:",
+                            "default": 1.0e-3,
+                            "paramClass": "FloatParam",
+                            "help": "model_training (learning_rate): Learning rate for the optimizer."
+                        },
+                        {
+                            "name": "train.yml.max_epochs_per_iteration",
+                            "label": "Max epochs per iteration:",
+                            "default": 30,
+                            "paramClass": "IntParam",
+                            "help": "model_training (max_epochs_per_iteration): Determines the maximum number of epochs per iteration."
+                        },
+                        {
+                            "name": "train.yml.dt_batch_size",
+                            "label": "Data Loading Batch size:",
+                            "default": 32,
+                            "paramClass": "IntParam",
+                            "help": "data_loading (batch_size): Batch size for training."
+                        },
+                        {
+                            "name": "train.yml.dt_patch_size",
+                            "label": "Data Loading Patch size:",
+                            "default": 96,
+                            "paramClass": "IntParam",
+                            "help": "data_loading (patch_size): Size of patches for training."
+                        },
+                        {
+                            "name": "train.yml.dt_steps_per_epoch",
+                            "label": "Data Loading Steps per epoch:",
+                            "default": 1000,
+                            "paramClass": "IntParam",
+                            "help": "data_loading (steps_per_epoch): Number of steps per epoch."
+                        }, 
+                        {
+                            "name": "train.yml.al_patch_size",
+                            "label": "Alignment Patch size:",
+                            "default": 96,
+                            "paramClass": "IntParam",
+                            "help": "tilt_series_alignment (patch_size): Same as training."
+                        },
+                        {
+                            "name": "train.yml.al_batch_size",
+                            "label": "Alignment Batch size:",
+                            "default": 32,
+                            "paramClass": "IntParam",
+                            "help": "tilt_series_alignment (batch_size): Batch size for training."
+                        },
+                        {
+                            "name": "train.yml.al_patch_overlap",
+                            "label": "Patch overlap:",
+                            "default": 0.1,
+                            "paramClass": "FloatParam",
+                            "help": "tilt_series_alignment (patch_overlap): tolerated overlap between patches used for optimizing the alignment."
+                        }
+                   ]
                 },
                 {
-                    "name": "ts_aretomo.axis_iter",
-                    "label": "Axis Iter",
-                    "default": 0,
-                    "paramClass": "FloatParam",
-                    "help": ""
+                    "label": "Training command",
+                    "paramClass": "Group",
+                    "collapsed": true,
+                    "params": [
+                        {
+                            "name": "train.missalign.dataloaders-per-trainer",
+                            "label": "Number of data loader per trainer:",
+                            "default": 5,
+                            "paramClass": "IntParam",
+                            "help": "(--dataloaders-per-trainer) Number of CPU DataLoader workers per training device. Total DataLoader workers = this value × number of training devices. [default: 2]"
+                        },
+                        {
+                            "name": "train.missalign.prepare-stacks",
+                            "label": "Prepare stacks (A):",
+                            "default": 10.0,
+                            "paramClass": "FloatParam",
+                            "help": "(--prepare-stacks) Pixel size (in Angstroms) for preprocessing tilt stacks. If provided, loads raw tilt images, rescales to this pixel size, and creates tilt stacks with thumbnails before training."
+                        },
+                        {
+                            "name": "train.missalign.start-at-iteration",
+                            "label": "Start at iteration:",
+                            "default": 0,
+                            "paramClass": "IntParam",
+                            "help": "(--start-at-iteration) If the run is interrupted, it can be resumed at any iteration with --start-at-iteration N (counting from 0)."
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "label": "Inference",
+            "params": [
+                {
+                    "label": "Model",
+                    "paramClass": "Group",
+                    "params": [
+                        {
+                            "name": "infer.dn3.model",
+                            "label": "Pretrained model (optional):",
+                            "default": "",
+                            "paramClass": "PathParam",
+                            "help": "(--model) Pre-trained UNet3d model file to use for inference. Leave empty to automatically use the best model (lowest ch_mean) from the associated training job."
+                        }
+                    ]
                 },
                 {
-                    "name": "ts_aretomo.axis_batch",
-                    "label": "Axis Batch",
-                    "default": 0,
-                    "paramClass": "FloatParam",
-                    "help": ""
-                },
-                {
-                    "name": "ts_aretomo.patches",
-                    "label": "Patches",
-                    "default": "",
-                    "help": "Number of patches for local alignments in X, Y, separated by 'x': e.g. 6x4. By default (empty, or 0x0 or 1x1) only global alignment is performed. More patches increase the processing time."                      
+                    "label": "Inference parameters",
+                    "paramClass": "Group",
+                    "collapsed": true,
+                    "params": [
+                        {
+                            "name": "infer.dn3.inf_length",
+                            "label": "Inference subvolume side length (px):",
+                            "default": "",
+                            "paramClass": "IntParam",
+                            "help": "(--inf_length) Side length of cubic subvolumes to extract during inference, in pixels. Leave empty to use the program default."
+                        },
+                        {
+                            "name": "infer.dn3.inf_padding",
+                            "label": "Inference padding (px):",
+                            "default": "",
+                            "paramClass": "IntParam",
+                            "help": "(--inf_padding) Padding length, in pixels, applied during inference."
+                        }
+                    ]
                 }
             ]
         },
@@ -63,11 +218,18 @@
                     "help": "If it is a single number (N), it will represent the total number of GPUs (0..N-1). It there are multiple values, it will be the specific GPUs ID."
                 },
                 {
-                    "name": "ts_aretomo.perdevice",
-                    "label": "Processes per device",
+                    "name": "train.perdevice",
+                    "label": "Training Processes per device",
                     "default": 2,
                     "paramClass": "IntParam",
-                    "help": "(--perdevice in ts_aretomo)"
+                    "help": "(--perdevice in training)"
+                },
+                {
+                    "name": "infer.perdevice",
+                    "label": "Inference Processes per device",
+                    "default": 2,
+                    "paramClass": "IntParam",
+                    "help": "(--perdevice in inference)"
                 },
                 {
                     "label": "Launchers",
