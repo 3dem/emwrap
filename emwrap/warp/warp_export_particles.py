@@ -168,7 +168,7 @@ class WarpExportParticles(WarpBasePipeline):
         columns = tomoTable.getColumnNames()
         if 'rlnCoordinatesMetadata' in columns:
             raise Exception(
-                f"{tomoStar} looks like a PyTom tomograms_coords.star file. "
+                f"{tomoStar} looks like a PyTom tomograms.star file. "
                 "Expected tomograms.star from a Warp reconstruction run."
             )
 
