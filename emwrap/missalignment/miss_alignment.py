@@ -610,29 +610,90 @@ class MissAlignment(WarpBasePipeline):
     # ------------------------------------------------------------------
     # Miss-Alignment training
     # ------------------------------------------------------------------
-    def _run_miss_alignment(self, batch, config_file):
-        """Launch Miss-Alignment training through the configured launcher.
+    def _training_gpu_devices(self):
+        """Build logical GPU assignments for Miss-Alignment training.
 
-        Training/reconstruction device allocation is intentionally kept in the
-        initial single-GPU configuration while the command is being validated.
-        The form-provided Miss-Alignment CLI options are appended directly.
+        ``self.gpuList`` contains the physical GPUs selected/reserved by EMHub.
+        Once those GPUs are exposed through CUDA_VISIBLE_DEVICES, Miss-Alignment
+        sees them as logical devices 0..N-1.
+
+        Training devices are assigned first, followed by reconstruction devices.
+        Each reconstruction GPU runs three reconstruction workers.
         """
+        if not self.gpuList:
+            raise ValueError(
+                'Miss-Alignment training requires at least one GPU.'
+            )
+
+        n_gpus = len(self.gpuList)
+        n_training = self._positive_int(
+            self._args.get('train.training_gpus', 1),
+            'train.training_gpus',
+        )
+        n_reconstruction = self._positive_int(
+            self._args.get('train.reconstruction_gpus', 1),
+            'train.reconstruction_gpus',
+        )
+
+        workers_per_reconstruction_gpu = 3
+
+        # A single large GPU is shared by training and reconstruction.
+        if n_gpus == 1:
+            if n_training != 1 or n_reconstruction != 1:
+                raise ValueError(
+                    'With one reserved GPU, train.training_gpus and '
+                    'train.reconstruction_gpus must both be 1.'
+                )
+            return '0', ','.join(
+                ['0'] * workers_per_reconstruction_gpu
+            )
+
+        if n_training + n_reconstruction > n_gpus:
+            raise ValueError(
+                f'Requested {n_training} training GPU(s) and '
+                f'{n_reconstruction} reconstruction GPU(s), but only '
+                f'{n_gpus} GPU(s) are available to the job.'
+            )
+
+        logical_gpus = list(range(n_gpus))
+        training_ids = logical_gpus[:n_training]
+        reconstruction_ids = logical_gpus[
+            n_training:n_training + n_reconstruction
+        ]
+
+        training_devices = ','.join(
+            str(device) for device in training_ids
+        )
+        reconstruction_devices = ','.join(
+            str(device)
+            for device in reconstruction_ids
+            for _ in range(workers_per_reconstruction_gpu)
+        )
+
+        return training_devices, reconstruction_devices
+
+    def _run_miss_alignment(self, batch, config_file):
+        """Launch Miss-Alignment training through the configured launcher."""
         omp_threads = 1
         mkl_threads = 1
 
-        # Initial single-large-GPU configuration.
-        training_devices = '0'
-        reconstruction_devices = '0,0,0'
+        training_devices, reconstruction_devices = (
+            self._training_gpu_devices()
+        )
 
-        if self.gpuList:
-            if isinstance(self.gpuList, str):
-                visible_devices = self.gpuList.strip().replace(' ', ',')
-            else:
-                visible_devices = ','.join(
-                    str(device) for device in self.gpuList
-                )
+        if isinstance(self.gpuList, str):
+            visible_devices = self.gpuList.strip().replace(' ', ',')
         else:
-            visible_devices = '0'
+            visible_devices = ','.join(
+                str(device) for device in self.gpuList
+            )
+
+        self.log(
+            'Miss-Alignment GPU allocation: '
+            f'CUDA_VISIBLE_DEVICES={visible_devices}; '
+            f'training={training_devices}; '
+            f'reconstruction={reconstruction_devices}'
+        )
 
         args = Args({
             'env': '',
@@ -866,12 +927,12 @@ class MissAlignment(WarpBasePipeline):
         #     )
         #     return
 
-        # # Train & Infer reaches this point after training. Inference will be
-        # # implemented separately.
-        # self.log(
-        #     f'Training completed. Model available for inference: '
-        #     f'{self.modelPath}'
-        # )
+        # Train & Infer reaches this point after training. Inference will be
+        # implemented separately.
+        self.log(
+            f'Training completed. Model available for inference: '
+            f'{self.modelPath}'
+        )
 
 
 if __name__ == '__main__':

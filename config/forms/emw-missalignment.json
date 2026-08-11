@@ -218,18 +218,22 @@
                     "help": "If it is a single number (N), it will represent the total number of GPUs (0..N-1). It there are multiple values, it will be the specific GPUs ID."
                 },
                 {
-                    "name": "train.perdevice",
-                    "label": "Training Processes per device",
-                    "default": 2,
-                    "paramClass": "IntParam",
-                    "help": "(--perdevice in training)"
+                    "name": "cpus",
+                    "label": "CPUs",
+                    "default": "",
+                    "help": "If empty, the program will use the number of GPUs * 10 CPUs."
                 },
                 {
-                    "name": "infer.perdevice",
-                    "label": "Inference Processes per device",
-                    "default": 2,
-                    "paramClass": "IntParam",
-                    "help": "(--perdevice in inference)"
+                    "name": "train.training_gpus",
+                    "label": "GPUs for training",
+                    "default": 1,
+                    "paramClass": "IntParam"
+                },
+                {
+                    "name": "train.reconstruction_gpus",
+                    "label": "GPUs for reconstruction",
+                    "default": 1,
+                    "paramClass": "IntParam"
                 },
                 {
                     "label": "Launchers",
