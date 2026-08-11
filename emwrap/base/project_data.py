@@ -366,6 +366,53 @@ class ProjectData(FolderManager):
             'info': info
         }
 
+    def _collectJobOutputIds(self, job_id, job=None):
+        """Gather output node ids from the workflow graph, RELION star, and cache."""
+        job = job or self._wf.getJob(job_id)
+        outputs = [o.id for o in job.outputs]
+
+        outputs_star = self.join(job_id, 'RELION_OUTPUT_NODES.star')
+        if os.path.exists(outputs_star):
+            output_table = StarFile.getTableFromFile('pipeline_nodes', outputs_star)
+            for row in output_table:
+                if row.rlnPipeLineNodeName not in outputs:
+                    outputs.append(row.rlnPipeLineNodeName)
+
+        for output_id in self._jobs.get(job_id, {}).get('outputs', []):
+            if output_id not in outputs:
+                outputs.append(output_id)
+
+        return outputs
+
+    def _extendJobInfoOutputs(self, job_id, jobInfo, job=None):
+        """Merge the latest output ids for an active job without invalidating cache."""
+        outputs = self._collectJobOutputIds(job_id, job=job)
+        if outputs == jobInfo.get('outputs'):
+            return jobInfo
+        extended = dict(jobInfo)
+        extended['outputs'] = outputs
+        return extended
+
+    def _shouldRefreshOutputInfo(self, output_id, job):
+        """Return True when a running job likely has newer output metadata."""
+        if job is None or not self.isActiveJob(job):
+            return False
+
+        cached = self._outputs.get(output_id)
+        cached_ts = cached.get('ts', 0) if cached else 0
+
+        output_path = self.join(output_id)
+        if os.path.exists(output_path):
+            if os.stat(output_path).st_mtime > cached_ts:
+                return True
+
+        run_out = self.join(job.id, 'run.out')
+        if os.path.exists(run_out):
+            if os.stat(run_out).st_mtime > cached_ts:
+                return True
+
+        return cached is None
+
     def _computeJobInfo(self, jobId, jobFiles):
         jobStarFile = jobFiles[0]
 
@@ -396,23 +443,7 @@ class ProjectData(FolderManager):
                     inputs.append((pid, rel_value))
 
         # Compute outputs info
-        outputs = [o.id for o in job.outputs]
-         
-        # Detect outputs not already in the job
-        # FIXME: Check if job_pipeline.star is used or not, or RELION_OUTPUT_NODES.star is enough.
-        outputsStarFile = jobFiles[1]
-
-        if os.path.exists(outputsStarFile):
-            self._debug(f"{Color.cyan('JOB')}: {Color.red('Reading')} star from {Color.bold(outputsStarFile)}")
-            output_table = StarFile.getTableFromFile('pipeline_nodes', outputsStarFile)
-            for row in output_table:
-                if row.rlnPipeLineNodeName not in outputs:
-                    outputs.append(row.rlnPipeLineNodeName)
-
-        if self.isActiveJob(job):
-            for output_id in self._jobs.get(jobId, {}).get('outputs', []):
-                if output_id not in outputs:
-                    outputs.append(output_id)
+        outputs = self._collectJobOutputIds(jobId, job=job)
 
         # Resolve status: RELION marker files, then project.json, then pipeline
         status = self._resolveJobStatus(job)
@@ -505,8 +536,14 @@ class ProjectData(FolderManager):
         updated = bool(self.removeMissingJobs())
         for job in self._wf.jobs():
             info, computed = self._getJobInfo(job.id)
-            # Always sync output metadata: pipeline reload drops info from nodes.
-            if self._updateJob(job, info, prune_outputs=computed) or computed:
+            active = self.isActiveJob(job)
+            if active:
+                extended = self._extendJobInfoOutputs(job.id, info, job=job)
+                if extended['outputs'] != info.get('outputs'):
+                    info = extended
+                    computed = True
+            if (self._updateJob(job, info, prune_outputs=computed and not active)
+                    or computed):
                 updated = True
             else:
                 self._debug(f"{Color.cyan('JOB')}: Info for {Color.bold(job.id)} is up to date")
@@ -573,11 +610,25 @@ class ProjectData(FolderManager):
 
     def getOutputInfo(self, output_id):
         self._debug(f"{Color.warn('OUTPUT')}: Getting info for {Color.bold(output_id)}")
+        job = self._outputParentJob(output_id)
+
         if self._isPendingOutput(output_id):
-            cached = self._outputs.get(output_id)
-            if cached and not str(cached.get('info', '')).startswith('Error:'):
-                return cached
-            return self._pendingOutputInfo(output_id)
+            if not (job and self.isActiveJob(job)):
+                cached = self._outputs.get(output_id)
+                if cached and not str(cached.get('info', '')).startswith('Error:'):
+                    return cached
+            pending = self._pendingOutputInfo(output_id)
+            if job and self.isActiveJob(job):
+                self._set_info(self._outputs, output_id, pending)
+            return pending
+
+        if self._shouldRefreshOutputInfo(output_id, job):
+            info = self._computeOutputTypeInfo(output_id, [self.join(output_id)])
+            self._set_info(self._outputs, output_id, info)
+            if (self._isPendingOutput(output_id)
+                    and str(info.get('info', '')).startswith('Error:')):
+                return self._pendingOutputInfo(output_id)
+            return info
 
         outputFiles = [self.join(output_id)]
         info, computed = self._get_info(self._outputs, output_id, outputFiles,
