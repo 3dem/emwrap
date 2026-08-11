@@ -409,6 +409,11 @@ class ProjectData(FolderManager):
                 if row.rlnPipeLineNodeName not in outputs:
                     outputs.append(row.rlnPipeLineNodeName)
 
+        if self.isActiveJob(job):
+            for output_id in self._jobs.get(jobId, {}).get('outputs', []):
+                if output_id not in outputs:
+                    outputs.append(output_id)
+
         # Resolve status: RELION marker files, then project.json, then pipeline
         status = self._resolveJobStatus(job)
         job['status'] = status
@@ -471,7 +476,7 @@ class ProjectData(FolderManager):
             data = job.getOutput(o) if job.hasOutput(o) else job.registerOutput(o)
             _update_data(data, o)
 
-        if prune_outputs:
+        if prune_outputs and not self.isActiveJob(job):
             for output in list(job.outputs):
                 if output.id not in output_ids:
                     self._removeJobOutput(job, output.id)
@@ -483,9 +488,15 @@ class ProjectData(FolderManager):
                 and cached_status in self.JOB_STATUS_EMWRAP):
             status = cached_status
         job['status'] = status
-        if cached.get('status') != status:
+        info_changed = (
+            cached.get('outputs') != jobInfo.get('outputs')
+            or cached.get('inputs') != jobInfo.get('inputs')
+        )
+        if cached.get('status') != status or info_changed:
             info = dict(cached) if cached else dict(jobInfo)
             info['status'] = status
+            info['inputs'] = jobInfo.get('inputs', info.get('inputs', []))
+            info['outputs'] = jobInfo.get('outputs', info.get('outputs', []))
             self._set_info(self._jobs, job.id, info)
             return True
         return False
@@ -504,8 +515,10 @@ class ProjectData(FolderManager):
 
     def _getJobInfo(self, job_id):
         self._debug(f"{Color.cyan('JOB')}: Getting info for {Color.bold(job_id)}")
+        # run.out grows during execution; exclude it so log writes do not
+        # invalidate output metadata and trigger pruning on every refresh.
         jobFiles = [self.join(job_id, fn) for fn in [
-            'job.star', 'RELION_OUTPUT_NODES.star', 'run.out',
+            'job.star', 'RELION_OUTPUT_NODES.star',
             *self.JOB_STATUS_FILES.keys(),
         ]]
         jobFiles.extend([self._project.pipeline_star, self._project_json_path])
