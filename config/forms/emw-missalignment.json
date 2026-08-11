@@ -178,32 +178,88 @@
                     "paramClass": "Group",
                     "params": [
                         {
-                            "name": "infer.dn3.model",
-                            "label": "Pretrained model (optional):",
+                            "name": "infer.model_run_directory",
+                            "label": "Training run directory:",
                             "default": "",
                             "paramClass": "PathParam",
-                            "help": "(--model) Pre-trained UNet3d model file to use for inference. Leave empty to automatically use the best model (lowest ch_mean) from the associated training job."
+                            "help": "Finished Miss-Alignment training run containing iter1/model.ckpt ... iterN/model.ckpt. Required for Infer only mode. In Train & Infer mode, the training directory produced by the current job will be used automatically."
                         }
                     ]
                 },
                 {
-                    "label": "Inference parameters",
+                    "label": "Configure inference (.yaml configuration file)",
                     "paramClass": "Group",
                     "collapsed": true,
                     "params": [
                         {
-                            "name": "infer.dn3.inf_length",
-                            "label": "Inference subvolume side length (px):",
-                            "default": "",
-                            "paramClass": "IntParam",
-                            "help": "(--inf_length) Side length of cubic subvolumes to extract during inference, in pixels. Leave empty to use the program default."
+                            "name": "infer.yml.apply_ctf",
+                            "label": "Apply CTF correction:",
+                            "default": false,
+                            "paramClass": "BoolParam",
+                            "help": "(apply_ctf) Apply CTF correction during alignment. Leave False; enabling CTF approximately doubles processing time."
                         },
                         {
-                            "name": "infer.dn3.inf_padding",
-                            "label": "Inference padding (px):",
-                            "default": "",
+                            "name": "infer.yml.iterations_anchoring",
+                            "label": "Number of anchoring iterations:",
+                            "default": 2,
                             "paramClass": "IntParam",
-                            "help": "(--inf_padding) Padding length, in pixels, applied during inference."
+                            "help": "Number of anchoring iterations to apply. The number and order of inference iterations must not exceed the models available in the selected training run."
+                        },
+                        {
+                            "name": "infer.yml.iterations_global",
+                            "label": "Number of global iterations:",
+                            "default": 2,
+                            "paramClass": "IntParam",
+                            "help": "Number of global alignment iterations to apply."
+                        },
+                        {
+                            "name": "infer.yml.iterations_spline",
+                            "label": "Number of local/spline iterations:",
+                            "default": 4,
+                            "paramClass": "IntParam",
+                            "help": "Number of local refinement iterations using alignment: [3, 3]."
+                        },
+                        {
+                            "name": "infer.yml.al_patch_size",
+                            "label": "Alignment Patch size:",
+                            "default": 96,
+                            "paramClass": "IntParam",
+                            "help": "tilt_series_alignment (patch_size): Patch size used during alignment. Normally this should match the value used during training."
+                        },
+                        {
+                            "name": "infer.yml.al_batch_size",
+                            "label": "Alignment Batch size:",
+                            "default": 32,
+                            "paramClass": "IntParam",
+                            "help": "tilt_series_alignment (batch_size): Number of patches reconstructed simultaneously. Reduce for GPUs with less memory."
+                        },
+                        {
+                            "name": "infer.yml.al_patch_overlap",
+                            "label": "Patch overlap:",
+                            "default": 0.1,
+                            "paramClass": "FloatParam",
+                            "help": "tilt_series_alignment (patch_overlap): Tolerated overlap between patches used for alignment optimization."
+                        }
+                    ]
+                },
+                {
+                    "label": "Inference command",
+                    "paramClass": "Group",
+                    "collapsed": true,
+                    "params": [
+                        {
+                            "name": "infer.missalign.prepare-stacks",
+                            "label": "Prepare stacks (A):",
+                            "default": 10.0,
+                            "paramClass": "FloatParam",
+                            "help": "(--prepare-stacks) Pixel size in Angstroms used when preparing the tilt stacks before inference."
+                        },
+                        {
+                            "name": "infer.missalign.start-at-iteration",
+                            "label": "Start at iteration:",
+                            "default": 0,
+                            "paramClass": "IntParam",
+                            "help": "(--start-at-iteration) Resume inference from this iteration. Iterations are counted from 0."
                         }
                     ]
                 }

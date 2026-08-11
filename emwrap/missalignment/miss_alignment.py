@@ -35,6 +35,8 @@ class MissAlignment(WarpBasePipeline):
 
     CONFIG_NAME = 'miss_alignment_config.yaml'
     CONFIG_TEMPLATE = 'config_template.yaml'
+    INFERENCE_CONFIG_NAME = 'miss_alignment_inference_config.yaml'
+    INFERENCE_CONFIG_TEMPLATE = 'inference_config_template.yaml'
     UPDATE_SCRIPT = 'update_warp_xml.py'
     TRAINING_DIR = 'warp_tiltseries_training'
     OUTPUT_STAR = 'miss_aligned_tilt_series.star'
@@ -608,6 +610,163 @@ class MissAlignment(WarpBasePipeline):
         return config_file
 
     # ------------------------------------------------------------------
+    # Miss-Alignment inference YAML configuration
+    # ------------------------------------------------------------------
+    def _inference_config_template_path(self):
+        """Return the bundled Miss-Alignment inference config template."""
+        config_template = os.path.abspath(
+            os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                self.INFERENCE_CONFIG_TEMPLATE,
+            )
+        )
+        if not os.path.isfile(config_template):
+            raise FileNotFoundError(
+                'Miss-Alignment inference config template not found. Install '
+                f'{self.INFERENCE_CONFIG_TEMPLATE} beside '
+                f'{os.path.basename(__file__)}: {config_template}'
+            )
+        return config_template
+
+    def _validate_model_run_directory(self, model_run_directory, n_iterations):
+        """Validate that all per-iteration checkpoints required by inference exist."""
+        model_run_directory = os.path.abspath(model_run_directory)
+
+        if not os.path.isdir(model_run_directory):
+            raise NotADirectoryError(
+                'Miss-Alignment model run directory does not exist: '
+                f'{model_run_directory}'
+            )
+
+        missing = []
+        for iteration in range(1, n_iterations + 1):
+            checkpoint = os.path.join(
+                model_run_directory,
+                f'iter{iteration}',
+                'model.ckpt',
+            )
+            if not os.path.isfile(checkpoint):
+                missing.append(checkpoint)
+
+        if missing:
+            raise FileNotFoundError(
+                'The selected Miss-Alignment model run does not contain all '
+                f'{n_iterations} checkpoints required by the inference '
+                'iteration schedule. Missing: '
+                + ', '.join(missing)
+            )
+
+        return model_run_directory
+
+    def _update_inference_config_yaml(self, data_directory, model_run_directory):
+        """Create the inference YAML from the bundled template and form values."""
+        config_template = self._inference_config_template_path()
+        data_directory = os.path.abspath(data_directory)
+
+        apply_ctf = self._as_bool(
+            self._args.get('infer.yml.apply_ctf', False)
+        )
+        anchoring_iterations = self._nonnegative_int(
+            self._args.get('infer.yml.iterations_anchoring', 2),
+            'infer.yml.iterations_anchoring',
+        )
+        global_iterations = self._nonnegative_int(
+            self._args.get('infer.yml.iterations_global', 2),
+            'infer.yml.iterations_global',
+        )
+        spline_iterations = self._nonnegative_int(
+            self._args.get('infer.yml.iterations_spline', 4),
+            'infer.yml.iterations_spline',
+        )
+
+        alignment_patch_size = self._positive_int(
+            self._args.get('infer.yml.al_patch_size', 96),
+            'infer.yml.al_patch_size',
+        )
+        alignment_batch_size = self._positive_int(
+            self._args.get('infer.yml.al_batch_size', 32),
+            'infer.yml.al_batch_size',
+        )
+        alignment_patch_overlap = self._nonnegative_float(
+            self._args.get('infer.yml.al_patch_overlap', 0.1),
+            'infer.yml.al_patch_overlap',
+        )
+
+        n_iterations = (
+            anchoring_iterations
+            + global_iterations
+            + spline_iterations
+        )
+        if n_iterations == 0:
+            raise ValueError('Inference requires at least one iteration.')
+
+        model_run_directory = self._validate_model_run_directory(
+            model_run_directory,
+            n_iterations,
+        )
+
+        config_file = os.path.join(
+            data_directory,
+            self.INFERENCE_CONFIG_NAME,
+        )
+        shutil.copy2(config_template, config_file)
+
+        with open(config_file, 'r', encoding='utf-8') as handle:
+            lines = handle.readlines()
+
+        updates = [
+            ('general', 'data_directory', json.dumps(data_directory)),
+            ('general', 'model_run_directory', json.dumps(model_run_directory)),
+            ('general', 'apply_ctf', 'True' if apply_ctf else 'False'),
+            ('tilt_series_alignment', 'patch_size', alignment_patch_size),
+            ('tilt_series_alignment', 'patch_overlap', alignment_patch_overlap),
+            ('tilt_series_alignment', 'batch_size', alignment_batch_size),
+        ]
+
+        missing = []
+        for section_name, key, value in updates:
+            if not self._replace_yaml_scalar(
+                lines,
+                section_name,
+                key,
+                value,
+            ):
+                missing.append(f'{section_name}.{key}')
+
+        if not self._replace_iteration_settings(
+            lines,
+            anchoring_iterations,
+            global_iterations,
+            spline_iterations,
+        ):
+            missing.append('general.iteration_settings')
+
+        if missing:
+            raise ValueError(
+                'Could not update expected keys in '
+                f'{config_template}: {", ".join(missing)}'
+            )
+
+        with open(config_file, 'w', encoding='utf-8') as handle:
+            handle.writelines(lines)
+
+        self.inferenceConfig = config_file
+        self.inferenceDir = data_directory
+        self.modelRunDirectory = model_run_directory
+
+        self.log(
+            'Miss-Alignment inference config updated: '
+            f'data_directory={data_directory}, '
+            f'model_run_directory={model_run_directory}, '
+            f'iterations={anchoring_iterations} anchoring/'
+            f'{global_iterations} global/'
+            f'{spline_iterations} spline, '
+            f'alignment_batch_size={alignment_batch_size}'
+        )
+
+        return config_file
+
+    # ------------------------------------------------------------------
     # Miss-Alignment training
     # ------------------------------------------------------------------
     def _training_gpu_devices(self):
@@ -723,6 +882,54 @@ class MissAlignment(WarpBasePipeline):
         )
 
     # ------------------------------------------------------------------
+    # Miss-Alignment inference
+    # ------------------------------------------------------------------
+    def _run_miss_alignment_infer(self, batch, config_file):
+        """Launch Miss-Alignment inference on all GPUs visible to the job."""
+        if not self.gpuList:
+            raise ValueError(
+                'Miss-Alignment inference requires at least one GPU.'
+            )
+
+        omp_threads = 1
+        mkl_threads = 1
+
+        if isinstance(self.gpuList, str):
+            visible_devices = self.gpuList.strip().replace(' ', ',')
+        else:
+            visible_devices = ','.join(
+                str(device) for device in self.gpuList
+            )
+
+        args = Args({
+            'env': '',
+            f'OMP_NUM_THREADS={omp_threads}': '',
+            f'MKL_NUM_THREADS={mkl_threads}': '',
+            f'CUDA_VISIBLE_DEVICES={visible_devices}': '',
+            'miss-alignment': '',
+            'infer': '',
+            '--config-file': config_file,
+        })
+
+        # Adds:
+        #   --prepare-stacks
+        #   --start-at-iteration
+        args.update(self._get_args('infer.missalign'))
+
+        self.log(
+            'Miss-Alignment inference GPU allocation: '
+            f'CUDA_VISIBLE_DEVICES={visible_devices}'
+        )
+        self.log(f'Miss-Alignment inference args: {args}')
+
+        self.batch_execute(
+            'miss_alignment_infer',
+            batch,
+            args,
+            launcher=self._get_launcher(),
+        )
+
+    # ------------------------------------------------------------------
     # Input monitoring
     # ------------------------------------------------------------------
     def _getInputTsTable(self):
@@ -802,6 +1009,39 @@ class MissAlignment(WarpBasePipeline):
         self.log(
             f'Miss-Alignment training finished. '
             f'Best model: {self.trainingBestModel}'
+        )
+
+    def launch_inference(self, model_run_directory):
+        """Prepare the full Warp dataset and launch Miss-Alignment inference."""
+        self.log(
+            'Launching Miss-Alignment inference with model run: '
+            f'{model_run_directory}'
+        )
+
+        batch = Batch(id=self.name, path=self.path)
+
+        input_folder = FolderManager(
+            os.path.abspath(os.path.dirname(self.inputTs))
+        )
+
+        # TODO: If mode is train+infer, the Warp project was already imported during training. Same as the update of the XMLs. If mode is infer-only, we need to import the Warp project and update the XMLs now. 
+        self._ensure_project_inputs(input_folder)
+        geometry = self._dataset_geometry()
+        self._update_warp_xmls(batch, geometry)
+        # TODO --------------------
+
+        data_directory = os.path.abspath(self.join(self.TS))
+        config_file = self._update_inference_config_yaml(
+            data_directory,
+            model_run_directory,
+        )
+
+        self._run_miss_alignment_infer(batch, config_file)
+        self.updateBatchInfo(batch)
+
+        self.log(
+            'Miss-Alignment inference finished. '
+            f'Aligned snapshots are in: {data_directory}/iterN/'
         )
 
     # ------------------------------------------------------------------
@@ -907,32 +1147,36 @@ class MissAlignment(WarpBasePipeline):
         )
 
         if mode == self.MODE_INFER_ONLY:
-            raise NotImplementedError(
-                'Infer-only mode is not implemented yet.'
-            )
+            model_run_directory = str(
+                self._args.get('infer.model_run_directory', '')
+                or ''
+            ).strip()
+            if not model_run_directory:
+                raise ValueError(
+                    'Infer-only mode requires infer.model_run_directory.'
+                )
+
+            self.launch_inference(model_run_directory)
+            return
 
         training_subset = self._wait_for_training_set()
         self.log(
             f'Starting training with {len(training_subset)} tilt series'
         )
-
         self.launch_training(training_subset)
-        
-        # self._output(Batch(id=self.name, path=self.path))
 
-        # if mode == self.MODE_TRAIN_ONLY:
-        #     self.log(
-        #         f'Training-only mode finished. '
-        #         f'Latest model: {self.modelPath}'
-        #     )
-        #     return
+        if mode == self.MODE_TRAIN_ONLY:
+            self.log(
+                'Training-only mode finished. '
+                f'Best model: {self.modelPath}'
+            )
+            return
 
-        # Train & Infer reaches this point after training. Inference will be
-        # implemented separately.
         self.log(
-            f'Training completed. Model available for inference: '
-            f'{self.modelPath}'
+            'Training completed. Starting inference using model run: '
+            f'{self.trainingDir}'
         )
+        self.launch_inference(self.trainingDir)
 
 
 if __name__ == '__main__':
