@@ -1,4 +1,6 @@
 {
+    "name": "relion.pseudosubtomo",
+    "label": "Relion Extract Subtomograms",
     "sections": [
         {
             "label": "I/O",

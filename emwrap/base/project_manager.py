@@ -809,6 +809,8 @@ class ProjectManager(FolderManager):
         return job
 
     def _hasJob(self, jobId):
+        if not jobId:
+            return False
         return self._wf.hasJob(Path.rmslash(jobId))
 
     def _getJob(self, jobId, validateExists=True):
