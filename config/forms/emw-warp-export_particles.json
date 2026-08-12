@@ -11,20 +11,20 @@
                     "paramClass": "Group",
                     "params": [
                         {
-                            "name": "input_tomograms",
-                            "label": "Input tomograms:",
+                            "name": "input_coordinates",
+                            "label": "Input coordinates:",
                             "pattern": "",
-                            "help": "Input tomograms.star file from a Warp reconstruction run.",
+                            "help": "REQUIRED. Input coordinates from optimisation_set.star or particles.star.",
                             "paramClass": "PathParam",
                             "pointerClass": "TomoCoordinates"
                         },
                         {
-                            "name": "input_coordinates",
-                            "label": "Input coordinates:",
+                            "name": "input_tomograms",
+                            "label": "Input tomograms:",
                             "pattern": "",
-                            "help": "Input coordinates from particles.star or optimisation_set.star.",
+                            "help": "REQUIRED. tomograms.star from a Warp CTF/reconstruction job (emw-warp-ctfrec).",
                             "paramClass": "PathParam",
-                            "pointerClass": "TomoCoordinates"
+                            "pointerClass": "Tomograms"
                         },
                         {
                             "name": "ts_export_particles.diameter",

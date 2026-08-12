@@ -42,9 +42,9 @@
                             "label": "EER upsampling factor",
                             "paramClass": "EnumParam",
                             "choices": {
-                                "1": "Native (~4k × 4k)",
-                                "2": "Half (2k × 2k)",
-                                "3": "Quarter (1k × 1k)"
+                                "1": "Native (4k × 4k)",
+                                "2": "Super-Res (8k × 8k)",
+                                "4": "Ultra-Res (16k × 16k)"
                             },
                             "default": "1",
                             "help": "(--EerSampling) Directly determines the maximum achievable resolution. It should be used together with -McBin."
@@ -189,7 +189,7 @@
                                 "0": "Measure only (used for alignment)",
                                 "1": "Measure & apply (corrects reconstruction)"
                             },
-                            "default": "0",
+                            "default": "1",
                             "help": "(--TiltCor) Controls whether the tilt angle offset is measured, and whether that correction is carried through to the reconstructed volume. It is not recommended to enable this option (-TiltCor 1) when subtomogram average is part of your workflow since this option rotates the volume around its tilt axis. The z coordinates of particles picked from the rotated tomogram would be different from the coordinates in the sample."
                         },
                         {

@@ -54,6 +54,20 @@ class ProjectData(FolderManager):
 
     JOB_STATUS_ACTIVE = [STATUS_LAUNCHED, STATUS_RUNNING, STATUS_SCHEDULED]
 
+    JOB_STATUS_TERMINAL = [STATUS_SUCCEEDED, STATUS_FAILED, STATUS_ABORTED]
+
+    # Emwrap-specific statuses Relion stores as Scheduled in default_pipeline.star
+    JOB_STATUS_EMWRAP = [STATUS_SAVED, STATUS_LAUNCHED]
+
+    # Check terminal RELION markers before RUNNING; stale RUNNING must not
+    # mask EXIT_* files left by a finished or aborted worker process.
+    JOB_STATUS_FILE_ORDER = (
+        'RELION_JOB_EXIT_SUCCESS',
+        'RELION_JOB_EXIT_FAILURE',
+        'RELION_JOB_EXIT_ABORTED',
+        'RELION_JOB_RUNNING',
+    )
+
     def __init__(self, project):
         FolderManager.__init__(self, project.path)
         self._project = project
@@ -91,34 +105,42 @@ class ProjectData(FolderManager):
         self.restoreJobStatuses()
 
     def _statusFromRelionFiles(self, job_id):
-        for statusFile, status in self.JOB_STATUS_FILES.items():
+        for statusFile in self.JOB_STATUS_FILE_ORDER:
             if self.exists(job_id, statusFile):
-                return status
+                return self.JOB_STATUS_FILES[statusFile]
         return None
 
     def _resolveJobStatus(self, job):
         """ Resolve canonical status: project.json intent > RELION files > pipeline.star."""
         cached_status = self._jobs.get(job.id, {}).get('status')
         relion_status = self._statusFromRelionFiles(job.id)
+        pipeline_status = job['status']
 
         # Saved in project.json overrides stale terminal RELION markers after re-save
         if cached_status == self.STATUS_SAVED:
             if relion_status == self.STATUS_RUNNING:
                 return relion_status
-            if relion_status in (self.STATUS_SUCCEEDED, self.STATUS_FAILED,
-                                 self.STATUS_ABORTED):
-                return cached_status
-            if relion_status is None:
+            return cached_status
+
+        # Actual completion markers on disk always win over cached active status
+        if relion_status in self.JOB_STATUS_TERMINAL:
+            return relion_status
+
+        # User-set terminal status beats a stale RELION_JOB_RUNNING left behind
+        # when a worker exited without updating its marker files.
+        if cached_status in self.JOB_STATUS_TERMINAL:
+            if relion_status == self.STATUS_RUNNING or relion_status is None:
                 return cached_status
 
         if relion_status:
             return relion_status
 
-        pipeline_status = job['status']
-
-        # default_pipeline.star maps Saved/Launched to Scheduled; recover from cache
-        if pipeline_status == self.STATUS_SCHEDULED and cached_status:
-            return cached_status
+        # Relion pipeline stores Saved/Launched as Scheduled; recover emwrap status.
+        if pipeline_status == self.STATUS_SCHEDULED:
+            if cached_status in self.JOB_STATUS_EMWRAP:
+                return cached_status
+            if self.exists(job.id, 'job.star'):
+                return self.STATUS_SAVED
 
         return pipeline_status
 
@@ -127,6 +149,19 @@ class ProjectData(FolderManager):
             path = self.join(job_id, statusFile)
             if os.path.exists(path):
                 os.remove(path)
+
+    def _signalJobAbort(self, job_id):
+        """Ask a running worker to abort using Relion's marker convention."""
+        job_dir = self.join(job_id)
+        if os.path.isdir(job_dir):
+            with open(os.path.join(job_dir, 'RELION_JOB_ABORT_NOW'), 'w'):
+                pass
+
+    def _writeJobRelionStatus(self, job_id, suffix):
+        """Replace RELION job status markers with a single terminal marker."""
+        job_dir = self.join(job_id)
+        if os.path.isdir(job_dir):
+            ProcessingPipeline.output_file(suffix, job_dir)
 
     def _removeJobOutput(self, job, output_id):
         """Remove one output from the workflow graph and project.json cache."""
@@ -274,10 +309,12 @@ class ProjectData(FolderManager):
                         'info': f'{n} items, {ps:0.1f} Å/px, bin: {binning:0.1f}'
                     }
                 elif filepath.endswith('optimisation_set.star'):
-                    t = None
-                    with StarFile(filepath, 'r') as sf:
-                        allTables = sf.getTableNames()
-                        t = sf.getTable(allTables[0])
+                    if not RelionStar.isTomoOptimisationSet(filepath):
+                        raise Exception(
+                            f"{filepath} is not a compliant tomography "
+                            "optimisation_set STAR file."
+                        )
+                    t = RelionStar.readTomoOptimisationSet(filepath)
 
                     cols = {
                         'rlnTomoParticlesFile': 'particles',
@@ -285,9 +322,13 @@ class ProjectData(FolderManager):
                     }
                     info = {}
                     for col, tableName in cols.items():
-                        v = getattr(t[0], col)
-                        with StarFile(v, 'r') as sf:
-                            info[col] = {'size': sf.getTableSize(tableName), 'table': sf.getTableInfo(tableName)}
+                        linked_path = getattr(t[0], col)
+                        star_path = self.join(linked_path)
+                        with StarFile(star_path, 'r') as sf:
+                            info[col] = {
+                                'size': sf.getTableSize(tableName),
+                                'table': sf.getTableInfo(tableName),
+                            }
 
                     # TODO: Check if there are TomoParticles
                     ptsInfo = info['rlnTomoParticlesFile']
@@ -325,6 +366,53 @@ class ProjectData(FolderManager):
             'info': info
         }
 
+    def _collectJobOutputIds(self, job_id, job=None):
+        """Gather output node ids from the workflow graph, RELION star, and cache."""
+        job = job or self._wf.getJob(job_id)
+        outputs = [o.id for o in job.outputs]
+
+        outputs_star = self.join(job_id, 'RELION_OUTPUT_NODES.star')
+        if os.path.exists(outputs_star):
+            output_table = StarFile.getTableFromFile('pipeline_nodes', outputs_star)
+            for row in output_table:
+                if row.rlnPipeLineNodeName not in outputs:
+                    outputs.append(row.rlnPipeLineNodeName)
+
+        for output_id in self._jobs.get(job_id, {}).get('outputs', []):
+            if output_id not in outputs:
+                outputs.append(output_id)
+
+        return outputs
+
+    def _extendJobInfoOutputs(self, job_id, jobInfo, job=None):
+        """Merge the latest output ids for an active job without invalidating cache."""
+        outputs = self._collectJobOutputIds(job_id, job=job)
+        if outputs == jobInfo.get('outputs'):
+            return jobInfo
+        extended = dict(jobInfo)
+        extended['outputs'] = outputs
+        return extended
+
+    def _shouldRefreshOutputInfo(self, output_id, job):
+        """Return True when a running job likely has newer output metadata."""
+        if job is None or not self.isActiveJob(job):
+            return False
+
+        cached = self._outputs.get(output_id)
+        cached_ts = cached.get('ts', 0) if cached else 0
+
+        output_path = self.join(output_id)
+        if os.path.exists(output_path):
+            if os.stat(output_path).st_mtime > cached_ts:
+                return True
+
+        run_out = self.join(job.id, 'run.out')
+        if os.path.exists(run_out):
+            if os.stat(run_out).st_mtime > cached_ts:
+                return True
+
+        return cached is None
+
     def _computeJobInfo(self, jobId, jobFiles):
         jobStarFile = jobFiles[0]
 
@@ -355,18 +443,7 @@ class ProjectData(FolderManager):
                     inputs.append((pid, rel_value))
 
         # Compute outputs info
-        outputs = [o.id for o in job.outputs]
-         
-        # Detect outputs not already in the job
-        # FIXME: Check if job_pipeline.star is used or not, or RELION_OUTPUT_NODES.star is enough.
-        outputsStarFile = jobFiles[1]
-
-        if os.path.exists(outputsStarFile):
-            self._debug(f"{Color.cyan('JOB')}: {Color.red('Reading')} star from {Color.bold(outputsStarFile)}")
-            output_table = StarFile.getTableFromFile('pipeline_nodes', outputsStarFile)
-            for row in output_table:
-                if row.rlnPipeLineNodeName not in outputs:
-                    outputs.append(row.rlnPipeLineNodeName)
+        outputs = self._collectJobOutputIds(jobId, job=job)
 
         # Resolve status: RELION marker files, then project.json, then pipeline
         status = self._resolveJobStatus(job)
@@ -430,17 +507,27 @@ class ProjectData(FolderManager):
             data = job.getOutput(o) if job.hasOutput(o) else job.registerOutput(o)
             _update_data(data, o)
 
-        if prune_outputs:
+        if prune_outputs and not self.isActiveJob(job):
             for output in list(job.outputs):
                 if output.id not in output_ids:
                     self._removeJobOutput(job, output.id)
 
         status = self._resolveJobStatus(job)
-        job['status'] = status
         cached = self._jobs.get(job.id, {})
-        if cached.get('status') != status:
+        cached_status = cached.get('status')
+        if (status == self.STATUS_SCHEDULED
+                and cached_status in self.JOB_STATUS_EMWRAP):
+            status = cached_status
+        job['status'] = status
+        info_changed = (
+            cached.get('outputs') != jobInfo.get('outputs')
+            or cached.get('inputs') != jobInfo.get('inputs')
+        )
+        if cached.get('status') != status or info_changed:
             info = dict(cached) if cached else dict(jobInfo)
             info['status'] = status
+            info['inputs'] = jobInfo.get('inputs', info.get('inputs', []))
+            info['outputs'] = jobInfo.get('outputs', info.get('outputs', []))
             self._set_info(self._jobs, job.id, info)
             return True
         return False
@@ -449,8 +536,14 @@ class ProjectData(FolderManager):
         updated = bool(self.removeMissingJobs())
         for job in self._wf.jobs():
             info, computed = self._getJobInfo(job.id)
-            # Always sync output metadata: pipeline reload drops info from nodes.
-            if self._updateJob(job, info, prune_outputs=computed) or computed:
+            active = self.isActiveJob(job)
+            if active:
+                extended = self._extendJobInfoOutputs(job.id, info, job=job)
+                if extended['outputs'] != info.get('outputs'):
+                    info = extended
+                    computed = True
+            if (self._updateJob(job, info, prune_outputs=computed and not active)
+                    or computed):
                 updated = True
             else:
                 self._debug(f"{Color.cyan('JOB')}: Info for {Color.bold(job.id)} is up to date")
@@ -459,8 +552,10 @@ class ProjectData(FolderManager):
 
     def _getJobInfo(self, job_id):
         self._debug(f"{Color.cyan('JOB')}: Getting info for {Color.bold(job_id)}")
+        # run.out grows during execution; exclude it so log writes do not
+        # invalidate output metadata and trigger pruning on every refresh.
         jobFiles = [self.join(job_id, fn) for fn in [
-            'job.star', 'RELION_OUTPUT_NODES.star', 'run.out',
+            'job.star', 'RELION_OUTPUT_NODES.star',
             *self.JOB_STATUS_FILES.keys(),
         ]]
         jobFiles.extend([self._project.pipeline_star, self._project_json_path])
@@ -515,11 +610,25 @@ class ProjectData(FolderManager):
 
     def getOutputInfo(self, output_id):
         self._debug(f"{Color.warn('OUTPUT')}: Getting info for {Color.bold(output_id)}")
+        job = self._outputParentJob(output_id)
+
         if self._isPendingOutput(output_id):
-            cached = self._outputs.get(output_id)
-            if cached and not str(cached.get('info', '')).startswith('Error:'):
-                return cached
-            return self._pendingOutputInfo(output_id)
+            if not (job and self.isActiveJob(job)):
+                cached = self._outputs.get(output_id)
+                if cached and not str(cached.get('info', '')).startswith('Error:'):
+                    return cached
+            pending = self._pendingOutputInfo(output_id)
+            if job and self.isActiveJob(job):
+                self._set_info(self._outputs, output_id, pending)
+            return pending
+
+        if self._shouldRefreshOutputInfo(output_id, job):
+            info = self._computeOutputTypeInfo(output_id, [self.join(output_id)])
+            self._set_info(self._outputs, output_id, info)
+            if (self._isPendingOutput(output_id)
+                    and str(info.get('info', '')).startswith('Error:')):
+                return self._pendingOutputInfo(output_id)
+            return info
 
         outputFiles = [self.join(output_id)]
         info, computed = self._get_info(self._outputs, output_id, outputFiles,
