@@ -22,6 +22,11 @@ from emtools.utils import FolderManager
 
 from emwrap.warp.warp import WarpBasePipeline
 
+from .utils import warp_xml_to_imod_xf 
+
+# TODO: 5. Post-processing
+# After miss-alignment finishes, update the CTF parameters in WarpTools (ts_ctf) 
+
 
 class MissAlignment(WarpBasePipeline):
     """Run Miss-Alignment on a Warp project produced by coarse TS alignment."""
@@ -1039,10 +1044,56 @@ class MissAlignment(WarpBasePipeline):
         self._run_miss_alignment_infer(batch, config_file)
         self.updateBatchInfo(batch)
 
+        self._write_imod_xfs(
+            data_directory,
+            geometry['pixel_size'],
+        )
+
         self.log(
             'Miss-Alignment inference finished. '
             f'Aligned snapshots are in: {data_directory}/iterN/'
         )
+
+    def _write_imod_xfs(self, data_directory, pixel_size):
+        """Export updated Warp global alignments as IMOD XF files.
+        Each ``TS_NAME.xml`` in the inference data directory is converted to
+        ``TS_NAME.xf`` in the same directory. The XF contains only the global
+        affine alignment represented by AxisAngle/AxisOffsetX/AxisOffsetY.
+        """
+        data_directory = os.path.abspath(data_directory)
+        xml_files = sorted(
+            glob(os.path.join(data_directory, '*.xml'))
+        )
+
+        if not xml_files:
+            raise FileNotFoundError(
+                'No Warp tilt-series XML files were found for XF export in: '
+                f'{data_directory}'
+            )
+
+        pixel_size = self._positive_float(
+            pixel_size,
+            'xf.pixel_size',
+        )
+
+        xf_files = []
+        for xml_file in xml_files:
+            xf_file = os.path.splitext(xml_file)[0] + '.xf'
+
+            warp_xml_to_imod_xf(
+                xml_file,
+                xf_file,
+                pixel_size,
+            )
+            xf_files.append(xf_file)
+
+        self.imodXfFiles = xf_files
+        self.log(
+            f'Exported {len(xf_files)} IMOD XF alignment file(s) to: '
+            f'{data_directory}'
+        )
+
+        return xf_files
 
     # ------------------------------------------------------------------
     # Output registration
