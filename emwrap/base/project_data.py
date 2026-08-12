@@ -260,6 +260,13 @@ class ProjectData(FolderManager):
         return (job is not None and self.isActiveJob(job)
                 and not os.path.exists(filepath))
 
+    def _outputTarget(self, output_id, filepath):
+        return output_id or self._projectPath(filepath)
+
+    def _fileNoInfo(self, output_id, filepath, reason='No-info'):
+        target = self._outputTarget(output_id, filepath)
+        return {'type': 'File', 'info': f'{reason}: {target}'}
+
     def _computeOutputTypeInfo(self, output_id, outputFiles):
         filepath = outputFiles[0]
         self._debug(f"{Color.warn('OUTPUT')}: {Color.red('Computing')} info for {Color.bold(filepath)}")
@@ -267,7 +274,7 @@ class ProjectData(FolderManager):
         if not os.path.exists(filepath):
             if self._isPendingOutput(output_id):
                 return self._pendingOutputInfo(output_id)
-            return {'type': 'File', 'info': 'No-info'}
+            return self._fileNoInfo(output_id, filepath, reason='Missing')
 
         info = 'No-info'
 
@@ -332,7 +339,7 @@ class ProjectData(FolderManager):
 
                     # TODO: Check if there are TomoParticles
                     ptsInfo = info['rlnTomoParticlesFile']
-                    datatype = 'TomoParticles' if ptsInfo['table'].hasColumn('rlnTomoParticleId') else 'TomoCoordinates'
+                    datatype = 'TomoParticles' if ptsInfo['table'].hasColumn('rlnTomoParticleName') else 'TomoCoordinates'
                     return {
                         'type': datatype,
                         'info': f'{ptsInfo["size"]} items, Tomograms: {info["rlnTomoTomogramsFile"]["size"]}'
@@ -345,14 +352,13 @@ class ProjectData(FolderManager):
                     return self._pendingOutputInfo(output_id)
                 info = f'Error: {str(e)}'
 
-        elif filepath.endswith('.mrc'):
+        elif filepath.endswith('.mrc') or filepath.endswith('.mrcs'):
             try:
-                dims = Image.get_dimensions(filepath)
-                if (isinstance(dims, (list, tuple)) and len(dims) >= 3
-                        and dims[0] == dims[1] == dims[2]):
+                meta = Image.get_metadata(filepath)
+                if meta:
                     return {
-                        'type': 'Volume',
-                        'info': f'{dims[0]} x {dims[1]} x {dims[2]} px'
+                        'type': meta.get('dataType', 'File'),
+                        'info': meta['info'],
                     }
             except Exception as e:
                 self._debug(
@@ -360,6 +366,10 @@ class ProjectData(FolderManager):
                     f"{Color.bold(filepath)}: {e}")
                 if self._isPendingOutput(output_id):
                     return self._pendingOutputInfo(output_id)
+                info = f'Error: {str(e)}'
+
+        if info == 'No-info':
+            return self._fileNoInfo(output_id, filepath)
 
         return {
             'type': 'File',
@@ -462,8 +472,9 @@ class ProjectData(FolderManager):
 
     def _get_info(self, info_dict, item_id, info_files, compute_info_func):
         info, computed = info_dict.get(item_id, None), False
+        force = self._project.force
 
-        if info:
+        if info and not force:
             # Check if the info is up to date by checking the timestamp of the info files
             for info_file in info_files:
                 if os.path.exists(info_file):
@@ -479,6 +490,18 @@ class ProjectData(FolderManager):
         info = compute_info_func(item_id, info_files)
         self._set_info(info_dict, item_id, info)
         return info, computed
+
+    def recomputeAllInfos(self):
+        """Recompute and persist metadata for all jobs and outputs."""
+        seen_outputs = set()
+        for job in self._wf.jobs():
+            self._getJobInfo(job.id)
+            for data in list(job.inputs) + list(job.outputs):
+                if data.id in seen_outputs:
+                    continue
+                seen_outputs.add(data.id)
+                self.getOutputInfo(data.id)
+        self.save()
 
     def _updateJob(self, job, jobInfo, prune_outputs=False):
         """ Update the job data base on the updated info. """
@@ -611,18 +634,20 @@ class ProjectData(FolderManager):
     def getOutputInfo(self, output_id):
         self._debug(f"{Color.warn('OUTPUT')}: Getting info for {Color.bold(output_id)}")
         job = self._outputParentJob(output_id)
+        force = self._project.force
 
         if self._isPendingOutput(output_id):
-            if not (job and self.isActiveJob(job)):
-                cached = self._outputs.get(output_id)
-                if cached and not str(cached.get('info', '')).startswith('Error:'):
-                    return cached
-            pending = self._pendingOutputInfo(output_id)
-            if job and self.isActiveJob(job):
-                self._set_info(self._outputs, output_id, pending)
-            return pending
+            if not force:
+                if not (job and self.isActiveJob(job)):
+                    cached = self._outputs.get(output_id)
+                    if cached and not str(cached.get('info', '')).startswith('Error:'):
+                        return cached
+                pending = self._pendingOutputInfo(output_id)
+                if job and self.isActiveJob(job):
+                    self._set_info(self._outputs, output_id, pending)
+                return pending
 
-        if self._shouldRefreshOutputInfo(output_id, job):
+        if force or self._shouldRefreshOutputInfo(output_id, job):
             info = self._computeOutputTypeInfo(output_id, [self.join(output_id)])
             self._set_info(self._outputs, output_id, info)
             if (self._isPendingOutput(output_id)

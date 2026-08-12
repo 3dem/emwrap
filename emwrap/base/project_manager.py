@@ -41,17 +41,19 @@ class ProjectManager(FolderManager):
     JOB_CLUSTER_ID_FILE = 'job.id'
     JOB_PROCESS_ID_FILE = 'process.id'
 
-    def __init__(self, path, create=False, verbose=1):
+    def __init__(self, path, create=False, verbose=1, force=False):
         """ Create a ProjectManager in that path.
 
         Args:
             path: Path to the project directory.
             create: Create a new project if it does not exist.
             verbose: Verbosity level.
+            force: Recompute cached metadata instead of using project.json cache.
         """
         path = os.path.abspath(os.path.expanduser(path))
         FolderManager.__init__(self, path)
         self._verbose = verbose
+        self._force = force
 
         if not self.exists():
             raise Exception(f"Project path '{path}' does not exist")
@@ -75,6 +77,15 @@ class ProjectManager(FolderManager):
 
     def get_workflow(self):
         return self._wf
+
+    @property
+    def force(self):
+        return self._force
+
+    def recomputeAllInfos(self):
+        """Recompute all cached job and output metadata and persist project.json."""
+        with self._project_write('recompute infos'):
+            self._data.recomputeAllInfos()
 
     def reload_from_disk(self):
         """Reload pipeline and project.json from disk into memory."""
@@ -913,6 +924,10 @@ class ProjectManager(FolderManager):
                             "If used in with --run, it will clean the job "
                             "output before running the command. ")
 
+        p.add_argument('--force', '-f', action='store_true',
+                       help='Force recomputation of cached metadata '
+                            '(e.g. with --list).')
+
         args = p.parse_args()
         n = len(sys.argv)
 
@@ -923,7 +938,8 @@ class ProjectManager(FolderManager):
             pipeline_star = os.path.join(args.path, 'default_pipeline.star')
             create = ((n == 2 and args.clean)
                       or (args.workflow and not os.path.exists(pipeline_star)))
-            pm = ProjectManager(args.path, create=create, verbose=args.verbose)
+            pm = ProjectManager(args.path, create=create, verbose=args.verbose,
+                                force=args.force)
 
         def _params(params, i):
             n = len(params)
@@ -933,6 +949,8 @@ class ProjectManager(FolderManager):
             pm.update()
 
         elif args.list is not None:  # only when -l / --list is on the command line
+            if args.force:
+                pm.recomputeAllInfos()
             if inputId := args.list:  # it can be empty string when no value is passed
                 w = pm.get_workflow()
                 if job := w.getJob(inputId):
