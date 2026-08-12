@@ -153,12 +153,12 @@ class AreTomo3Pipeline(ProcessingPipeline):
         try:
             dims = Image.get_dimensions(movieFile)
             nFrames = int(dims[2])
-            frameDose = float(self.inputTiltDose) / float(nFrames)
+            frameDose = round(float(self.inputTiltDose) / float(nFrames), 4)
             return frameDose
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, IndexError):
             self.log(
                 f"WARNING: Could not parse frame count from dimensions for {movieFile}: {dims}")
-                return None
+            return None
 
     @staticmethod
     def _get_first_binning_value(value):
