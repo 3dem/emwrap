@@ -1,0 +1,141 @@
+{
+    "sections": [
+        {
+            "label": "I/O",
+            "params": [
+                {
+                    "name": "in_optimisation",
+                    "label": "Input optimisation set:",
+                    "pattern": "Optimisation set STAR file (*optimisation_set.star)",
+                    "help": "Input optimisation set. This will be passed with a --i argument to the executable. If any individual components of the optimisation set are specified below, then they will override the components in this optimisation set.",
+                    "paramClass": "PathParam",
+                    "pointerClass": "TomoParticles, TomoCoordinates",
+                    "condition": "use_direct_entries == False"
+                },
+                {
+                    "name": "use_direct_entries",
+                    "label": "OR: use direct entries?",
+                    "default": false,
+                    "paramClass": "BooleanParam",
+                    "help": "If set to Yes, the optimisation set will be ignored and the direct entries below will be used instead."
+                },
+                {
+                    "label": "Direct entries",
+                    "paramClass": "Group",
+                    "condition": "use_direct_entries == True",
+                    "params": [
+                        {
+                            "name": "in_particles",
+                            "label": "Input particle set:",
+                            "pattern": "Particle STAR file (*.star)",
+                            "help": "Input particle set.",
+                            "paramClass": "PathParam",
+                            "pointerClass": "TomoParticles, TomoCoordinates"
+                        },
+                        {
+                            "name": "in_tomograms",
+                            "label": "Input tomogram set:",
+                            "pattern": "Tomogram set STAR file (*.star)",
+                            "help": "Input tomogram set STAR file. This file gets generated during Tomogram Reconstruction, and updated during Tomogram Frame Alignment or Tomogram CTF Refinement.",
+                            "paramClass": "PathParam",
+                            "pointerClass": "Tomograms"
+                        },
+                        {
+                            "name": "in_trajectories",
+                            "label": "Input trajectory set:",
+                            "pattern": "Trajectory set STAR file (*.star)",
+                            "help": "Input trajectory set. Leave empty if no particle motion tracks have been estimated during tomogram frame alignment.",
+                            "paramClass": "PathParam",
+                            "allowsEmpty": true
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "label": "Extract",
+            "params": [
+                {
+                    "name": "box_size_angst",
+                    "label": "Box size (A):",
+                    "default": 128,
+                    "paramClass": "FloatParam",
+                    "help": "The final particle box size in Angstrom."
+                },
+                {
+                    "name": "precrop_size_angst",
+                    "label": "Pre-cropping box size (A):",
+                    "default": -1,
+                    "paramClass": "FloatParam",
+                    "help": "If set to a positive value, then a larger box size can be used to extract 2D slices out of the micrograph, pre-multiply these with the CTF, and then crop to the box size above. A sufficiently large pre-crop box size therefore will allow more of the high-frequency signal to be captured that has been delocalised by the CTF."
+                },
+                {
+                    "name": "binned_size_pix",
+                    "label": "Binning to box size (pixels):",
+                    "default": 64,
+                    "paramClass": "IntParam",
+                    "help": "The box size above will be binned to yield the number of pixels given here. Smaller boxes will refine faster and occupy less space, but will be limited to lower Nyquist frequency."
+                },
+                {
+                    "name": "max_dose",
+                    "label": "Maximum dose (e/A^2):",
+                    "default": -1,
+                    "paramClass": "FloatParam",
+                    "help": "Tilt series frames with a dose higher than this maximum dose (in electrons per squared Angstroms) will not be included in the 3D pseudo-subtomogram, or in the 2D stack. For the latter, this will disc I/O operations and increase speed."
+                },
+                {
+                    "name": "min_frames",
+                    "label": "Minimum nr. frames:",
+                    "default": 1,
+                    "paramClass": "IntParam",
+                    "help": "Each selected pseudo-subtomogram need to be visible in at least this number of tilt series frames with doses below the maximum dose"
+                },
+                {
+                    "name": "subtomo_format",
+                    "label": "Subtomogram format:",
+                    "default": "2D stacks",
+                    "paramClass": "EnumParam",
+                    "choices": [
+                        "2D stacks",
+                        "3D pseudo-subtomos",
+                        "3D subtomos"
+                    ],
+                    "help": "Format of the extracted subtomograms. Relion-5 type 2D stacks, relion-4 type 3D pseudo-subtomograms, or relion-3 type real-space subtomograms. Some people have reported that real-space 3D subtomograms are better for initial alignments than 2D stacks or 3D pseudo-subtomograms. You may want to use AreTomo2 reconstructions for extracting real-space subtomograms. They can be made as part of the Align tilt-series job."
+                },
+                {
+                    "name": "do_float16",
+                    "label": "Write output in float16?",
+                    "default": true,
+                    "paramClass": "BooleanParam",
+                    "help": "If set to Yes, this program will write output images in float16 MRC format. This will save a factor of two in disk space compared to the default of writing in float32. Note that RELION and CCPEM will read float16 images, but other programs may not (yet) do so."
+                }
+            ]
+        },
+        {
+            "label": "Compute",
+            "params": [
+                {
+                    "name": "nr_mpi",
+                    "label": "Number of MPI procs:",
+                    "default": 1,
+                    "paramClass": "IntParam",
+                    "help": "Number of MPI nodes to use in parallel. When set to 1, MPI will not be used. The maximum can be set through the environment variable RELION_MPI_MAX."
+                },
+                {
+                    "name": "nr_threads",
+                    "label": "Number of threads:",
+                    "default": 1,
+                    "paramClass": "IntParam",
+                    "help": "Number of shared-memory (POSIX) threads to use in parallel. When set to 1, no multi-threading will be used. The maximum can be set through the environment variable RELION_THREAD_MAX."
+                },
+                {
+                    "name": "other_args",
+                    "label": "Additional arguments:",
+                    "default": "",
+                    "paramClass": "StringParam",
+                    "help": "In this box command-line arguments may be provided that are not generated by the GUI. This may be useful for testing developmental options and/or expert use of the program. To print a list of possible options, run the corresponding program from the command line without any arguments."
+                }
+            ]
+        }
+    ]
+}
