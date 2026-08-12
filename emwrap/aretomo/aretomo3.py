@@ -79,8 +79,8 @@ class AreTomo3:
         })
         if gain := acq.get('gain', None):
             args['-Gain'] = gain
-        if dose := acq.get('total_dose', None):
-            args['-FmDose'] = dose
+        # if dose := acq.get('total_dose', None):
+            # args['-FmDose'] = dose
 
         return args
     
