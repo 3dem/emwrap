@@ -1,0 +1,26 @@
+{
+    "name": "emw-subset-ts",
+    "label": "EMwrap Subset TS",
+    "help": "Create a subset of a tilt-series, tomogram, or particle/coordinate set by selecting tomogram names (rlnTomoName).",
+    "sections": [
+        {
+            "label": "Input",
+            "params": [
+                {
+                    "name": "input_set",
+                    "label": "Input set:",
+                    "paramClass": "PathParam",
+                    "pointerClass": "TiltSeriesMovies, TiltSeries, Tomograms, TomoParticles, TomoCoordinates",
+                    "help": "Input STAR file: tilt_series.star, tomograms.star, or optimisation_set.star (TomoParticles / TomoCoordinates)."
+                },
+                {
+                    "name": "subset_tomo_names",
+                    "label": "Subset Tomo Names",
+                    "paramClass": "StringParam",
+                    "default": "",
+                    "help": "Space-separated list of rlnTomoName values to keep in the output set."
+                }
+            ]
+        }
+    ]
+}

@@ -157,18 +157,6 @@ class WarpExportParticles(WarpBasePipeline):
             return base[:-len('.tomostar')]
         return base
 
-    def _readFirstTable(self, starPath):
-        absPath = self.project.join(starPath)
-        with StarFile(absPath) as sf:
-            tableNames = sf.getTableNames()
-            if not tableNames:
-                raise Exception(f"No tables found in {starPath}")
-            tableName = tableNames[0]
-            table = sf.getTable(tableName)
-            if not table:
-                raise Exception(f"Could not read table '{tableName}' from {starPath}")
-            return table, tableName
-
     def _validateTomogramsStar(self, tomoStar):
         if not self.project.exists(tomoStar):
             raise Exception(f"Input tomograms STAR file not found: {tomoStar}")
@@ -180,7 +168,7 @@ class WarpExportParticles(WarpBasePipeline):
         columns = tomoTable.getColumnNames()
         if 'rlnCoordinatesMetadata' in columns:
             raise Exception(
-                f"{tomoStar} looks like a PyTom tomograms_coords.star file. "
+                f"{tomoStar} looks like a PyTom tomograms.star file. "
                 "Expected tomograms.star from a Warp reconstruction run."
             )
 
@@ -193,6 +181,7 @@ class WarpExportParticles(WarpBasePipeline):
         return tomoTable
 
     def _resolveCoordinatesInput(self):
+        """Resolve coordinates input to particles STAR and optional linked tomograms."""
         inCoords = self._args.get('input_coordinates', '')
         if not inCoords:
             raise Exception("Missing required parameter 'input_coordinates'.")
@@ -200,48 +189,60 @@ class WarpExportParticles(WarpBasePipeline):
         if not self.project.exists(inCoords):
             raise Exception(f"Input coordinates STAR file not found: {inCoords}")
 
-        if inCoords.endswith('optimisation_set.star'):
-            table, _ = self._readFirstTable(inCoords)
-            row = table[0]
-            if not hasattr(row, 'rlnTomoParticlesFile'):
-                raise Exception(
-                    f"{inCoords} does not contain column 'rlnTomoParticlesFile'."
-                )
+        absCoords = self.project.join(inCoords)
+        if RelionStar.isTomoOptimisationSet(absCoords):
+            row = RelionStar.readTomoOptimisationSet(absCoords)[0]
             particlesStar = row.rlnTomoParticlesFile
             if not self.project.exists(particlesStar):
                 raise Exception(
                     f"Particles STAR file '{particlesStar}' referenced in "
                     f"{inCoords} was not found."
                 )
-            return particlesStar, row._asdict()
 
-        if inCoords.endswith('particles.star'):
-            return inCoords, None
+            optRow = row._asdict()
+            tomogramsStar = optRow.get('rlnTomoTomogramsFile') or ''
+            if tomogramsStar and not self.project.exists(tomogramsStar):
+                raise Exception(
+                    f"Tomograms STAR file '{tomogramsStar}' referenced in "
+                    f"{inCoords} was not found."
+                )
+            return particlesStar, optRow, tomogramsStar or None
+
+        if RelionStar.isTomoParticles(absCoords):
+            return inCoords, None, None
 
         raise Exception(
-            "input_coordinates must be a particles.star or optimisation_set.star file."
+            f"{inCoords} is not a compliant tomography optimisation_set or "
+            "particles STAR file."
         )
 
+    def _ensureInputsResolved(self):
+        if self._inputTomogramsStar is None:
+            self._resolveInputs()
+
     def _resolveInputs(self):
-        self._inputTomogramsStar = self._args.get('input_tomograms', '')
-        if not self._inputTomogramsStar:
-            raise Exception("Missing required parameter 'input_tomograms'.")
+        particlesStar, optRow, _tomogramsFromOpt = self._resolveCoordinatesInput()
+        self._inputOptimisationSetRow = optRow
+
+        tomogramsStar = self._args.get('input_tomograms', '')
+        if not tomogramsStar:
+            raise Exception(
+                "Missing required parameter 'input_tomograms'. "
+                "Provide tomograms.star from a Warp CTF/reconstruction (emw-warp-ctfrec) job."
+            )
+        self._inputTomogramsStar = tomogramsStar
 
         tomoTable = self._validateTomogramsStar(self._inputTomogramsStar)
-        particlesStar, optRow = self._resolveCoordinatesInput()
-        self._inputOptimisationSetRow = optRow
         return tomoTable, particlesStar
 
     def _readParticlesTable(self, particlesStar):
         absPath = self.project.join(particlesStar)
-        table = StarFile.getTableFromFile('particles', absPath)
-        if not table:
-            raise Exception(f"Could not read 'particles' table from {particlesStar}")
-        if not table.hasColumn('rlnTomoName'):
+        if not RelionStar.isTomoParticles(absPath):
             raise Exception(
-                f"Particles STAR file {particlesStar} is missing column 'rlnTomoName'."
+                f"Particles STAR file {particlesStar} is not a compliant "
+                "tomography particles STAR file."
             )
-        return table
+        return RelionStar.readTomoParticles(absPath)
 
     def _buildTomoLookup(self, tomoTable):
         lookup = {}
@@ -385,7 +386,9 @@ class WarpExportParticles(WarpBasePipeline):
                     totalTomograms += 1
                     tomostar = self.project.join(tomoRow.wrpTomostar)
                     if tomostar not in copiedTomostars:
-                        shutil.copy(tomostar, outTM)
+                        dst = os.path.join(outTM, os.path.basename(tomostar))
+                        if not os.path.exists(dst):
+                            shutil.copy(tomostar, dst)
                         copiedTomostars.add(tomostar)
 
                 self._exportedParticleLookup[(tomoKey, particleId)] = row._asdict()
@@ -406,18 +409,15 @@ class WarpExportParticles(WarpBasePipeline):
         iosFn = self.join('optimisation_set.star')
         particlesPath = self._projectRelPath(particlesStarPath)
 
-        if self._inputOptimisationSetRow is None and not self._inputTomogramsStar:
-            _, self._inputOptimisationSetRow = self._resolveCoordinatesInput()
-            self._inputTomogramsStar = self._args.get('input_tomograms', '')
+        self._ensureInputsResolved()
 
         if self._inputOptimisationSetRow:
             values = dict(self._inputOptimisationSetRow)
         else:
-            values = {
-                'rlnTomoTomogramsFile': self._inputTomogramsStar,
-            }
+            values = {}
 
         values['rlnTomoParticlesFile'] = particlesPath
+        values['rlnTomoTomogramsFile'] = self._inputTomogramsStar
 
         with StarFile(iosFn, 'w') as sf:
             sf.writeTable('optimisation_set', Table.fromDict(values), timeStamp=True)

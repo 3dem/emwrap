@@ -57,7 +57,7 @@ class TestApoFWarp(TestApoF):
                 'emw-relion-tomoinitial'
             ])
             self.expected_outputs.update({
-                'emw-pytom': 'tomograms_coords.star',
+                'emw-pytom': 'optimisation_set.star',
                 'emw-warp-export_particles': 'optimisation_set.star',
                 'emw-relion-tomoinitial': 'output/initial_model.mrc',
             })
