@@ -17,7 +17,7 @@ from glob import glob
 
 from emtools.image import Image
 from emtools.jobs import Args, Batch
-from emtools.metadata import StarFile, Table, WarpXml
+from emtools.metadata import Imod, RelionStar, StarFile, Table, WarpXml
 from emtools.utils import FolderManager
 
 from emwrap.warp.warp import WarpBasePipeline
@@ -44,7 +44,7 @@ class MissAlignment(WarpBasePipeline):
     INFERENCE_CONFIG_TEMPLATE = 'inference_config_template.yaml'
     UPDATE_SCRIPT = 'update_warp_xml.py'
     TRAINING_DIR = 'warp_tiltseries_training'
-    OUTPUT_STAR = 'miss_aligned_tilt_series.star'
+    OUTPUT_STAR = 'aligned_tilt_series.star'
 
     # ------------------------------------------------------------------
     # Launcher and argument helpers
@@ -160,7 +160,7 @@ class MissAlignment(WarpBasePipeline):
 
         self._importInputs(
             input_folder,
-            keys=['fs', 'fss', 'ts', 'tss', 'tm'],
+            keys=['fs', 'fss', 'ts', 'tss', 'tm', 'frames', 'mdocs'],
         )
 
     def _dataset_geometry(self):
@@ -1049,6 +1049,13 @@ class MissAlignment(WarpBasePipeline):
             geometry['pixel_size'],
         )
 
+        # Convert the optimized global XF transforms back into the RELION 5
+        # alignment columns and register a new aligned_tilt_series.star.
+        self._output(
+            batch,
+            geometry['pixel_size'],
+        )
+
         self.log(
             'Miss-Alignment inference finished. '
             f'Aligned snapshots are in: {data_directory}/iterN/'
@@ -1098,50 +1105,202 @@ class MissAlignment(WarpBasePipeline):
     # ------------------------------------------------------------------
     # Output registration
     # ------------------------------------------------------------------
-    def _copy_passthrough_metadata(self, batch):
-        """Create a local STAR handle while preserving initial Relion matrices."""
-        batch.mkdir('tilt_series')
-        metadata_dir = FolderManager(batch.join('tilt_series'))
-        input_table = StarFile.getTableFromFile('global', self.inputTs)
-        output_table = Table(input_table.getColumnNames())
+    def _compute_relion_alignments_from_xf(
+        self,
+        xf_file,
+        tilt_angles,
+        pixel_size,
+    ):
+        """Convert one IMOD XF file to RELION per-tilt alignment values."""
+        imod_alignments = Imod.get_alignment_from_xf(xf_file)
 
-        for row in input_table:
-            row_dict = row._asdict()
-            source_star = row_dict.get(
-                'rlnTomoTiltSeriesStarFile',
-                '',
+        if len(imod_alignments) != len(tilt_angles):
+            raise ValueError(
+                f'XF/STAR row count mismatch for {xf_file}: '
+                f'{len(imod_alignments)} XF transforms versus '
+                f'{len(tilt_angles)} tilt angles.'
             )
 
-            if (
-                source_star
-                and source_star != 'None'
-                and os.path.isfile(source_star)
-            ):
-                destination_star = metadata_dir.join(
-                    os.path.basename(source_star)
+        return RelionStar.alignments_from_imod(
+            tilt_angles,
+            imod_alignments,
+            pixel_size,
+        )
+
+    def _write_individual_tilt_series_star(
+        self,
+        batch,
+        ts_row,
+        pixel_size,
+    ):
+        """Copy one input TS STAR while replacing only RELION alignment fields."""
+        ts_name = str(ts_row.rlnTomoName)
+        input_star = ts_row.rlnTomoTiltSeriesStarFile
+
+        if not input_star or not os.path.isfile(input_star):
+            raise FileNotFoundError(
+                f'Input tilt-series STAR not found for {ts_name}: {input_star}'
+            )
+
+        input_table = StarFile.getTableFromFile(
+            ts_name,
+            input_star,
+        )
+        if len(input_table) == 0:
+            raise ValueError(
+                f'Input tilt-series STAR is empty for {ts_name}: {input_star}'
+            )
+
+        tilt_angles = []
+        for tilt_row in input_table:
+            tilt_dict = tilt_row._asdict()
+            tilt_angle = tilt_dict.get(
+                'rlnTomoNominalStageTiltAngle',
+                None,
+            )
+            if tilt_angle in ('', None):
+                raise ValueError(
+                    f'{ts_name}: rlnTomoNominalStageTiltAngle is required '
+                    'to convert the IMOD XF transform to RELION alignment.'
                 )
-                if (
-                    os.path.abspath(source_star)
-                    != os.path.abspath(destination_star)
-                ):
-                    shutil.copy2(source_star, destination_star)
+            tilt_angles.append(float(tilt_angle))
 
-                row_dict['rlnTomoTiltSeriesStarFile'] = destination_star
+        xf_file = os.path.join(
+            os.path.abspath(self.join(self.TS)),
+            f'{ts_name}.xf',
+        )
+        if not os.path.isfile(xf_file):
+            raise FileNotFoundError(
+                f'Miss-Alignment XF file not found for {ts_name}: {xf_file}'
+            )
 
+        relion_alignments = self._compute_relion_alignments_from_xf(
+            xf_file,
+            tilt_angles,
+            pixel_size,
+        )
+
+        if len(relion_alignments) != len(input_table):
+            raise ValueError(
+                f'RELION alignment count mismatch for {ts_name}: '
+                f'{len(relion_alignments)} alignments versus '
+                f'{len(input_table)} STAR rows.'
+            )
+
+        alignment_columns = (
+            'rlnTomoXTilt',
+            'rlnTomoYTilt',
+            'rlnTomoZRot',
+            'rlnTomoXShiftAngst',
+            'rlnTomoYShiftAngst',
+        )
+
+        input_columns = input_table.getColumnNames()
+        missing_columns = [
+            column
+            for column in alignment_columns
+            if column not in input_columns
+        ]
+        if missing_columns:
+            raise ValueError(
+                f'{ts_name}: input STAR does not contain the expected '
+                'RELION alignment columns: '
+                + ', '.join(missing_columns)
+            )
+
+        output_table = Table(input_columns)
+
+        for tilt_row, alignment in zip(
+            input_table,
+            relion_alignments,
+        ):
+            tilt_dict = tilt_row._asdict()
+
+            for column in alignment_columns:
+                if column not in alignment:
+                    raise ValueError(
+                        f'{ts_name}: converted RELION alignment is missing '
+                        f'{column}.'
+                    )
+                tilt_dict[column] = alignment[column]
+
+            output_table.addRowValues(**tilt_dict)
+
+        output_star = batch.join(
+            'tilt_series',
+            f'{ts_name}.star',
+        )
+        self.write_ts_table(
+            ts_name,
+            output_table,
+            output_star,
+        )
+
+        return output_star
+
+    def _build_relion_output_metadata(self, batch, pixel_size):
+        """Build RELION 5 metadata using the optimized Miss-Alignment XF files."""
+        batch.mkdir('tilt_series')
+
+        input_table = StarFile.getTableFromFile(
+            'global',
+            self.inputTs,
+        )
+        output_table = Table(input_table.getColumnNames())
+        individual_stars = []
+
+        pixel_size = self._positive_float(
+            pixel_size,
+            'output.pixel_size',
+        )
+
+        for ts_row in input_table:
+            output_ts_star = self._write_individual_tilt_series_star(
+                batch,
+                ts_row,
+                pixel_size,
+            )
+            individual_stars.append(output_ts_star)
+
+            row_dict = ts_row._asdict()
+            row_dict['rlnTomoTiltSeriesStarFile'] = output_ts_star
             output_table.addRowValues(**row_dict)
 
         output_star = batch.join(self.OUTPUT_STAR)
-        self.write_ts_table('global', output_table, output_star)
-        return output_star
+        self.write_ts_table(
+            'global',
+            output_table,
+            output_star,
+        )
 
-    def _output(self, batch):
-        output_star = self._copy_passthrough_metadata(batch)
+        return output_star, individual_stars
+
+    def _output(self, batch, pixel_size):
+        """Register RELION metadata containing Miss-Alignment global alignment."""
+        output_star, individual_stars = self._build_relion_output_metadata(
+            batch,
+            pixel_size,
+        )
+
         self.writeRelionOutputNodes([[
             output_star,
-            'TomogramGroupMetadata.star.emwrap.tsalign',
+            'TomogramGroupMetadata.star.relion.tomo.aligntiltseries',
         ]])
 
         files = [[output_star, 'TomogramGroupMetadata']]
+
+        for star_file in individual_stars:
+            files.append([
+                star_file,
+                'TiltSeriesMetadata',
+            ])
+
+        for xf_file in getattr(self, 'imodXfFiles', []):
+            if os.path.exists(xf_file):
+                files.append([
+                    xf_file,
+                    'ImodAlignment',
+                ])
 
         if os.path.exists(self.join(self.TSS)):
             files.append([
@@ -1149,35 +1308,56 @@ class MissAlignment(WarpBasePipeline):
                 'WarpTiltSeriesSettings',
             ])
 
+        inference_config = getattr(
+            self,
+            'inferenceConfig',
+            None,
+        )
+        if inference_config and os.path.exists(inference_config):
+            files.append([
+                inference_config,
+                'MissAlignmentInferenceConfig',
+            ])
+
         training_directory = getattr(
             self,
             'trainingDir',
-            self.join(self.TRAINING_DIR),
+            None,
         )
-        config_file = os.path.join(
+        if training_directory:
+            config_file = os.path.join(
+                training_directory,
+                self.CONFIG_NAME,
+            )
+            if os.path.exists(config_file):
+                files.append([
+                    config_file,
+                    'MissAlignmentConfig',
+                ])
+
+            best_model = os.path.join(
+                training_directory,
+                'model.ckpt',
+            )
+            if os.path.exists(best_model):
+                files.append([
+                    best_model,
+                    'MissAlignmentCheckpoint',
+                ])
+
+        model_run_directory = getattr(
+            self,
+            'modelRunDirectory',
             training_directory,
-            self.CONFIG_NAME,
         )
-
-        if os.path.exists(config_file):
-            files.append([
-                config_file,
-                'MissAlignmentConfig',
-            ])
-
-        best_model = os.path.join(training_directory, 'model.ckpt')
-        if os.path.exists(best_model):
-            files.append([
-                best_model,
-                'MissAlignmentCheckpoint',
-            ])
 
         self.outputs['MissAlignment'] = {
             'label': 'Miss-Alignment',
             'type': 'MissAlignmentRun',
             'info': (
-                f'Training directory: {training_directory}. '
-                'Relion alignment matrices remain the initial coarse alignment.'
+                f'Model run directory: {model_run_directory}. '
+                'RELION per-tilt alignment columns were updated from the '
+                'optimized Miss-Alignment global XF transforms.'
             ),
             'files': files,
         }
