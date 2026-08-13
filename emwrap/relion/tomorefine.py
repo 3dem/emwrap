@@ -16,9 +16,7 @@
 
 import os
 
-from emtools.image import Image
 from emtools.jobs import Batch, Args
-from emtools.metadata import StarFile
 from .relion_base import RelionBasePipeline
 
 
@@ -82,21 +80,20 @@ class RelionTomoRefine(RelionBasePipeline):
         self.mkdir('output')
         self.batch_execute('relion_refine', batch, args)
 
-        # Register output Volume and Particle STAR file
-        outStar = self.join('output', 'run_data.star')
+        runOptSet = self.join('output', 'run_optimisation_set.star')
+        if not os.path.exists(runOptSet):
+            raise Exception(
+                f"ERROR: Output optimisation set '{runOptSet}' was not produced."
+            )
 
-        if not os.path.exists(outStar):
-            raise Exception(f"ERROR: Output STAR file '{outStar}' was not produced.")
-
-        with StarFile(outStar) as sf:
-            o = sf.getTable('optics')
-            box = o[0].rlnImageSize
-            ps = o[0].rlnImagePixelSize
-            N = sf.getTableSize('particles')
+        optSet = self.join('optimisation_set.star')
+        if os.path.lexists(optSet):
+            os.remove(optSet)
+        self.link('output/run_optimisation_set.star', name='optimisation_set.star')
 
         outVol = self.join('output', 'run_class001.mrc')
 
-        outputNodes = [[outStar, 'TomogramGroupMetadata.star.relion.tomo.particles']]
+        outputNodes = [[optSet, 'TomogramGroupMetadata.star.relion.tomo.particles']]
         outputNodes.append([outVol, 'TomogramGroupMetadata.star.relion.volume'])
         self.writeRelionOutputNodes(outputNodes)
         self.updateBatchInfo(batch)
