@@ -140,15 +140,13 @@ class WarpExportParticles(WarpBasePipeline):
                     "skipping post-processing. Check input coordinates and Warp export logs."
                 )
 
-        self._writeOptimisationSet(ptsFn)
         self._removeUnusedWarpOutputs()
+        self._writeFilteredTomogramsStar()
+        self._writeOptimisationSet()
 
         outputNodes = [[iosFn, 'TomogramGroupMetadata.star.relion.tomo.particles']]
         self.writeRelionOutputNodes(outputNodes)
         self.updateBatchInfo(batch)
-
-    def _projectRelPath(self, path):
-        return os.path.relpath(path, self.project.path)
 
     @staticmethod
     def _normalizeTomoName(name):
@@ -405,9 +403,62 @@ class WarpExportParticles(WarpBasePipeline):
 
         return totalPts, totalTomograms
 
-    def _writeOptimisationSet(self, particlesStarPath):
+    def _collectExportedTomoNames(self, particlesTable, tomoTable):
+        """Return normalized tomogram names kept after the particle-count filter."""
+        return {
+            tomoKey
+            for tomoKey, _tomoRow, _row, _particleId in self._iterExportedParticles(
+                particlesTable, tomoTable)
+        }
+
+    def _writeFilteredTomogramsStar(self):
+        """Write tomograms.star subset for tomograms that passed the particle filter."""
+        self._ensureInputsResolved()
+        tomoTable, particlesStar = self._resolveInputs()
+        particlesTable = self._readParticlesTable(particlesStar)
+        subsetNames = self._collectExportedTomoNames(particlesTable, tomoTable)
+
+        inputStar = self.project.join(self._inputTomogramsStar)
+        inputTable = StarFile.getTableFromFile('global', inputStar)
+        if not inputTable:
+            raise Exception(
+                f"Could not read 'global' table from {self._inputTomogramsStar}"
+            )
+
+        filtered = Table(inputTable.getColumnNames())
+        for row in inputTable:
+            if self._normalizeTomoName(row.rlnTomoName) in subsetNames:
+                filtered.addRow(row)
+
+        if not len(filtered):
+            raise Exception(
+                "No tomograms from the input tomograms.star matched tomograms "
+                "with exported particles."
+            )
+
+        outputStar = self.join('tomograms.star')
+        self.log(
+            f"Writing {Color.green(len(filtered))} / "
+            f"{Color.bold(len(inputTable))} tomograms to {Color.cyan(outputStar)}"
+        )
+
+        with StarFile(inputStar) as sfIn:
+            tableNames = sfIn.getTableNames()
+
+        with StarFile(outputStar, 'w') as sfOut:
+            sfOut.writeTable('global', filtered, computeFormat='left', timeStamp=True)
+            for tableName in tableNames:
+                if tableName == 'global':
+                    continue
+                if self._normalizeTomoName(tableName) not in subsetNames:
+                    continue
+                table = StarFile.getTableFromFile(tableName, inputStar)
+                sfOut.writeTable(tableName, table, computeFormat='left')
+
+        return outputStar
+
+    def _writeOptimisationSet(self):
         iosFn = self.join('optimisation_set.star')
-        particlesPath = self._projectRelPath(particlesStarPath)
 
         self._ensureInputsResolved()
 
@@ -416,8 +467,8 @@ class WarpExportParticles(WarpBasePipeline):
         else:
             values = {}
 
-        values['rlnTomoParticlesFile'] = particlesPath
-        values['rlnTomoTomogramsFile'] = self._inputTomogramsStar
+        values['rlnTomoParticlesFile'] = self.fixOutputPath('particles.star')
+        values['rlnTomoTomogramsFile'] = self.fixOutputPath('tomograms.star')
 
         with StarFile(iosFn, 'w') as sf:
             sf.writeTable('optimisation_set', Table.fromDict(values), timeStamp=True)
