@@ -140,15 +140,13 @@ class WarpExportParticles(WarpBasePipeline):
                     "skipping post-processing. Check input coordinates and Warp export logs."
                 )
 
-        self._writeOptimisationSet(ptsFn)
         self._removeUnusedWarpOutputs()
+        self._writeFilteredTomogramsStar()
+        self._writeOptimisationSet()
 
         outputNodes = [[iosFn, 'TomogramGroupMetadata.star.relion.tomo.particles']]
         self.writeRelionOutputNodes(outputNodes)
         self.updateBatchInfo(batch)
-
-    def _projectRelPath(self, path):
-        return os.path.relpath(path, self.project.path)
 
     @staticmethod
     def _normalizeTomoName(name):
@@ -156,18 +154,6 @@ class WarpExportParticles(WarpBasePipeline):
         if base.endswith('.tomostar'):
             return base[:-len('.tomostar')]
         return base
-
-    def _readFirstTable(self, starPath):
-        absPath = self.project.join(starPath)
-        with StarFile(absPath) as sf:
-            tableNames = sf.getTableNames()
-            if not tableNames:
-                raise Exception(f"No tables found in {starPath}")
-            tableName = tableNames[0]
-            table = sf.getTable(tableName)
-            if not table:
-                raise Exception(f"Could not read table '{tableName}' from {starPath}")
-            return table, tableName
 
     def _validateTomogramsStar(self, tomoStar):
         if not self.project.exists(tomoStar):
@@ -180,7 +166,7 @@ class WarpExportParticles(WarpBasePipeline):
         columns = tomoTable.getColumnNames()
         if 'rlnCoordinatesMetadata' in columns:
             raise Exception(
-                f"{tomoStar} looks like a PyTom tomograms_coords.star file. "
+                f"{tomoStar} looks like a PyTom tomograms.star file. "
                 "Expected tomograms.star from a Warp reconstruction run."
             )
 
@@ -193,6 +179,7 @@ class WarpExportParticles(WarpBasePipeline):
         return tomoTable
 
     def _resolveCoordinatesInput(self):
+        """Resolve coordinates input to particles STAR and optional linked tomograms."""
         inCoords = self._args.get('input_coordinates', '')
         if not inCoords:
             raise Exception("Missing required parameter 'input_coordinates'.")
@@ -200,48 +187,60 @@ class WarpExportParticles(WarpBasePipeline):
         if not self.project.exists(inCoords):
             raise Exception(f"Input coordinates STAR file not found: {inCoords}")
 
-        if inCoords.endswith('optimisation_set.star'):
-            table, _ = self._readFirstTable(inCoords)
-            row = table[0]
-            if not hasattr(row, 'rlnTomoParticlesFile'):
-                raise Exception(
-                    f"{inCoords} does not contain column 'rlnTomoParticlesFile'."
-                )
+        absCoords = self.project.join(inCoords)
+        if RelionStar.isTomoOptimisationSet(absCoords):
+            row = RelionStar.readTomoOptimisationSet(absCoords)[0]
             particlesStar = row.rlnTomoParticlesFile
             if not self.project.exists(particlesStar):
                 raise Exception(
                     f"Particles STAR file '{particlesStar}' referenced in "
                     f"{inCoords} was not found."
                 )
-            return particlesStar, row._asdict()
 
-        if inCoords.endswith('particles.star'):
-            return inCoords, None
+            optRow = row._asdict()
+            tomogramsStar = optRow.get('rlnTomoTomogramsFile') or ''
+            if tomogramsStar and not self.project.exists(tomogramsStar):
+                raise Exception(
+                    f"Tomograms STAR file '{tomogramsStar}' referenced in "
+                    f"{inCoords} was not found."
+                )
+            return particlesStar, optRow, tomogramsStar or None
+
+        if RelionStar.isTomoParticles(absCoords):
+            return inCoords, None, None
 
         raise Exception(
-            "input_coordinates must be a particles.star or optimisation_set.star file."
+            f"{inCoords} is not a compliant tomography optimisation_set or "
+            "particles STAR file."
         )
 
+    def _ensureInputsResolved(self):
+        if self._inputTomogramsStar is None:
+            self._resolveInputs()
+
     def _resolveInputs(self):
-        self._inputTomogramsStar = self._args.get('input_tomograms', '')
-        if not self._inputTomogramsStar:
-            raise Exception("Missing required parameter 'input_tomograms'.")
+        particlesStar, optRow, _tomogramsFromOpt = self._resolveCoordinatesInput()
+        self._inputOptimisationSetRow = optRow
+
+        tomogramsStar = self._args.get('input_tomograms', '')
+        if not tomogramsStar:
+            raise Exception(
+                "Missing required parameter 'input_tomograms'. "
+                "Provide tomograms.star from a Warp CTF/reconstruction (emw-warp-ctfrec) job."
+            )
+        self._inputTomogramsStar = tomogramsStar
 
         tomoTable = self._validateTomogramsStar(self._inputTomogramsStar)
-        particlesStar, optRow = self._resolveCoordinatesInput()
-        self._inputOptimisationSetRow = optRow
         return tomoTable, particlesStar
 
     def _readParticlesTable(self, particlesStar):
         absPath = self.project.join(particlesStar)
-        table = StarFile.getTableFromFile('particles', absPath)
-        if not table:
-            raise Exception(f"Could not read 'particles' table from {particlesStar}")
-        if not table.hasColumn('rlnTomoName'):
+        if not RelionStar.isTomoParticles(absPath):
             raise Exception(
-                f"Particles STAR file {particlesStar} is missing column 'rlnTomoName'."
+                f"Particles STAR file {particlesStar} is not a compliant "
+                "tomography particles STAR file."
             )
-        return table
+        return RelionStar.readTomoParticles(absPath)
 
     def _buildTomoLookup(self, tomoTable):
         lookup = {}
@@ -385,7 +384,9 @@ class WarpExportParticles(WarpBasePipeline):
                     totalTomograms += 1
                     tomostar = self.project.join(tomoRow.wrpTomostar)
                     if tomostar not in copiedTomostars:
-                        shutil.copy(tomostar, outTM)
+                        dst = os.path.join(outTM, os.path.basename(tomostar))
+                        if not os.path.exists(dst):
+                            shutil.copy(tomostar, dst)
                         copiedTomostars.add(tomostar)
 
                 self._exportedParticleLookup[(tomoKey, particleId)] = row._asdict()
@@ -402,22 +403,72 @@ class WarpExportParticles(WarpBasePipeline):
 
         return totalPts, totalTomograms
 
-    def _writeOptimisationSet(self, particlesStarPath):
-        iosFn = self.join('optimisation_set.star')
-        particlesPath = self._projectRelPath(particlesStarPath)
+    def _collectExportedTomoNames(self, particlesTable, tomoTable):
+        """Return normalized tomogram names kept after the particle-count filter."""
+        return {
+            tomoKey
+            for tomoKey, _tomoRow, _row, _particleId in self._iterExportedParticles(
+                particlesTable, tomoTable)
+        }
 
-        if self._inputOptimisationSetRow is None and not self._inputTomogramsStar:
-            _, self._inputOptimisationSetRow = self._resolveCoordinatesInput()
-            self._inputTomogramsStar = self._args.get('input_tomograms', '')
+    def _writeFilteredTomogramsStar(self):
+        """Write tomograms.star subset for tomograms that passed the particle filter."""
+        self._ensureInputsResolved()
+        tomoTable, particlesStar = self._resolveInputs()
+        particlesTable = self._readParticlesTable(particlesStar)
+        subsetNames = self._collectExportedTomoNames(particlesTable, tomoTable)
+
+        inputStar = self.project.join(self._inputTomogramsStar)
+        inputTable = StarFile.getTableFromFile('global', inputStar)
+        if not inputTable:
+            raise Exception(
+                f"Could not read 'global' table from {self._inputTomogramsStar}"
+            )
+
+        filtered = Table(inputTable.getColumnNames())
+        for row in inputTable:
+            if self._normalizeTomoName(row.rlnTomoName) in subsetNames:
+                filtered.addRow(row)
+
+        if not len(filtered):
+            raise Exception(
+                "No tomograms from the input tomograms.star matched tomograms "
+                "with exported particles."
+            )
+
+        outputStar = self.join('tomograms.star')
+        self.log(
+            f"Writing {Color.green(len(filtered))} / "
+            f"{Color.bold(len(inputTable))} tomograms to {Color.cyan(outputStar)}"
+        )
+
+        with StarFile(inputStar) as sfIn:
+            tableNames = sfIn.getTableNames()
+
+        with StarFile(outputStar, 'w') as sfOut:
+            sfOut.writeTable('global', filtered, computeFormat='left', timeStamp=True)
+            for tableName in tableNames:
+                if tableName == 'global':
+                    continue
+                if self._normalizeTomoName(tableName) not in subsetNames:
+                    continue
+                table = StarFile.getTableFromFile(tableName, inputStar)
+                sfOut.writeTable(tableName, table, computeFormat='left')
+
+        return outputStar
+
+    def _writeOptimisationSet(self):
+        iosFn = self.join('optimisation_set.star')
+
+        self._ensureInputsResolved()
 
         if self._inputOptimisationSetRow:
             values = dict(self._inputOptimisationSetRow)
         else:
-            values = {
-                'rlnTomoTomogramsFile': self._inputTomogramsStar,
-            }
+            values = {}
 
-        values['rlnTomoParticlesFile'] = particlesPath
+        values['rlnTomoParticlesFile'] = self.fixOutputPath('particles.star')
+        values['rlnTomoTomogramsFile'] = self.fixOutputPath('tomograms.star')
 
         with StarFile(iosFn, 'w') as sf:
             sf.writeTable('optimisation_set', Table.fromDict(values), timeStamp=True)

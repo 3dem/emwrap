@@ -66,6 +66,7 @@ class AreTomo3Pipeline(ProcessingPipeline):
         self.outputTomDir = 'tomograms'
         self.outputTsDir = 'tilt_series'
         self.acq = self.loadAcquisition(self._args['input_tiltseries'])
+        self.inputTiltDose = self._get_input_tilt_dose()
         self.inputLen = 0
         self.inputGain = self.acq.get('gain', None)
         self._allResults = {}  # tsName -> result dict, accumulated by _output
@@ -135,6 +136,30 @@ class AreTomo3Pipeline(ProcessingPipeline):
     
     
     # -------- Small generic helpers -------------
+    def _get_input_tilt_dose(self):
+        """Return the total dose per tilt from the acquisition metadata.
+        AreTomo3 expects -FmDose to be dose per raw frame. The acquisition dose
+        available to the pipeline is the total dose per tilt image.
+        """
+        dose = self.acq.get('total_dose', None)
+        if dose in ('', None):
+            self.log("WARNING: Could not find total dose per tilt in acquisition.")
+        return dose
+
+    def _get_frame_dose(self, movieFile):
+        """Get aretomo3.FmDose to dose per raw frame"""
+        if self.inputTiltDose in ('', None):
+            return None
+        try:
+            dims = Image.get_dimensions(movieFile)
+            nFrames = int(dims[2])
+            frameDose = round(float(self.inputTiltDose) / float(nFrames), 4)
+            return frameDose
+        except (TypeError, ValueError, IndexError):
+            self.log(
+                f"WARNING: Could not parse frame count from dimensions for {movieFile}: {dims}")
+            return None
+
     @staticmethod
     def _get_first_binning_value(value):
         if value is None:
@@ -967,6 +992,11 @@ class AreTomo3Pipeline(ProcessingPipeline):
             _fix_mdoc_subframe_paths(mdocAbs, mdocDest, relDir='.')
             # Link the gain reference
             acq = Acquisition(self.acq) 
+            # Set -FmDose: AreTomo3 expects dose per raw frame
+            firstMovie = _absfn(items[0])
+            frameDose = self._get_frame_dose(firstMovie)
+            if frameDose is not None:
+                self._args['aretomo3.FmDose'] = frameDose
 
             if self.inputGain:
                 acq['gain'] = batch.link(self.inputGain)

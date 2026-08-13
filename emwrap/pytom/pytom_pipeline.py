@@ -44,15 +44,27 @@ class PyTomPipeline(ProcessingPipeline):
                        'particles_relion5.star',
                        'scores.mrc']
 
+    PARTICLES_COLUMNS = [
+        'rlnTomoName',
+        'rlnCenteredCoordinateXAngst',
+        'rlnCenteredCoordinateYAngst',
+        'rlnCenteredCoordinateZAngst',
+        'rlnAngleRot',
+        'rlnAngleTilt',
+        'rlnAnglePsi',
+        'rlnLCCmax'
+    ]
+
     def __init__(self, args, output):
         ProcessingPipeline.__init__(self, args, output)
         # FIXME add support to comma separated values for parallels in batches
-        self.gpuList = [self.get_gpu_list(args['gpus'], as_string=True)]
+        self.gpuList = self.get_gpu_list(args['gpus'])
         self.launcher = args.get('launcher', '') or ProcessingPipeline.get_launcher('PYTOM')
 
         self.inTomoStar = self._args['input_tomograms']
         self.acq = self.loadAcquisition(self.inTomoStar)
-        self.outTomoStar = self.join('tomograms_coords.star')
+        self.outTomoStar = self.join('tomograms.star')
+        self.outParticlesStar = self.join('particles.star')
         self.outTomoOptimisationSet = self.join('optimisation_set.star')
 
         # FIXME: Read this from the input arguments
@@ -101,6 +113,50 @@ class PyTomPipeline(ProcessingPipeline):
 
         Process.system(f"mv {batch.join('output', '*')} {self.join('Coordinates')}")
 
+    def _processedTomoNames(self):
+        if self.outTable is None:
+            return set()
+        return {row.rlnTomoName for row in self.outTable}
+
+    def _ensureOptimisationSet(self):
+        if os.path.exists(self.outTomoOptimisationSet):
+            return
+
+        with StarFile(self.outTomoOptimisationSet, 'w') as sf:
+            values = {
+                'rlnTomoParticlesFile': self.outParticlesStar,
+                'rlnTomoTomogramsFile': self.outTomoStar,
+            }
+            sf.writeTable('optimisation_set', Table.fromDict(values), timeStamp=True)
+
+        outputNodes = [[self.outTomoOptimisationSet,
+                        'TomogramGroupMetadata.star.emwrap.TomoCoordinates']]
+        self.writeRelionOutputNodes(outputNodes)
+
+    def _appendParticles(self, tsName, coordsStar, batch):
+        if os.path.exists(self.outParticlesStar):
+            ptsTable = StarFile.getTableFromFile('particles', self.outParticlesStar)
+        else:
+            ptsTable = Table(columns=self.PARTICLES_COLUMNS)
+
+        if any(row.rlnTomoName == tsName for row in ptsTable):
+            batch.log(
+                f"WARNING: particles for tomogram '{tsName}' already in "
+                f"{self.outParticlesStar}, skipping")
+            return
+
+        if coordsStar and os.path.exists(coordsStar):
+            coordsTable = StarFile.getTableFromFile('particles', coordsStar)
+            for coord in coordsTable:
+                values = {c: getattr(coord, c) for c in self.PARTICLES_COLUMNS}
+                values['rlnTomoName'] = tsName
+                ptsTable.addRowValues(**values)
+        elif coordsStar:
+            batch.log(f'ERROR: coordinate file {coordsStar} does not exist, skipping')
+
+        with StarFile(self.outParticlesStar, 'w') as sf:
+            sf.writeTable('particles', ptsTable, timeStamp=True)
+
     def _output(self, batch):
         tsName = batch['tsName']
 
@@ -110,6 +166,12 @@ class PyTomPipeline(ProcessingPipeline):
             batch.log(f"ERROR: {batch.error}")
         else:
             outFiles = self._moveBatchFiles(batch)
+            if tsName in self._processedTomoNames():
+                batch.log(
+                    f"WARNING: tomogram '{tsName}' already in "
+                    f"{self.outTomoStar}, skipping output")
+                return batch
+
             rowDict = batch['rowDict']
             rowDict['rlnParticleNumber'] = 0
             rowDict['rlnCoordinatesMetadata'] = 'None'
@@ -125,8 +187,11 @@ class PyTomPipeline(ProcessingPipeline):
                 sfOut.writeTable('global', self.outTable,
                                  timeStamp=True, computeFormat='left')
 
+            self._ensureOptimisationSet()
+            self._appendParticles(
+                tsName, outFiles.get('particles_relion5.star'), batch)
+
             self._updateInput()
-            self._updateOutput()
             self.updateBatchInfo(batch)
 
         return batch
@@ -190,14 +255,8 @@ class PyTomPipeline(ProcessingPipeline):
         ps = RelionStar.getTomoPixelSize(first)
         bin = first.rlnTomoTomogramBinning
 
-    def _updateOutput(self):
-        N = len(self.outTable)
-        n = sum(row.rlnParticleNumber for row in self.outTable)
-        outputNodes = [[self.outTomoOptimisationSet, 'TomogramGroupMetadata.star.emwrap.TomoCoordinates']]
-        self.writeRelionOutputNodes(outputNodes)
-
     def prerun(self):
-        self.log("Testing output generation, nothing else....exiting.")
+        self.log("Setting up PyTom picking pipeline.")
 
         self._dims = None
         self._updateInput()
@@ -206,74 +265,24 @@ class PyTomPipeline(ProcessingPipeline):
         g = self.addGenerator(self._getInputTomograms)
         outputQueue = None
         self.mkdir('Coordinates')
-        self.log(f"Creating {len(self.gpuList)} processing threads.", flush=True)
+        n = len(self.gpuList)
+        self.log(f"Total GPUs: {n}.", flush=True)
 
-        for gpu in self.gpuList:
+        if n % 2 == 0:
+            gpu_groups = [self.gpuList[i:i+2] for i in range(0, n, 2)]
+        else:
+            gpu_groups = [[g] for g in self.gpuList]
+
+        self.log(f"Creating {len(gpu_groups)} processing threads.")
+
+        for gpus in gpu_groups:
+            gpuStr = ' '.join(str(g) for g in gpus)
             p = self.addProcessor(g.outputQueue,
-                                  self.get_pytom_proc(gpu),
+                                  self.get_pytom_proc(gpuStr),
                                   outputQueue=outputQueue)
             outputQueue = p.outputQueue
 
         self.addProcessor(outputQueue, self._output)
-
-    def postrun(self):
-        self.log("Generating Relion 5 compatible outputs: optimisation_set.star and related files.")
-        tomoCoordsTable = StarFile.getTableFromFile('global', self.join('tomograms_coords.star'))
-
-        def _output(key):
-            return self.join(f'{key}.star')
-
-        optsetFn = _output('optimisation_set')
-        tomogramsFn = _output('tomograms')
-        particlesFn = _output('particles')
-
-        # First create the optimisation_set.star file and then the associated tomograms and particles
-        with StarFile(optsetFn, 'w') as sf:
-            values = {
-                'rlnTomoParticlesFile': particlesFn,
-                'rlnTomoTomogramsFile': tomogramsFn
-            }
-            sf.writeTable('optimisation_set', Table.fromDict(values), timeStamp=True)
-
-        with StarFile(tomogramsFn, 'w') as sf:
-            newTomoTable = tomoCoordsTable.cloneColumns(['rlnCoordinatesMetadata'])
-            for row in tomoCoordsTable:
-                rowDict = row._asdict()
-                del rowDict['rlnCoordinatesMetadata']
-                newTomoTable.addRowValues(**rowDict)
-            sf.writeTable('global', newTomoTable, timeStamp=True)
-
-        ptsColumns = [
-            'rlnTomoName',
-            'rlnCenteredCoordinateXAngst',
-            'rlnCenteredCoordinateYAngst',
-            'rlnCenteredCoordinateZAngst',
-            'rlnAngleRot',
-            'rlnAngleTilt',
-            'rlnAnglePsi',
-            'rlnLCCmax'
-        ]
-
-        with StarFile(particlesFn, 'w') as sf:
-            ptsTable = Table(columns=ptsColumns)
-            for row in tomoCoordsTable:
-                tsName = row.rlnTomoName
-                # FIMXE Now it is hardcoded how to match tomoName with its particle
-                # we might handle this at the batch output, instead of using simply mv
-                # we can prefix it with the proper tomoName
-                coordsFn = self.join('Coordinates', f'{tsName}_particles_relion5.star')
-                self.log(f'Mapped tomo {tsName} to coordinates {coordsFn}')
-                if os.path.exists(coordsFn):
-                    coordsTable = StarFile.getTableFromFile('particles', coordsFn)
-                    for coord in coordsTable:
-                        values = {c: getattr(coord, c) for c in ptsColumns}
-                        values['rlnTomoName'] = tsName
-                        ptsTable.addRowValues(**values)
-
-                else:
-                    self.log(f'ERROR: coordinate file {coordsFn} does not exist, skipping')
-
-            sf.writeTable('particles', ptsTable, timeStamp=True)
 
 
 if __name__ == '__main__':

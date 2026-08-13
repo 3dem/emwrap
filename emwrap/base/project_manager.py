@@ -38,17 +38,22 @@ from .project_lock import ProjectLock
 class ProjectManager(FolderManager):
     """ Class to manipulate information about a Relion project. """
 
-    def __init__(self, path, create=False, verbose=1):
+    JOB_CLUSTER_ID_FILE = 'job.id'
+    JOB_PROCESS_ID_FILE = 'process.id'
+
+    def __init__(self, path, create=False, verbose=1, force=False):
         """ Create a ProjectManager in that path.
 
         Args:
             path: Path to the project directory.
             create: Create a new project if it does not exist.
             verbose: Verbosity level.
+            force: Recompute cached metadata instead of using project.json cache.
         """
         path = os.path.abspath(os.path.expanduser(path))
         FolderManager.__init__(self, path)
         self._verbose = verbose
+        self._force = force
 
         if not self.exists():
             raise Exception(f"Project path '{path}' does not exist")
@@ -72,6 +77,15 @@ class ProjectManager(FolderManager):
 
     def get_workflow(self):
         return self._wf
+
+    @property
+    def force(self):
+        return self._force
+
+    def recomputeAllInfos(self):
+        """Recompute all cached job and output metadata and persist project.json."""
+        with self._project_write('recompute infos'):
+            self._data.recomputeAllInfos()
 
     def reload_from_disk(self):
         """Reload pipeline and project.json from disk into memory."""
@@ -384,6 +398,59 @@ class ProjectManager(FolderManager):
 
         return job
 
+    def _stopClusterJob(self, jobId):
+        """Cancel a job that was submitted to a cluster queue."""
+        with open(self.join(jobId, self.JOB_CLUSTER_ID_FILE)) as f:
+            cluster_job_id = f.readline().strip()
+
+        job_params = self._readJobParams(self._getJob(jobId))
+        qname = job_params.get('queue.name', 'NO-NAME')
+        if qname == 'NO-NAME':
+            raise Exception(f"No queue name found for stopping job {jobId}.")
+
+        if queue := ProcessingConfig.get_queue(qname):
+            cancelCmd = queue['cancel'].format(job_id=cluster_job_id)
+        else:
+            raise Exception(f"Queue {qname} not found in config for stopping job {jobId}.")
+
+        scriptLog = self.join(jobId, 'job.log')
+        try:
+            subprocess.run(shlex.split(cancelCmd), check=True, capture_output=True, text=True)
+            self._log(f"Stopping CLUSTER job, {cancelCmd}", jobFile=scriptLog, flush=True)
+        except subprocess.CalledProcessError as e:
+            self._log("ERROR: Stopping CLUSTER job failed", jobFile=scriptLog)
+            self._log(f"  Error: '{e.stderr.rstrip()}'", jobFile=scriptLog)
+
+    def _stopLocalJob(self, jobId):
+        """Kill a locally launched job using its recorded root process id."""
+        scriptLog = self.join(jobId, 'job.log')
+        process_id_file = self.join(jobId, self.JOB_PROCESS_ID_FILE)
+        if not os.path.exists(process_id_file):
+            self._log(
+                f"No {self.JOB_PROCESS_ID_FILE} found for local job {jobId}",
+                jobFile=scriptLog, flush=True)
+            return
+
+        with open(process_id_file) as f:
+            pid = f.readline().strip()
+
+        if not pid:
+            self._log(
+                f"Empty {self.JOB_PROCESS_ID_FILE} for local job {jobId}",
+                jobFile=scriptLog, flush=True)
+            return
+
+        self._log(f"Stopping LOCAL job, pid={pid}", jobFile=scriptLog, flush=True)
+        if Process.checkChilds(None, self.path, kill=True, pid=pid,
+                               verbose=max(self._verbose - 1, 0)):
+            self._log(
+                f"Killed process tree for pid {pid}",
+                jobFile=scriptLog, flush=True)
+        else:
+            self._log(
+                f"Process {pid} is not running or could not be killed",
+                jobFile=scriptLog, flush=True)
+
     def stopJob(self, jobId):
         """ Stop a job. """
         with self._project_write('stop job'):
@@ -391,28 +458,19 @@ class ProjectManager(FolderManager):
             if not self._data.isActiveJob(job):
                 raise Exception("Can not stop non-running jobs.")
 
-            self._data.setJobStatus(jobId, ProjectData.STATUS_ABORTED)
-            if self.exists(jobId, 'job.id'):
-                with open(self.join(jobId, 'job.id')) as f:
-                    job_id = f.readline().strip()
+            self._data._signalJobAbort(jobId)
+            job_params = self._readJobParams(job)
+            qname = job_params.get('queue.name', 'NO-NAME')
+            queue = (None if qname in ('None', 'NO-NAME', 'NO-QUEUE')
+                     else ProcessingConfig.get_queue(qname))
 
-                job_params = self._readJobParams(job)
-                qname = job_params.get('queue.name', 'NO-NAME')
-                if qname == 'NO-NAME':
-                    raise Exception(f"No queue name found for stopping job {jobId}.")
+            if self.exists(jobId, self.JOB_CLUSTER_ID_FILE) and queue:
+                self._stopClusterJob(jobId)
+            else:
+                self._stopLocalJob(jobId)
 
-                if queue := ProcessingConfig.get_queue(qname):
-                    cancelCmd = queue['cancel'].format(job_id=job_id)
-                else:
-                    raise Exception(f"Queue {qname} not found in config for stopping job {jobId}.")
-
-                scriptLog = self.join(jobId, 'job.log')
-                try:
-                    subprocess.run(shlex.split(cancelCmd), check=True, capture_output=True, text=True)                
-                    self._log(f"Stopping CLUSTER job, {cancelCmd}", jobFile=scriptLog, flush=True)
-                except subprocess.CalledProcessError as e:
-                    self._log("ERROR: Stopping CLUSTER job failed", jobFile=scriptLog)
-                    self._log(f"  Error: '{e.stderr.rstrip()}'", jobFile=scriptLog)
+            # Clear stale RELION_JOB_RUNNING so refresh cannot revert Aborted.
+            self._data._writeJobRelionStatus(jobId, 'EXIT_ABORTED')
             self._data.setJobStatus(jobId, ProjectData.STATUS_ABORTED)
             self._persist_workflow()
         return job
@@ -622,7 +680,11 @@ class ProjectManager(FolderManager):
                 raise Exception(f"Unexpected submission output: {result.stdout}")
             self._log(f"Submission successful, JOB_ID: {job_id}",
                       jobFile=script_log, flush=True)
-            with open(script_file.replace('.script', '.id'), 'w') as f:
+            job_dir = os.path.dirname(script_file)
+            process_id_file = os.path.join(job_dir, self.JOB_PROCESS_ID_FILE)
+            if os.path.exists(process_id_file):
+                os.remove(process_id_file)
+            with open(os.path.join(job_dir, self.JOB_CLUSTER_ID_FILE), 'w') as f:
                 f.write(job_id)
             return job_id
         except subprocess.CalledProcessError as e:
@@ -640,6 +702,11 @@ class ProjectManager(FolderManager):
 
         p = subprocess.Popen(args, cwd=self.path,
                              stdout=stdout, stderr=stderr, close_fds=True)
+        cluster_id_file = os.path.join(folder_path, self.JOB_CLUSTER_ID_FILE)
+        if os.path.exists(cluster_id_file):
+            os.remove(cluster_id_file)
+        with open(os.path.join(folder_path, self.JOB_PROCESS_ID_FILE), 'w') as f:
+            f.write(str(p.pid))
         if wait:
             p.wait()
 
@@ -753,6 +820,8 @@ class ProjectManager(FolderManager):
         return job
 
     def _hasJob(self, jobId):
+        if not jobId:
+            return False
         return self._wf.hasJob(Path.rmslash(jobId))
 
     def _getJob(self, jobId, validateExists=True):
@@ -855,6 +924,10 @@ class ProjectManager(FolderManager):
                             "If used in with --run, it will clean the job "
                             "output before running the command. ")
 
+        p.add_argument('--force', '-f', action='store_true',
+                       help='Force recomputation of cached metadata '
+                            '(e.g. with --list).')
+
         args = p.parse_args()
         n = len(sys.argv)
 
@@ -865,7 +938,8 @@ class ProjectManager(FolderManager):
             pipeline_star = os.path.join(args.path, 'default_pipeline.star')
             create = ((n == 2 and args.clean)
                       or (args.workflow and not os.path.exists(pipeline_star)))
-            pm = ProjectManager(args.path, create=create, verbose=args.verbose)
+            pm = ProjectManager(args.path, create=create, verbose=args.verbose,
+                                force=args.force)
 
         def _params(params, i):
             n = len(params)
@@ -875,6 +949,8 @@ class ProjectManager(FolderManager):
             pm.update()
 
         elif args.list is not None:  # only when -l / --list is on the command line
+            if args.force:
+                pm.recomputeAllInfos()
             if inputId := args.list:  # it can be empty string when no value is passed
                 w = pm.get_workflow()
                 if job := w.getJob(inputId):

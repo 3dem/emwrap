@@ -19,6 +19,11 @@ export EMWRAP_CONFIG=$(cat <<EOF
             "label": "EMwrap Import TS",
             "output": "EMwrap"
         },
+        "emw-subset-ts": {
+            "launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.base.subset_ts",
+            "label": "EMwrap Subset TS",
+            "output": "EMwrap"
+        },
         "emw-warp-mctf": {
             "launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_mctf",
             "label": "Warp Motion and CTF",
@@ -27,6 +32,11 @@ export EMWRAP_CONFIG=$(cat <<EOF
         "emw-warp-aretomo": {
             "launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_aretomo",
             "label": "Warp Aretomo",
+            "output": "WarpTsAlign"
+        },
+        "emw-warp-tsalign": {
+            "launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_tsalign",
+            "label": "Warp TS Align",
             "output": "WarpTsAlign"
         },
         "emw-warp-ctfrec": {
@@ -76,6 +86,16 @@ export EMWRAP_CONFIG=$(cat <<EOF
         "emw-warp-mcore": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_mcore"},
         "emw-warp-estimate_weights": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_estimate_weights"},
         "emw-warp-mtools_resample": {"launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.warp.warp_mtools_resample"},
+        "relion.reconstructtomograms": {
+            "launcher": "$SCRIPTS/relion_job_launcher.sh",
+            "label": "Relion Reconstruct Tomograms",
+            "output": "Tomograms"
+        },
+        "relion.pseudosubtomo": {
+            "launcher": "$SCRIPTS/relion_job_launcher.sh",
+            "label": "Relion Extract Subtomograms",
+            "output": "Extract"
+        },
         "emw-denoiset": {
             "launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.aretomo.denoiset",
             "label": "DenoisET",
