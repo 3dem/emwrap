@@ -34,11 +34,7 @@ def _broadcast(values, n, name):
     )
 
 
-def warp_xml_to_imod_xf(
-    xml_file,
-    xf_file,
-    xf_pixel_size,
-):
+def warp_xml_to_imod_xf(xml_file, xf_file, xf_pixel_size):
     """Convert Warp global tilt-series alignment parameters to IMOD XF.
 
     Only the global per-tilt alignment stored in ``AxisAngle``,
@@ -84,9 +80,7 @@ def warp_xml_to_imod_xf(
 
     xf_pixel_size = float(xf_pixel_size)
     if xf_pixel_size <= 0:
-        raise ValueError(
-            f"xf_pixel_size must be greater than zero, got {xf_pixel_size}."
-        )
+        raise ValueError(f"xf_pixel_size must be greater than zero, got {xf_pixel_size}.")
 
     if not xml_file.is_file():
         raise FileNotFoundError(f"Warp XML not found: {xml_file}")
@@ -94,8 +88,7 @@ def warp_xml_to_imod_xf(
     root = ET.parse(xml_file).getroot()
     if root.tag != "TiltSeries":
         raise ValueError(
-            f"Expected <TiltSeries> root in {xml_file}, found <{root.tag}>."
-        )
+            f"Expected <TiltSeries> root in {xml_file}, found <{root.tag}>.")
 
     offsets_x = _read_float_array(root, "AxisOffsetX")
     offsets_y = _read_float_array(root, "AxisOffsetY")
@@ -103,24 +96,19 @@ def warp_xml_to_imod_xf(
     if len(offsets_x) != len(offsets_y):
         raise ValueError(
             "AxisOffsetX/AxisOffsetY length mismatch: "
-            f"{len(offsets_x)} vs {len(offsets_y)}."
-        )
+            f"{len(offsets_x)} vs {len(offsets_y)}.")
 
     n_tilts = len(offsets_x)
     axis_angles = _broadcast(
         _read_float_array(root, "AxisAngle"),
         n_tilts,
-        "AxisAngle",
+        "AxisAngle"
     )
 
     xf_file.parent.mkdir(parents=True, exist_ok=True)
 
     with xf_file.open("w", encoding="utf-8") as handle:
-        for axis_angle, offset_x, offset_y in zip(
-            axis_angles,
-            offsets_x,
-            offsets_y,
-        ):
+        for axis_angle, offset_x, offset_y in zip(axis_angles, offsets_x, offsets_y):
             theta = math.radians(-axis_angle)
             cos_theta = math.cos(theta)
             sin_theta = math.sin(theta)

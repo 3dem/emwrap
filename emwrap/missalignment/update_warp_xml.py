@@ -12,35 +12,31 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description=(
             'Update image_dimensions_physical and volume_dimensions_physical '
-            'in Warp tilt-series XML files.'
-        )
-    )
+            'in Warp tilt-series XML files.'))
+
     parser.add_argument(
         '--xml-directory',
         required=True,
-        help='Directory containing Warp tilt-series XML files.',
-    )
+        help='Directory containing Warp tilt-series XML files.')
+
     parser.add_argument('--image-x', type=int, required=True)
     parser.add_argument('--image-y', type=int, required=True)
     parser.add_argument('--volume-x', type=int, required=True)
     parser.add_argument('--volume-y', type=int, required=True)
     parser.add_argument('--volume-z', type=int, required=True)
     parser.add_argument('--pixel-size', type=float, required=True)
+    
     return parser.parse_args()
 
 
 def update_xml_files(args):
     xml_directory = Path(args.xml_directory).expanduser().resolve()
     if not xml_directory.is_dir():
-        raise NotADirectoryError(
-            f'Warp XML directory does not exist: {xml_directory}'
-        )
+        raise NotADirectoryError(f'Warp XML directory does not exist: {xml_directory}')
 
     xml_files = sorted(xml_directory.glob('*.xml'))
     if not xml_files:
-        raise RuntimeError(
-            f'No Warp tilt-series XML files found in {xml_directory}'
-        )
+        raise RuntimeError(f'No Warp tilt-series XML files found in {xml_directory}')
 
     image_dimensions_physical = torch.tensor(
         [
