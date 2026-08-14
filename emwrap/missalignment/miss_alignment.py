@@ -24,9 +24,6 @@ from emwrap.warp.warp import WarpBasePipeline
 
 from .utils import warp_xml_to_imod_xf 
 
-# TODO: 5. Post-processing
-# After miss-alignment finishes, update the CTF parameters in WarpTools (ts_ctf) 
-
 
 class MissAlignment(WarpBasePipeline):
     """Run Miss-Alignment on a Warp project produced by coarse TS alignment."""
@@ -55,11 +52,7 @@ class MissAlignment(WarpBasePipeline):
 
     def _get_args(self, prefix, new_prefix='--'):
         """Return arguments below *prefix* using a new command-line prefix."""
-        return self._args.subset(
-            prefix,
-            new_prefix,
-            filters=['remove_empty'],
-        )
+        return self._args.subset(prefix, new_prefix, filters=['remove_empty'])
 
     @staticmethod
     def _positive_int(value, name):
@@ -157,8 +150,7 @@ class MissAlignment(WarpBasePipeline):
 
         if len(ts_table) == 0:
             raise ValueError('Tilt-series metadata is empty: '
-            f'{first.rlnTomoTiltSeriesStarFile}'
-            )
+            f'{first.rlnTomoTiltSeriesStarFile}')
 
         mic_file = ts_table[0].rlnMicrographName
         dims = Image.get_dimensions(mic_file)
@@ -850,11 +842,11 @@ class MissAlignment(WarpBasePipeline):
 
         input_folder = FolderManager(os.path.abspath(os.path.dirname(self.inputTs)))
 
+        self._ensure_project_inputs(input_folder)
         geometry = self._dataset_geometry()
         # If mode is train+infer, the Warp project was already imported during training. 
         # If mode is infer-only, we need to import the Warp project and update the XMLs now. 
         if mode == self.MODE_INFER_ONLY:
-            self._ensure_project_inputs(input_folder)
             self._update_warp_xmls(batch, geometry)
 
         data_directory = os.path.abspath(self.join(self.TS))
@@ -907,12 +899,7 @@ class MissAlignment(WarpBasePipeline):
     # ------------------------------------------------------------------
     # Output registration
     # ------------------------------------------------------------------
-    def _compute_relion_alignments_from_xf(
-        self,
-        xf_file,
-        tilt_angles,
-        pixel_size,
-    ):
+    def _compute_relion_alignments_from_xf(self, xf_file, tilt_angles, pixel_size):
         """Convert one IMOD XF file to RELION per-tilt alignment values."""
         imod_alignments = Imod.get_alignment_from_xf(xf_file)
 
@@ -929,52 +916,35 @@ class MissAlignment(WarpBasePipeline):
             pixel_size,
         )
 
-    def _write_individual_tilt_series_star(
-        self,
-        batch,
-        ts_row,
-        pixel_size,
-    ):
+    def _write_individual_tilt_series_star(self, batch, ts_row, pixel_size):
         """Copy one input TS STAR while replacing only RELION alignment fields."""
         ts_name = str(ts_row.rlnTomoName)
         input_star = ts_row.rlnTomoTiltSeriesStarFile
 
         if not input_star or not os.path.isfile(input_star):
             raise FileNotFoundError(
-                f'Input tilt-series STAR not found for {ts_name}: {input_star}'
-            )
+                f'Input tilt-series STAR not found for {ts_name}: {input_star}')
 
-        input_table = StarFile.getTableFromFile(
-            ts_name,
-            input_star,
-        )
+        input_table = StarFile.getTableFromFile(ts_name, input_star)
         if len(input_table) == 0:
             raise ValueError(
-                f'Input tilt-series STAR is empty for {ts_name}: {input_star}'
-            )
+                f'Input tilt-series STAR is empty for {ts_name}: {input_star}')
 
         tilt_angles = []
         for tilt_row in input_table:
             tilt_dict = tilt_row._asdict()
-            tilt_angle = tilt_dict.get(
-                'rlnTomoNominalStageTiltAngle',
-                None,
-            )
+            tilt_angle = tilt_dict.get('rlnTomoNominalStageTiltAngle', None)
             if tilt_angle in ('', None):
                 raise ValueError(
                     f'{ts_name}: rlnTomoNominalStageTiltAngle is required '
-                    'to convert the IMOD XF transform to RELION alignment.'
-                )
+                    'to convert the IMOD XF transform to RELION alignment.')
+            
             tilt_angles.append(float(tilt_angle))
 
-        xf_file = os.path.join(
-            os.path.abspath(self.join(self.TS)),
-            f'{ts_name}.xf',
-        )
+        xf_file = os.path.join(os.path.abspath(self.join(self.TS)), f'{ts_name}.xf')
         if not os.path.isfile(xf_file):
             raise FileNotFoundError(
-                f'Miss-Alignment XF file not found for {ts_name}: {xf_file}'
-            )
+                f'Miss-Alignment XF file not found for {ts_name}: {xf_file}')
 
         relion_alignments = self._compute_relion_alignments_from_xf(
             xf_file,
@@ -986,8 +956,7 @@ class MissAlignment(WarpBasePipeline):
             raise ValueError(
                 f'RELION alignment count mismatch for {ts_name}: '
                 f'{len(relion_alignments)} alignments versus '
-                f'{len(input_table)} STAR rows.'
-            )
+                f'{len(input_table)} STAR rows.')
 
         alignment_columns = (
             'rlnTomoXTilt',
@@ -1007,15 +976,11 @@ class MissAlignment(WarpBasePipeline):
             raise ValueError(
                 f'{ts_name}: input STAR does not contain the expected '
                 'RELION alignment columns: '
-                + ', '.join(missing_columns)
-            )
+                + ', '.join(missing_columns))
 
         output_table = Table(input_columns)
 
-        for tilt_row, alignment in zip(
-            input_table,
-            relion_alignments,
-        ):
+        for tilt_row, alignment in zip(input_table, relion_alignments):
             tilt_dict = tilt_row._asdict()
 
             for column in alignment_columns:
@@ -1028,15 +993,8 @@ class MissAlignment(WarpBasePipeline):
 
             output_table.addRowValues(**tilt_dict)
 
-        output_star = batch.join(
-            'tilt_series',
-            f'{ts_name}.star',
-        )
-        self.write_ts_table(
-            ts_name,
-            output_table,
-            output_star,
-        )
+        output_star = batch.join('tilt_series', f'{ts_name}.star')
+        self.write_ts_table(ts_name, output_table, output_star)
 
         return output_star
 
