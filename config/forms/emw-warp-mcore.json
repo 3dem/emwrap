@@ -1,146 +1,145 @@
 {
-  "name": "emw-warp-mcore",
-  "help": "Warp wrapper to run MCore refinements (MTools/M). Input is typically from a Relion tomorefine job from Warp export particles.\n\n*REFERENCES*:\n[[https://warpem.github.io/warp/reference/mtools/api/mcore/?h=mcore][MCore API]]",
-  "sections": [
-    {
-      "label": "Refinement",
-      "params": [
+    "name": "emw-warp-mcore",
+    "help": "Warp wrapper to run MCore refinements (MTools/M). Input is typically from a Relion tomorefine job from Warp export particles.\n\n*REFERENCES*:\n[[https://warpem.github.io/warp/reference/mtools/api/mcore/?h=mcore][MCore API]]",
+    "sections": [
         {
-          "name": "mcore.population",
-          "label": "Population file:",
-          "paramClass": "PathParam",
-          "pointerClass": "WarpPopulation",
-          "help": "Required. Path to the .population file containing descriptions of data sources and species. May be set by the wrapper from input context."
+            "label": "Refinement",
+            "params": [
+                {
+                    "name": "mcore.population",
+                    "label": "Population file:",
+                    "paramClass": "PathParam",
+                    "pointerClass": "WarpPopulation",
+                    "help": "Required. Path to the .population file containing descriptions of data sources and species. May be set by the wrapper from input context."
+                },
+                {
+                    "name": "mcore.iter",
+                    "label": "Sub-iterations",
+                    "default": 3,
+                    "paramClass": "IntParam",
+                    "help": "Number of refinement sub-iterations (--iter). Default: 3."
+                },
+                {
+                    "name": "mcore.refine_imagewarp",
+                    "label": "Refine image warp (XxY)",
+                    "paramClass": "StringParam",
+                    "help": "Refine image warp with a grid of XxY dimensions (--refine_imagewarp). Examples: leave blank = don't refine, '1x1', '3x3', '6x4'."
+                },
+                {
+                    "name": "mcore.refine_particles",
+                    "label": "Refine particle poses",
+                    "paramClass": "BooleanParam",
+                    "default": false,
+                    "help": "Refine particle poses (--refine_particles)."
+                },
+                {
+                    "name": "mcore.refine_mag",
+                    "label": "Refine anisotropic magnification",
+                    "paramClass": "BooleanParam",
+                    "default": false,
+                    "help": "Refine anisotropic magnification (--refine_mag)."
+                },
+                {
+                    "name": "mcore.refine_doming",
+                    "label": "Refine doming",
+                    "paramClass": "BooleanParam",
+                    "default": false,
+                    "help": "Refine doming; frame series only (--refine_doming)."
+                },
+                {
+                    "name": "mcore.refine_stageangles",
+                    "label": "Refine stage angles",
+                    "paramClass": "BooleanParam",
+                    "default": false,
+                    "help": "Refine stage angles; tilt series only (--refine_stageangles)."
+                },
+                {
+                    "name": "extra_mcore",
+                    "label": "MCore extra arguments",
+                    "paramClass": "StringParam",
+                    "help": "Extra arguments to pass to MCore"
+                }
+            ]
         },
         {
-          "name": "mcore.iter",
-          "label": "Sub-iterations",
-          "default": 3,
-          "paramClass": "IntParam",
-          "help": "Number of refinement sub-iterations (--iter). Default: 3."
+            "label": "CTF",
+            "params": [
+                {
+                    "name": "mcore.ctf_defocus",
+                    "label": "Refine defocus",
+                    "paramClass": "BooleanParam",
+                    "default": false,
+                    "help": "Refine defocus using a local search (--ctf_defocus)."
+                },
+                {
+                    "name": "mcore.ctf_defocusexhaustive",
+                    "label": "Exhaustive defocus (first sub-iter)",
+                    "paramClass": "BooleanParam",
+                    "default": false,
+                    "help": "Refine defocus using a more exhaustive grid search in the first sub-iteration (--ctf_defocusexhaustive); only with ctf_defocus."
+                },
+                {
+                    "name": "mcore.ctf_cs",
+                    "label": "Refine spherical aberration",
+                    "paramClass": "BooleanParam",
+                    "default": false,
+                    "help": "Refine spherical aberration (Cs), also a proxy for pixel size (--ctf_cs)."
+                },
+                {
+                    "label": "Refine Zernike Polynomials",
+                    "paramClass": "Group",
+                    "default": false,
+                    "help": "Refine Zernike polynomials of 2nd, 3rd, 4th and 5th order (--ctf_zernike2, --ctf_zernike3, --ctf_zernike4, --ctf_zernike5).",
+                    "params": [
+                        {
+                            "name": "mcore.ctf_zernike2",
+                            "label": "2nd order (slow)",
+                            "paramClass": "BooleanParam",
+                            "default": false,
+                            "help": "Refine Zernike polynomials of 2nd order (--ctf_zernike2). Slow."
+                        },
+                        {
+                            "name": "mcore.ctf_zernike3",
+                            "label": "3rd order (beam tilt, trefoil)",
+                            "paramClass": "BooleanParam",
+                            "default": false,
+                            "help": "Refine Zernike polynomials of 3rd order \u2013 beam tilt, trefoil (--ctf_zernike3). Fast."
+                        },
+                        {
+                            "name": "mcore.ctf_zernike4",
+                            "label": "4th order (slow)",
+                            "paramClass": "BooleanParam",
+                            "default": false,
+                            "help": "Refine Zernike polynomials of 4th order (--ctf_zernike4). Slow."
+                        },
+                        {
+                            "name": "mcore.ctf_zernike5",
+                            "label": "5th order",
+                            "paramClass": "BooleanParam",
+                            "default": false,
+                            "help": "Refine Zernike polynomials of 5th order (--ctf_zernike5). Fast."
+                        }
+                    ]
+                }
+            ]
         },
         {
-          "name": "mcore.refine_imagewarp",
-          "label": "Refine image warp (XxY)",
-          "default": "",
-          "paramClass": "StringParam",
-          "help": "Refine image warp with a grid of XxY dimensions (--refine_imagewarp). Examples: leave blank = don't refine, '1x1', '3x3', '6x4'."
-        },
-        {
-          "name": "mcore.refine_particles",
-          "label": "Refine particle poses",
-          "paramClass": "BooleanParam",
-          "default": false,
-          "help": "Refine particle poses (--refine_particles)."
-        },        
-        {
-          "name": "mcore.refine_mag",
-          "label": "Refine anisotropic magnification",
-          "paramClass": "BooleanParam",
-          "default": false,
-          "help": "Refine anisotropic magnification (--refine_mag)."
-        },
-        {
-          "name": "mcore.refine_doming",
-          "label": "Refine doming",
-          "paramClass": "BooleanParam",
-          "default": false,
-          "help": "Refine doming; frame series only (--refine_doming)."
-        },
-        {
-          "name": "mcore.refine_stageangles",
-          "label": "Refine stage angles",
-          "paramClass": "BooleanParam",
-          "default": false,
-          "help": "Refine stage angles; tilt series only (--refine_stageangles)."
-        },
-        {
-          "name": "extra_mcore",
-          "label": "MCore extra arguments",
-          "paramClass": "StringParam",
-          "help": "Extra arguments to pass to MCore"
-        }       
-      ]
-    },
-    {
-      "label": "CTF",
-      "params": [        
-        {
-          "name": "mcore.ctf_defocus",
-          "label": "Refine defocus",
-          "paramClass": "BooleanParam",
-          "default": false,
-          "help": "Refine defocus using a local search (--ctf_defocus)."
-        },
-        {
-          "name": "mcore.ctf_defocusexhaustive",
-          "label": "Exhaustive defocus (first sub-iter)",
-          "paramClass": "BooleanParam",
-          "default": false,
-          "help": "Refine defocus using a more exhaustive grid search in the first sub-iteration (--ctf_defocusexhaustive); only with ctf_defocus."
-        },        
-        {
-          "name": "mcore.ctf_cs",
-          "label": "Refine spherical aberration",
-          "paramClass": "BooleanParam",
-          "default": false,
-          "help": "Refine spherical aberration (Cs), also a proxy for pixel size (--ctf_cs)."
-        },
-        {
-          "label": "Refine Zernike Polynomials",
-          "paramClass": "Group",
-          "default": false,
-          "help": "Refine Zernike polynomials of 2nd, 3rd, 4th and 5th order (--ctf_zernike2, --ctf_zernike3, --ctf_zernike4, --ctf_zernike5).",
-          "params": [
-            {
-              "name": "mcore.ctf_zernike2",
-              "label": "2nd order (slow)",
-              "paramClass": "BooleanParam",
-              "default": false,
-              "help": "Refine Zernike polynomials of 2nd order (--ctf_zernike2). Slow."
-            },
-            {
-              "name": "mcore.ctf_zernike3",
-              "label": "3rd order (beam tilt, trefoil)",
-              "paramClass": "BooleanParam",
-              "default": false,
-              "help": "Refine Zernike polynomials of 3rd order – beam tilt, trefoil (--ctf_zernike3). Fast."
-            },
-            {
-              "name": "mcore.ctf_zernike4",
-              "label": "4th order (slow)",
-              "paramClass": "BooleanParam",
-              "default": false,
-              "help": "Refine Zernike polynomials of 4th order (--ctf_zernike4). Slow."
-            },
-            {
-              "name": "mcore.ctf_zernike5",
-              "label": "5th order",
-              "paramClass": "BooleanParam",
-              "default": false,
-              "help": "Refine Zernike polynomials of 5th order (--ctf_zernike5). Fast."
-            }
-          ]
-        }        
-      ]
-    },
-    {
-      "label": "Compute",
-      "params": [
-        {
-          "name": "gpus",
-          "label": "GPUs",
-          "default": 1,
-          "help": "If it is a single number (N), total number of GPUs (0..N-1). If multiple values, specific GPU IDs."
-        },
-        {
-          "name": "mcore.perdevice_refine",
-          "label": "Processes per device (refine)",
-          "default": 1,
-          "paramClass": "IntParam",
-          "help": "Number of processes per GPU for refinement (--perdevice_refine). Set >1 if GPUs have enough memory. Default: 1."
+            "label": "Compute",
+            "params": [
+                {
+                    "name": "gpus",
+                    "label": "GPUs",
+                    "default": 1,
+                    "help": "If it is a single number (N), total number of GPUs (0..N-1). If multiple values, specific GPU IDs."
+                },
+                {
+                    "name": "mcore.perdevice_refine",
+                    "label": "Processes per device (refine)",
+                    "default": 1,
+                    "paramClass": "IntParam",
+                    "help": "Number of processes per GPU for refinement (--perdevice_refine). Set >1 if GPUs have enough memory. Default: 1."
+                }
+            ]
         }
-      ]    
-    }
-  ]
+    ]
 }

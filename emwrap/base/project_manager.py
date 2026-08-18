@@ -21,6 +21,7 @@ import json
 import subprocess
 import argparse
 import shutil
+import time
 from contextlib import contextmanager
 from datetime import datetime
 
@@ -29,6 +30,7 @@ from emtools.jobs import BatchManager, Workflow
 from emtools.metadata import Table, StarFile, RelionStar
 
 from .config import ProcessingConfig
+from .job_form import JobForm, JobValidationError
 from .processing_pipeline import ProcessingPipeline
 from .project_data import ProjectData
 from .project_lock import ProjectLock
@@ -40,6 +42,7 @@ class ProjectManager(FolderManager):
 
     JOB_CLUSTER_ID_FILE = 'job.id'
     JOB_PROCESS_ID_FILE = 'process.id'
+    JOB_SCHEDULE_ID_FILE = 'schedule.id'
 
     def __init__(self, path, create=False, verbose=1, force=False):
         """ Create a ProjectManager in that path.
@@ -155,11 +158,36 @@ class ProjectManager(FolderManager):
                 self._persist_workflow()
             self.log(t.getToc(f"{Color.cyan('Update took')}"))
 
-    def _validateJobInputs(self, jobDef, params):
-        """ Validate that provide values match with the job definition.
-        For example, format values or that PathParam exists.
-        """
-        pass
+    def _validateJobInputs(self, jobType, params, job=None, for_schedule=False):
+        """Validate that provided values match the job form definition."""
+        jobForm = ProcessingConfig.get_job_form(jobType)
+        if not jobForm:
+            return
+
+        skip_path_exists = None
+        if for_schedule and job is not None:
+            parent_ids = {inp.parent.id for inp in job.inputs}
+            for v in (params or {}).values():
+                if not isinstance(v, str):
+                    continue
+                for job2 in self._wf.jobs():
+                    if (job2.id != job.id
+                            and self._param_references_job(v, job2.id)):
+                        parent_ids.add(job2.id)
+            if parent_ids:
+                skip_path_exists = lambda value, ids=parent_ids: (
+                    isinstance(value, str)
+                    and any(self._param_references_job(value, pid)
+                            for pid in ids)
+                )
+
+        errors = JobForm.validate_params(
+            jobForm, params,
+            project_path=self.path,
+            skip_path_exists=skip_path_exists,
+        )
+        if errors:
+            raise JobValidationError(errors)
 
     
     def _param_references_job(self, param_value, job_id):
@@ -199,12 +227,14 @@ class ProjectManager(FolderManager):
 
             job = None
             is_existing = self._hasJob(jobTypeOrId)
+            job_params = params
             if is_existing:
                 job = self._getJob(jobTypeOrId)
                 # FIXME Activate the following validation once we allow to override the job's status
                 # if job['status'] != STATUS_SAVED:
                 #     raise Exception("Can only save un-run jobs.")
-                self._writeJobParams(job, params)
+                job_params = self._readJobParams(job, extraParams=params)
+                self._writeJobParams(job, job_params)
             else:
                 if jobDef := ProcessingConfig.get_job_form(jobTypeOrId):
                     job = self._createJob(jobTypeOrId, params, update=False)
@@ -213,7 +243,7 @@ class ProjectManager(FolderManager):
                 raise Exception(f"{jobTypeOrId} is not an existing jobId or job type.")
 
             self._data.setJobStatus(job.id, ProjectData.STATUS_SAVED)
-            self._updateJobInputs(job, params)
+            self._updateJobInputs(job, job_params)
             if is_existing:
                 self._data.resetJobForSave(job.id)
             self._persist_workflow()
@@ -354,7 +384,8 @@ class ProjectManager(FolderManager):
                 jobStar = os.path.join(job.id, 'job.star')
                 jobType = job['jobtype']
 
-                if self._data.isActiveJob(job):
+                if (self._data.isActiveJob(job)
+                        and not self._hasScheduleId(job.id)):
                     raise Exception("Can not re-run running or launched jobs.")
 
                 job_params = self._readJobParams(job, extraParams=params)
@@ -368,12 +399,14 @@ class ProjectManager(FolderManager):
                 jobDef = ProcessingConfig.get_job_conf(jobType)
                 self._updateJobInputs(job, job_params)
                 self._writeJobParams(job, job_params)
+                self._validateJobInputs(jobType, job_params, job=job)
 
             else:
                 job_params = params
                 jobType = jobTypeOrId
                 jobDef = ProcessingConfig.get_job_conf(jobType)
                 if jobDef:
+                    self._validateJobInputs(jobType, job_params)
                     job = self._createJob(jobType, job_params, update=False)
                     self._updateJobInputs(job, job_params)
                     jobStar = os.path.join(job.id, 'job.star')
@@ -387,6 +420,7 @@ class ProjectManager(FolderManager):
                 raise Exception(f"Invalid launcher for job type: {jobType}")
 
             self._data._clearJobStatusFiles(job.id)
+            self._removeScheduleId(job.id)
             launcher_cmd = f"{launcher} -i {jobStar} -o {job.id}"
             self._persist_workflow()
 
@@ -397,6 +431,222 @@ class ProjectManager(FolderManager):
             self._persist_workflow()
 
         return job
+
+    def _hasScheduleId(self, job_id):
+        return self.exists(job_id, self.JOB_SCHEDULE_ID_FILE)
+
+    def _readSchedulePid(self, job_id):
+        path = self.join(job_id, self.JOB_SCHEDULE_ID_FILE)
+        if not os.path.exists(path):
+            return None
+        with open(path) as f:
+            pid = f.readline().strip()
+        return pid or None
+
+    def _isScheduleWatcherActive(self, job_id):
+        pid = self._readSchedulePid(job_id)
+        if not pid:
+            return False
+        try:
+            os.kill(int(pid), 0)
+            return True
+        except (OSError, ValueError):
+            return False
+
+    def _removeScheduleId(self, job_id):
+        path = self.join(job_id, self.JOB_SCHEDULE_ID_FILE)
+        if os.path.exists(path):
+            os.remove(path)
+
+    def _scheduleWatcherCmd(self, job_id, interval_minutes):
+        return [
+            sys.executable, '-m', 'emwrap',
+            '--path', self.path,
+            '--schedule-watch', job_id,
+            '--interval', str(interval_minutes),
+        ]
+
+    def _startScheduleWatcher(self, job_id, interval_minutes=5):
+        """Spawn a detached process that monitors one scheduled job."""
+        job_dir = self.join(job_id)
+        os.makedirs(job_dir, exist_ok=True)
+        job_log = self._jobLogPath(job_id)
+        cmd = self._scheduleWatcherCmd(job_id, interval_minutes)
+        self._log(
+            f"Starting schedule watcher: {' '.join(cmd)}",
+            jobFile=job_log, flush=True)
+        log_file = open(job_log, 'a')
+        p = subprocess.Popen(
+            cmd,
+            cwd=self.path,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            close_fds=True,
+            start_new_session=True,
+        )
+        self._log(
+            f"Started schedule watcher for {job_id} (pid={p.pid})",
+            jobFile=job_log, flush=True)
+        return p.pid
+
+    def _stopScheduleWatcher(self, jobId):
+        """Stop the per-job schedule watcher process."""
+        job_log = self._jobLogPath(jobId)
+        pid = self._readSchedulePid(jobId)
+        if not pid:
+            self._removeScheduleId(jobId)
+            return False
+
+        self._log(f"Stopping schedule watcher, pid={pid}",
+                  jobFile=job_log, flush=True)
+        if Process.checkChilds(None, self.path, kill=True, pid=pid,
+                               verbose=max(self._verbose - 1, 0)):
+            self._log(f"Killed schedule watcher pid {pid}",
+                      jobFile=job_log, flush=True)
+        else:
+            self._log(f"Schedule watcher pid {pid} is not running",
+                      jobFile=job_log, flush=True)
+
+        self._removeScheduleId(jobId)
+        return True
+
+    def _jobLogPath(self, job_id):
+        return self.join(job_id, 'job.log')
+
+    def _checkScheduledDependencies(self, job):
+        """Check parent jobs for each input and log readiness to job.log."""
+        job_log = self._jobLogPath(job.id)
+        inputs = list(job.inputs)
+
+        if not inputs:
+            self._log(
+                f"No input dependencies; job {job.id} is ready to launch.",
+                jobFile=job_log, flush=True)
+            return True
+
+        all_ready = True
+        for inp in inputs:
+            input_id = inp.id
+            parent_id = inp.parent.id
+            parent = self._getJob(parent_id, validateExists=False)
+            if parent is None:
+                all_ready = False
+                self._log(
+                    f"Checking input {input_id}, parent job {parent_id} not found",
+                    jobFile=job_log, flush=True)
+                continue
+
+            status = parent['status']
+            if status == ProjectData.STATUS_SUCCEEDED:
+                self._log(
+                    f"Input {input_id} is ready, parent job {parent_id} finished.",
+                    jobFile=job_log, flush=True)
+            else:
+                all_ready = False
+                self._log(
+                    f"Checking input {input_id}, parent job {parent_id} not "
+                    f"finished (status {status})",
+                    jobFile=job_log, flush=True)
+
+        return all_ready
+
+    def scheduleJob(self, job_id, interval_minutes=5):
+        """Schedule an existing saved job and start a watcher process for it."""
+        if not job_id:
+            raise Exception("Job id is required to schedule a job.")
+
+        job_id = Path.rmslash(job_id)
+        if not self._hasJob(job_id):
+            raise Exception(f"{job_id} is not an existing jobId.")
+
+        if not self.exists(job_id, 'job.star'):
+            raise Exception(
+                f"Job {job_id} has no saved parameters. Save the job before scheduling.")
+
+        with self._project_write('schedule job'):
+            self._data.updateWorkflow()
+            job = self._getJob(job_id)
+
+            if self._isScheduleWatcherActive(job.id):
+                raise Exception(f"Job {job.id} is already scheduled.")
+
+            if (self._data.isActiveJob(job)
+                    and not self._hasScheduleId(job.id)):
+                raise Exception("Can not schedule running or launched jobs.")
+
+            if self._hasScheduleId(job.id):
+                self._removeScheduleId(job.id)
+
+            job_params = self._readJobParams(job)
+            self._updateJobInputs(job, job_params)
+            self._validateJobInputs(
+                job['jobtype'], job_params, job=job, for_schedule=True)
+            self._data._clearJobStatusFiles(job.id)
+            self._data.setJobStatus(job.id, ProjectData.STATUS_SCHEDULED)
+            self._persist_workflow()
+
+        job_log = self._jobLogPath(job_id)
+        self._log(
+            f"Job {job_id} scheduled; starting watcher (interval "
+            f"{interval_minutes} min)",
+            jobFile=job_log, flush=True)
+        self._startScheduleWatcher(job_id, interval_minutes=interval_minutes)
+        return self._getJob(job_id)
+
+    def watchScheduledJob(self, job_id, interval_minutes=5):
+        """Monitor one scheduled job and launch it when dependencies are ready."""
+        if interval_minutes <= 0:
+            raise Exception("Schedule interval must be greater than zero minutes.")
+
+        job_id = Path.rmslash(job_id)
+        job_log = self._jobLogPath(job_id)
+        watcher_pid = str(os.getpid())
+        with open(self.join(job_id, self.JOB_SCHEDULE_ID_FILE), 'w') as f:
+            f.write(f"{watcher_pid}\n")
+        self._log(
+            f"Schedule watcher started for {job_id} (pid={watcher_pid})",
+            jobFile=job_log, flush=True)
+
+        while True:
+            if not self._hasScheduleId(job_id):
+                self._log(
+                    f"Schedule watcher for {job_id}: cancelled, exiting",
+                    jobFile=job_log, flush=True)
+                return False
+
+            current_pid = self._readSchedulePid(job_id)
+            if current_pid and current_pid != watcher_pid:
+                self._log(
+                    f"Schedule watcher for {job_id}: replaced by pid "
+                    f"{current_pid}, exiting",
+                    jobFile=job_log, flush=True)
+                return False
+
+            ready = False
+            with self._project_write('schedule watch'):
+                if not self._hasScheduleId(job_id):
+                    self._log(
+                        f"Schedule watcher for {job_id}: cancelled, exiting",
+                        jobFile=job_log, flush=True)
+                    return False
+
+                self._data.updateWorkflow()
+                job = self._getJob(job_id)
+                ready = self._checkScheduledDependencies(job)
+
+            if ready:
+                break
+
+            self._log(
+                f"Waiting {interval_minutes} min before next dependency check",
+                jobFile=job_log, flush=True)
+            time.sleep(interval_minutes * 60)
+
+        self._log(
+            f"All inputs ready. Launching current job {job_id}.",
+            jobFile=job_log, flush=True)
+        self.runJob(job_id, wait=False, update=True)
+        return True
 
     def _stopClusterJob(self, jobId):
         """Cancel a job that was submitted to a cluster queue."""
@@ -453,6 +703,14 @@ class ProjectManager(FolderManager):
 
     def stopJob(self, jobId):
         """ Stop a job. """
+        if self._hasScheduleId(jobId):
+            with self._project_write('cancel scheduled job'):
+                job = self._getJob(jobId)
+                self._stopScheduleWatcher(jobId)
+                self._data.setJobStatus(jobId, ProjectData.STATUS_SAVED)
+                self._persist_workflow()
+            return job
+
         with self._project_write('stop job'):
             job = self._getJob(jobId)
             if not self._data.isActiveJob(job):
@@ -476,7 +734,8 @@ class ProjectManager(FolderManager):
         return job
 
     def _deleteJobFolder(self, job, validate=True):
-        if validate and self._data.isActiveJob(job):
+        if (validate and self._data.isActiveJob(job)
+                and not self._hasScheduleId(job.id)):
             raise Exception("Can not delete launched or running jobs, stop them first.")
 
         if not self.exists('.Trash'):
@@ -564,7 +823,7 @@ class ProjectManager(FolderManager):
     def _writeJobStarFile(self, job_type, params, job_star):
         job_conf = ProcessingConfig.get_job_conf(job_type)
         job_form = ProcessingConfig.get_job_form(job_type)
-        values = ProcessingConfig.get_form_values(job_form)
+        values = JobForm.get_values(job_form)
         values.update(params)
         is_continue = 1 if os.path.exists(job_star) else 0
         is_tomo = 1 if job_conf.get('tomo', False) else 0
@@ -770,7 +1029,7 @@ class ProjectManager(FolderManager):
         jobType = job['jobtype']
         jobConf = ProcessingConfig.get_job_conf(jobType)
         jobForm = ProcessingConfig.get_job_form(jobType)
-        values = ProcessingConfig.get_form_values(jobForm)
+        values = JobForm.get_values(jobForm)
         values.update(params)
         paramsFile = self.join(job.id, 'job.star')
         self.log(f"Saving job params: {paramsFile}")
@@ -875,6 +1134,12 @@ class ProjectManager(FolderManager):
                             "or re-run an existing one passing job_id."
                             "If --clean is added, the output folder will "
                             "be cleaned before running the job. ")
+        g.add_argument('--schedule', metavar='JOB_ID',
+                       help="Schedule an existing saved job. A watcher process "
+                            "is started for this job and exits after launch.")
+        g.add_argument('--schedule-watch', metavar='JOB_ID',
+                       help="Internal: monitor one scheduled job until its "
+                            "dependencies are ready, then launch it.")
         g.add_argument('--save', '-s', nargs=2,
                        metavar=('JOB_TYPE_OR_ID', 'PARAMS'),
                        help="Save an existing job or create a new one, "
@@ -928,6 +1193,10 @@ class ProjectManager(FolderManager):
                        help='Force recomputation of cached metadata '
                             '(e.g. with --list).')
 
+        p.add_argument('--interval', type=int, default=5,
+                       help='Schedule watcher polling interval in minutes '
+                            '(used with --schedule and --schedule-watch).')
+
         args = p.parse_args()
         n = len(sys.argv)
 
@@ -965,6 +1234,13 @@ class ProjectManager(FolderManager):
             pm.runJob(jobTypeOrId, _params(args.run, 1),
                       clean=args.clean,
                       wait=args.wait)
+
+        elif args.schedule:
+            pm.scheduleJob(args.schedule, interval_minutes=args.interval)
+
+        elif args.schedule_watch:
+            pm.watchScheduledJob(args.schedule_watch,
+                                 interval_minutes=args.interval)
 
         elif args.copy:
             jobId = args.copy[0]

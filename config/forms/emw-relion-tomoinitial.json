@@ -76,7 +76,6 @@
                     "default": true,
                     "help": "If set to Yes, the job will apply a spherical mask and enforce all values in the reference to be non-negative. Passed as --flatten_solvent when Yes."
                 },
-
                 {
                     "name": "relion_refine.sym",
                     "label": "Symmetry:",
@@ -95,9 +94,9 @@
                     "name": "relion_refine.sigma_tilt",
                     "label": "Prior width on tilt angle (deg):",
                     "paramClass": "FloatParam",
-                    "help": "The width of the prior on the tilt angle: angular searches will be +/-3 times this value. Tilt priors will be defined when particles have been picked as filaments, on spheres or on manifolds. Setting this width to a negative value will lead to no prior being used on the tilt angle. Passed as --sigma_tilt only when the value is strictly positive."
+                    "help": "The width of the prior on the tilt angle: angular searches will be +/-3 times this value. Tilt priors will be defined when particles have been picked as filaments, on spheres or on manifolds. Setting this width to a negative value will lead to no prior being used on the tilt angle. Passed as --sigma_tilt only when the value is strictly positive.",
+                    "allowsEmpty": true
                 }
-                    
             ]
         },
         {
@@ -117,7 +116,6 @@
                     "default": 30,
                     "help": "Particles are processed in individual batches by MPI followers. Passed as --pool."
                 },
-                
                 {
                     "name": "relion_refine.dont_combine_weights_via_disc",
                     "label": "Combine iterations through disc?",
@@ -130,18 +128,16 @@
                     "label": "GPUs",
                     "default": 1,
                     "help": "If empty, no GPU will be used, if allowed by the underlying program. If it is a single number (N), it will represent the total number of GPUs (0..N-1). It there are multiple values, it will be the specific GPUs ID."
-                }, 
+                },
                 {
                     "name": "cpus",
                     "label": "CPUs",
-                    "default": "",
                     "help": "If empty, the program will use the number of GPUs * 10 CPUs."
-                },                        
+                },
                 {
                     "name": "extra_args",
                     "label": "Additional relion_refine arguments",
                     "paramClass": "StringParam",
-                    "default": "",
                     "help": "Optional extra tokens appended to relion_refine (e.g. expert flags)."
                 },
                 {
@@ -156,7 +152,7 @@
                             "help": "Launcher to use for RELION"
                         }
                     ]
-                } 
+                }
             ]
         }
     ]

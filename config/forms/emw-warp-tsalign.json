@@ -64,7 +64,8 @@
                             "name": "ts_aretomo.angpix",
                             "label": "Output pixel size (A/pix)",
                             "paramClass": "FloatParam",
-                            "help": "Rescale tilt images to this pixel size; normally 10–15 A for cryo data; leave out to keep the original pixel size."
+                            "help": "Rescale tilt images to this pixel size; normally 10\u201315 A for cryo data; leave out to keep the original pixel size.",
+                            "allowsEmpty": true
                         },
                         {
                             "name": "ts_aretomo.alignz",
@@ -90,7 +91,6 @@
                         {
                             "name": "ts_aretomo.patches",
                             "label": "Patches",
-                            "default": "",
                             "help": "Number of patches for local alignments in X, Y, separated by 'x': e.g. 6x4. By default (empty, or 0x0 or 1x1) only global alignment is performed. More patches increase the processing time."
                         }
                     ]
@@ -104,7 +104,8 @@
                             "name": "ts_etomo_patches.angpix",
                             "label": "Output pixel size (A/pix)",
                             "paramClass": "FloatParam",
-                            "help": "Rescale tilt images to this pixel size; normally 10–15 A for cryo data; leave out to keep the original pixel size."
+                            "help": "Rescale tilt images to this pixel size; normally 10\u201315 A for cryo data; leave out to keep the original pixel size.",
+                            "allowsEmpty": true
                         },
                         {
                             "name": "ts_etomo_patches.patch_size",
@@ -123,7 +124,8 @@
                             "name": "ts_etomo_patches.initial_axis",
                             "label": "Initial axis",
                             "paramClass": "FloatParam",
-                            "help": "Override initial tilt axis angle with this value"
+                            "help": "Override initial tilt axis angle with this value",
+                            "allowsEmpty": true
                         },
                         {
                             "name": "ts_etomo_patches.do_axis_search",
