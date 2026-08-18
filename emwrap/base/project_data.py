@@ -104,6 +104,9 @@ class ProjectData(FolderManager):
         self._outputs = self._data.get('outputs', {})
         self.restoreJobStatuses()
 
+    def _isScheduledJob(self, job_id):
+        return self.exists(job_id, 'schedule.id')
+
     def _statusFromRelionFiles(self, job_id):
         for statusFile in self.JOB_STATUS_FILE_ORDER:
             if self.exists(job_id, statusFile):
@@ -112,6 +115,9 @@ class ProjectData(FolderManager):
 
     def _resolveJobStatus(self, job):
         """ Resolve canonical status: project.json intent > RELION files > pipeline.star."""
+        if self._isScheduledJob(job.id):
+            return self.STATUS_SCHEDULED
+
         cached_status = self._jobs.get(job.id, {}).get('status')
         relion_status = self._statusFromRelionFiles(job.id)
         pipeline_status = job['status']
@@ -532,13 +538,15 @@ class ProjectData(FolderManager):
 
         if prune_outputs and not self.isActiveJob(job):
             for output in list(job.outputs):
-                if output.id not in output_ids:
+                if output.id not in output_ids and not output.childs:
                     self._removeJobOutput(job, output.id)
 
         status = self._resolveJobStatus(job)
         cached = self._jobs.get(job.id, {})
         cached_status = cached.get('status')
-        if (status == self.STATUS_SCHEDULED
+        if self._isScheduledJob(job.id):
+            status = self.STATUS_SCHEDULED
+        elif (status == self.STATUS_SCHEDULED
                 and cached_status in self.JOB_STATUS_EMWRAP):
             status = cached_status
         job['status'] = status
@@ -575,13 +583,14 @@ class ProjectData(FolderManager):
 
     def _getJobInfo(self, job_id):
         self._debug(f"{Color.cyan('JOB')}: Getting info for {Color.bold(job_id)}")
-        # run.out grows during execution; exclude it so log writes do not
-        # invalidate output metadata and trigger pruning on every refresh.
+        # Only this job's on-disk files should invalidate its cache. Global files
+        # such as default_pipeline.star and project.json change whenever any job
+        # is updated, which would otherwise recompute and prune inactive jobs while
+        # another job is running and the GUI auto-refreshes.
         jobFiles = [self.join(job_id, fn) for fn in [
             'job.star', 'RELION_OUTPUT_NODES.star',
             *self.JOB_STATUS_FILES.keys(),
         ]]
-        jobFiles.extend([self._project.pipeline_star, self._project_json_path])
         return self._get_info(self._jobs, job_id, jobFiles, self._computeJobInfo)
 
     def getJobInfo(self, job_id):
