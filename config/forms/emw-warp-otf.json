@@ -59,8 +59,8 @@
                     "label": "Gain reference",
                     "paramClass": "PathParam",
                     "pattern": "*.{mrc,gain}",
-                    "help": "Optional gain reference file for motion correction. If set, overrides the value from the emw-import-ts job stored in the input tilt-series STAR file.",
-                    "default": ""
+                    "allowsEmpty": true,
+                    "help": "Optional gain reference file for motion correction. If set, overrides the value from the emw-import-ts job stored in the input tilt-series STAR file."
                 }
             ]
         },
@@ -158,7 +158,8 @@
                             "name": "wat.ts_aretomo.angpix",
                             "label": "Output pixel size (A/pix)",
                             "paramClass": "FloatParam",
-                            "help": "Rescale tilt images to this pixel size; normally 10\u201315 A for cryo data; leave out to keep the original pixel size."
+                            "help": "Rescale tilt images to this pixel size; normally 10\u201315 A for cryo data; leave out to keep the original pixel size.",
+                            "allowsEmpty": true
                         },
                         {
                             "name": "wat.ts_aretomo.alignz",
@@ -190,8 +191,7 @@
                         {
                             "name": "wat.ts_aretomo.patches",
                             "label": "Patches",
-                            "default": "",
-                            "help": "Number of patches for local alignments in X, Y, separated by 'x': e.g. 6x4. By default (empty, or 0x0 or 1x1) only global alignment is performed. More patches increase the processing time."                      
+                            "help": "Number of patches for local alignments in X, Y, separated by 'x': e.g. 6x4. By default (empty, or 0x0 or 1x1) only global alignment is performed. More patches increase the processing time."
                         }
                     ]
                 },
@@ -203,7 +203,8 @@
                             "name": "ctfrec.ts_reconstruct.angpix",
                             "label": "Reconstruction Voxel size (A/pix)",
                             "paramClass": "FloatParam",
-                            "help": ""
+                            "help": "",
+                            "allowsEmpty": true
                         },
                         {
                             "name": "ctfrec.ts_reconstruct.halfmap_frames",
@@ -229,7 +230,7 @@
                     "default": 2,
                     "paramClass": "IntParam",
                     "help": "(--perdevice in fs_motion_and_ctf, ts_reconstruct)"
-                },                
+                },
                 {
                     "label": "Launchers",
                     "paramClass": "Group",

@@ -17,7 +17,6 @@
                     "name": "subset_tomo_names",
                     "label": "Subset Tomo Names",
                     "paramClass": "StringParam",
-                    "default": "",
                     "help": "Space-separated list of rlnTomoName values to keep in the output set."
                 }
             ]

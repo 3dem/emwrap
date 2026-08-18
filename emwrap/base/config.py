@@ -157,40 +157,6 @@ class ProcessingConfig:
         return cls.get_job_conf(jobtype).get('launcher', None)
 
     @classmethod
-    def iter_form_params(cls, jobForm):
-        """ Iterate over all params in sections, groups, lines of
-        the form definition. """
-        def _iter_params(containerDef):            
-            if params := containerDef.get('params', None):
-                for p in params:
-                    for paramDef in _iter_params(p):
-                        yield paramDef
-            else:
-                yield containerDef
-
-
-        for sectionDef in jobForm['sections']:
-            for paramDef in _iter_params(sectionDef):
-                yield paramDef
-
-    @classmethod
-    def get_form_values(cls, jobForm, all=False):
-        """ Iterate over all params in the form and get a dict
-        with their name as key and default values.
-
-        Args:
-            all: if True, the full dict will be returned,
-            including params with None value.
-        """
-        values = {}
-        for paramDef in cls.iter_form_params(jobForm):
-            v = paramDef.get('default', None)
-            name = paramDef.get('name', None)
-            if name and (v or all):
-                values[name] = v
-        return values
-
-    @classmethod
     def print_config(cls):
         print(json.dumps(cls._get_config(), indent=4))
 

@@ -1,143 +1,139 @@
 {
-  "name": "emw-warp-mtools",
-  "help": "Warp/MTools wrapper to create a population, add a data source, and define a species in one step. Runs: create_population, create_source, create_species.\n\n*REFERENCES*:\n[[https://warpem.github.io/warp/reference/mtools/api/mtools/?h=mtools][MTools API]]",
-  "sections": [
-    {
-      "label": "Population / Source",
-      "params": [
+    "name": "emw-warp-mtools",
+    "help": "Warp/MTools wrapper to create a population, add a data source, and define a species in one step. Runs: create_population, create_source, create_species.\n\n*REFERENCES*:\n[[https://warpem.github.io/warp/reference/mtools/api/mtools/?h=mtools][MTools API]]",
+    "sections": [
         {
-          "label": "Population",
-          "paramClass": "Group",
-          "params": [
-            {
-              "label": "Create new population",
-              "name": "new_population",
-              "paramClass": "BooleanParam", 
-              "default": true,
-              "help": "Create a new population or input an existing population file."
-            },
-            {
-              "name": "create_population.name",
-              "label": "Population name:",
-              "paramClass": "StringParam",
-              "condition": "new_population",
-              "help": "Required (-n, --name). Name of the new population. The .population file will be <directory>/<name>.population"
-            },
-            {
-              "name": "warp_folder",
-              "label": "Previous WARP run:",
-              "default": "",
-              "paramClass": "PathParam",
-              "condition": "new_population",
-              "help": "Select the folder of the previous WARP run to use the settings and frame/tilt series from that run. Required only if creating a new population."
-            },
-            {
-              "name": "input_population",
-              "label": "Input population:",
-              "paramClass": "PathParam",
-              "pointerClass": "WarpPopulation",
-              "condition": "!new_population",
-              "help": "Path to an existing population file."
-            }
-          ]
+            "label": "Population / Source",
+            "params": [
+                {
+                    "label": "Population",
+                    "paramClass": "Group",
+                    "params": [
+                        {
+                            "label": "Create new population",
+                            "name": "new_population",
+                            "paramClass": "BooleanParam",
+                            "default": true,
+                            "help": "Create a new population or input an existing population file."
+                        },
+                        {
+                            "name": "create_population.name",
+                            "label": "Population name:",
+                            "paramClass": "StringParam",
+                            "condition": "new_population",
+                            "help": "Required (-n, --name). Name of the new population. The .population file will be <directory>/<name>.population"
+                        },
+                        {
+                            "name": "warp_folder",
+                            "label": "Previous WARP run:",
+                            "paramClass": "PathParam",
+                            "condition": "new_population",
+                            "help": "Select the folder of the previous WARP run to use the settings and frame/tilt series from that run. Required only if creating a new population."
+                        },
+                        {
+                            "name": "input_population",
+                            "label": "Input population:",
+                            "paramClass": "PathParam",
+                            "pointerClass": "WarpPopulation",
+                            "condition": "!new_population",
+                            "help": "Path to an existing population file."
+                        }
+                    ]
+                },
+                {
+                    "label": "Source",
+                    "paramClass": "Group",
+                    "params": [
+                        {
+                            "name": "create_source.name",
+                            "label": "Source name:",
+                            "paramClass": "StringParam",
+                            "help": "Name of the new data source, if empty will be the same as the population name."
+                        },
+                        {
+                            "name": "create_source.nframes",
+                            "label": "Max tilts/frames:",
+                            "allowsEmpty": true,
+                            "paramClass": "IntParam",
+                            "help": "Maximum number of tilts or frames to use in refinements (--nframes). Leave 0 or empty to use the maximum available."
+                        },
+                        {
+                            "name": "create_source.files",
+                            "label": "Files (STAR, optional):",
+                            "condition": "false",
+                            "paramClass": "PathParam",
+                            "allowsEmpty": true,
+                            "help": "Optional (--files). STAR file with a list of files to intersect with the full list of frame or tilt series referenced by the settings."
+                        }
+                    ]
+                }
+            ]
         },
         {
-          "label": "Source",
-          "paramClass": "Group",
-          "params": [
-            {
-              "name": "create_source.name",
-              "label": "Source name:",
-              "paramClass": "StringParam",
-              "help": "Name of the new data source, if empty will be the same as the population name."
-            },
-            {
-              "name": "create_source.nframes",
-              "label": "Max tilts/frames:",
-              "default": "",
-              "paramClass": "IntParam",
-              "help": "Maximum number of tilts or frames to use in refinements (--nframes). Leave 0 or empty to use the maximum available."
-            },            
-            {
-              "name": "create_source.files",
-              "label": "Files (STAR, optional):",
-              "condition": "false",
-              "default": "",
-              "paramClass": "PathParam",
-              "help": "Optional (--files). STAR file with a list of files to intersect with the full list of frame or tilt series referenced by the settings."
-            }
-          ]
-        }   
-      ]
-    },
-    {
-      "label": "Species",
-      "params": [
-        {
-          "name": "create_species.name",
-          "label": "Species name:",
-          "paramClass": "StringParam",
-          "help": "Required (-n, --name). Name of the new species."
-        },
-        {
-          "name": "create_species.diameter",
-          "label": "Diameter (Å):",
-          "paramClass": "IntParam",
-          "help": "Required (-d, --diameter). Molecule diameter in Angstrom."
-        },
-        {
-          "name": "create_species.sym",
-          "label": "Symmetry:",
-          "default": "C1",
-          "paramClass": "StringParam",
-          "help": "Point symmetry (-s, --sym). E.g. C1, D7, O. Default: C1."
-        },
-        {
-          "name": "create_species.particles_relion",
-          "label": "Particles (RELION _data.star):",
-          "default": "",
-          "paramClass": "PathParam",
-          "pointerClass": "TomoParticles",
-          "help": "Path to ${RELION_PREFIX}_data.star particle metadata from RELION (--particles_relion). It is expected to have the same particle names as the half-maps."
-        },
-        {
-          "name": "create_species.mask",
-          "label": "Mask:",
-          "paramClass": "PathParam",
-          "pointerClass": "VolumeMask",
-          "help": "Required (-m, --mask). Path to a tight binary mask file. M will automatically expand and smooth it based on current resolution."
-        },        
-        {
-          "name": "create_species.angpix_resample",
-          "label": "Resample pixel size (Å/px):",
-          "default": "",
-          "paramClass": "FloatParam",
-          "help": "Resample half-maps and masks to this pixel size (--angpix_resample)."
-        },
-        {
-          "name": "create_species.lowpass",
-          "label": "Low-pass filter (Å):",
-          "default": "",
-          "paramClass": "FloatParam",
-          "help": "Optional (--lowpass). Low-pass filter in Angstrom, applied to both half-maps."
-        },
-        {
-          "name": "extra_create_species",
-          "label": "Extra arguments",
-          "default": "",
-          "paramClass": "StringParam",
-          "help": "Extra arguments to pass to create_species. Example:\n\n*--angpix* Override pixel size value found in half-maps, if empty will use map header."
-        },
-        {
-          "name": "gpus",
-          "label": "Fixed one GPU",
-          "default": "1",
-          "paramClass": "StringParam",
-          "help": "Hidden parameter to force the use of a single GPU.",
-          "condition": "false"
-        }  
-
-      ]
-    }
-  ]
+            "label": "Species",
+            "params": [
+                {
+                    "name": "create_species.name",
+                    "label": "Species name:",
+                    "paramClass": "StringParam",
+                    "help": "Required (-n, --name). Name of the new species."
+                },
+                {
+                    "name": "create_species.diameter",
+                    "label": "Diameter (\u00c5):",
+                    "paramClass": "IntParam",
+                    "help": "Required (-d, --diameter). Molecule diameter in Angstrom."
+                },
+                {
+                    "name": "create_species.sym",
+                    "label": "Symmetry:",
+                    "default": "C1",
+                    "paramClass": "StringParam",
+                    "help": "Point symmetry (-s, --sym). E.g. C1, D7, O. Default: C1."
+                },
+                {
+                    "name": "create_species.particles_relion",
+                    "label": "Particles (RELION _data.star):",
+                    "paramClass": "PathParam",
+                    "pointerClass": "TomoParticles",
+                    "help": "Path to ${RELION_PREFIX}_data.star particle metadata from RELION (--particles_relion). It is expected to have the same particle names as the half-maps."
+                },
+                {
+                    "name": "create_species.mask",
+                    "label": "Mask:",
+                    "paramClass": "PathParam",
+                    "pointerClass": "VolumeMask",
+                    "help": "Required (-m, --mask). Path to a tight binary mask file. M will automatically expand and smooth it based on current resolution."
+                },
+                {
+                    "name": "create_species.angpix_resample",
+                    "label": "Resample pixel size (\u00c5/px):",
+                    "allowsEmpty": true,
+                    "paramClass": "FloatParam",
+                    "help": "Resample half-maps and masks to this pixel size (--angpix_resample)."
+                },
+                {
+                    "name": "create_species.lowpass",
+                    "label": "Low-pass filter (\u00c5):",
+                    "allowsEmpty": true,
+                    "paramClass": "FloatParam",
+                    "help": "Optional (--lowpass). Low-pass filter in Angstrom, applied to both half-maps."
+                },
+                {
+                    "name": "extra_create_species",
+                    "label": "Extra arguments",
+                    "paramClass": "StringParam",
+                    "help": "Extra arguments to pass to create_species. Example:\n\n*--angpix* Override pixel size value found in half-maps, if empty will use map header."
+                },
+                {
+                    "name": "gpus",
+                    "label": "Fixed one GPU",
+                    "default": "1",
+                    "paramClass": "StringParam",
+                    "help": "Hidden parameter to force the use of a single GPU.",
+                    "condition": "false"
+                }
+            ]
+        }
+    ]
 }
