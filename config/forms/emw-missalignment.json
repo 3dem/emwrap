@@ -43,7 +43,7 @@
                         {
                             "name": "train.n_training",
                             "label": "Training set size:",
-                            "default": "10",
+                            "default": 10,
                             "paramClass": "IntParam",
                             "help": "Number of tilt series to use for training."
                         }
