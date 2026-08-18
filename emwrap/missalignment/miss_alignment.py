@@ -54,45 +54,8 @@ class MissAlignment(WarpBasePipeline):
         """Return arguments below *prefix* using a new command-line prefix."""
         return self._args.subset(prefix, new_prefix, filters=['remove_empty'])
 
-    @staticmethod
-    def _positive_int(value, name):
-        try:
-            result = int(value)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f'{name} must be an integer, received: {value!r}') from exc
-        if result <= 0:
-            raise ValueError(f'{name} must be greater than zero, received: {result}')
-        return result
-
-    @staticmethod
-    def _nonnegative_int(value, name):
-        try:
-            result = int(value)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f'{name} must be an integer, received: {value!r}') from exc
-        if result < 0:
-            raise ValueError(f'{name} must be zero or greater, received: {result}')
-        return result
-
-    @staticmethod
-    def _positive_float(value, name):
-        try:
-            result = float(value)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f'{name} must be numeric, received: {value!r}') from exc
-        if result <= 0:
-            raise ValueError(f'{name} must be greater than zero, received: {result}')
-        return result
-
-    @staticmethod
-    def _nonnegative_float(value, name):
-        try:
-            result = float(value)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f'{name} must be numeric, received: {value!r}') from exc
-        if result < 0:
-            raise ValueError(f'{name} must be zero or greater, received: {result}')
-        return result
+    def _get_mode(self):
+        return int(self._args.get('mode', self.MODE_TRAIN_INFER))
 
     @staticmethod
     def _as_bool(value):
@@ -104,9 +67,6 @@ class MissAlignment(WarpBasePipeline):
         if text in {'0', 'false', 'no', 'off', ''}:
             return False
         raise ValueError(f'Cannot interpret as boolean: {value!r}')
-
-    def _get_mode(self):
-        return int(self._args.get('mode', self.MODE_TRAIN_INFER))
 
     # ------------------------------------------------------------------
     # Warp project preparation
@@ -145,7 +105,7 @@ class MissAlignment(WarpBasePipeline):
         global_table = StarFile.getTableFromFile('global', self.inputTs)
         
         first = global_table[0]
-        pixel_size = self._positive_float(first.rlnTomoTiltSeriesPixelSize,'pixel_size')
+        pixel_size = float(first.rlnTomoTiltSeriesPixelSize)
         ts_table = StarFile.getTableFromFile(first.rlnTomoName, first.rlnTomoTiltSeriesStarFile)
 
         if len(ts_table) == 0:
@@ -163,11 +123,11 @@ class MissAlignment(WarpBasePipeline):
         )
 
         geometry = {
-            'image_x': self._positive_int(image_x, 'image_size_x'),
-            'image_y': self._positive_int(image_y, 'image_size_y'),
-            'volume_x': self._positive_int(settings_dims['DimensionsX'], 'xml.volume_size_x'),
-            'volume_y': self._positive_int(settings_dims['DimensionsY'], 'xml.volume_size_y'),
-            'volume_z': self._positive_int(settings_dims['DimensionsZ'], 'xml.volume_size_z'),
+            'image_x': image_x,
+            'image_y': image_y,
+            'volume_x': settings_dims['DimensionsX'],
+            'volume_y': settings_dims['DimensionsY'], 
+            'volume_z': settings_dims['DimensionsZ'],
             'pixel_size': pixel_size
         }
 
@@ -265,8 +225,7 @@ class MissAlignment(WarpBasePipeline):
                 'Missing Warp XML files for the selected training tilt series: '
                 + ', '.join(missing)
             )
-
-        self.trainingDir = training_dir
+            
         self.log(
             f'Prepared Miss-Alignment training set with '
             f'{len(training_names)} tilt series in: {training_dir}'
@@ -394,42 +353,19 @@ class MissAlignment(WarpBasePipeline):
         config_file = os.path.join(training_directory, self.CONFIG_NAME)
 
         apply_ctf = self._as_bool(self._args.get('train.yml.apply_ctf', False))
-        anchoring_iterations = self._nonnegative_int(
-            self._args.get('train.yml.iterations_anchoring', 2),
-            'train.yml.iterations_anchoring')
-        global_iterations = self._nonnegative_int(
-            self._args.get('train.yml.iterations_global', 2),
-            'train.yml.iterations_global')
-        spline_iterations = self._nonnegative_int(
-            self._args.get('train.yml.iterations_spline', 4),
-            'train.yml.iterations_spline')
+        anchoring_iterations = int(self._args.get('train.yml.iterations_anchoring', 2))
+        global_iterations = int(self._args.get('train.yml.iterations_global', 2))
+        spline_iterations = int(self._args.get('train.yml.iterations_spline', 4))
 
-        learning_rate = self._positive_float(
-            self._args.get('train.yml.learning_rate', 1.0e-3),
-            'train.yml.learning_rate')
-        max_epochs = self._positive_int(
-            self._args.get('train.yml.max_epochs_per_iteration', 30),
-            'train.yml.max_epochs_per_iteration')
+        learning_rate = self._args.get('train.yml.learning_rate', 1.0e-3)
+        max_epochs = self._args.get('train.yml.max_epochs_per_iteration', 30)
+        data_batch_size = self._args.get('train.yml.dt_batch_size', 32)
+        data_patch_size = self._args.get('train.yml.dt_patch_size', 96)
+        steps_per_epoch = self._args.get('train.yml.dt_steps_per_epoch', 1000)
 
-        data_batch_size = self._positive_int(
-            self._args.get('train.yml.dt_batch_size', 32),
-            'train.yml.dt_batch_size')
-        data_patch_size = self._positive_int(
-            self._args.get('train.yml.dt_patch_size', 96),
-            'train.yml.dt_patch_size')
-        steps_per_epoch = self._positive_int(
-            self._args.get('train.yml.dt_steps_per_epoch', 1000),
-            'train.yml.dt_steps_per_epoch')
-
-        alignment_patch_size = self._positive_int(
-            self._args.get('train.yml.al_patch_size', 96),
-            'train.yml.al_patch_size')
-        alignment_batch_size = self._positive_int(
-            self._args.get('train.yml.al_batch_size', 32),
-            'train.yml.al_batch_size')
-        alignment_patch_overlap = self._nonnegative_float(
-            self._args.get('train.yml.al_patch_overlap', 0.1),
-            'train.yml.al_patch_overlap')
+        alignment_patch_size = self._args.get('train.yml.al_patch_size', 96)
+        alignment_batch_size = self._args.get('train.yml.al_batch_size', 32)
+        alignment_patch_overlap = self._args.get('train.yml.al_patch_overlap', 0.1)
 
         shutil.copy2(config_template, config_file)
 
@@ -507,6 +443,7 @@ class MissAlignment(WarpBasePipeline):
 
     def _validate_model_run_directory(self, model_run_directory, n_iterations):
         """Validate that all per-iteration checkpoints required by inference exist."""
+        # TODO: check if you can have less iterations in the inference than the ones you used for training
         model_run_directory = os.path.abspath(model_run_directory)
 
         missing = []
@@ -531,25 +468,13 @@ class MissAlignment(WarpBasePipeline):
         data_directory = os.path.abspath(data_directory)
 
         apply_ctf = self._as_bool(self._args.get('infer.yml.apply_ctf', False))
-        anchoring_iterations = self._nonnegative_int(
-            self._args.get('infer.yml.iterations_anchoring', 2),
-            'infer.yml.iterations_anchoring')
-        global_iterations = self._nonnegative_int(
-            self._args.get('infer.yml.iterations_global', 2),
-            'infer.yml.iterations_global')
-        spline_iterations = self._nonnegative_int(
-            self._args.get('infer.yml.iterations_spline', 4),
-            'infer.yml.iterations_spline')
+        anchoring_iterations = int(self._args.get('infer.yml.iterations_anchoring', 2))
+        global_iterations = int(self._args.get('infer.yml.iterations_global', 2))
+        spline_iterations = int(self._args.get('infer.yml.iterations_spline', 4))
 
-        alignment_patch_size = self._positive_int(
-            self._args.get('infer.yml.al_patch_size', 96),
-            'infer.yml.al_patch_size')
-        alignment_batch_size = self._positive_int(
-            self._args.get('infer.yml.al_batch_size', 32),
-            'infer.yml.al_batch_size')
-        alignment_patch_overlap = self._nonnegative_float(
-            self._args.get('infer.yml.al_patch_overlap', 0.1),
-            'infer.yml.al_patch_overlap')
+        alignment_patch_size = self._args.get('infer.yml.al_patch_size', 96)
+        alignment_batch_size = self._args.get('infer.yml.al_batch_size', 32)
+        alignment_patch_overlap = self._args.get('infer.yml.al_patch_overlap', 0.1)
 
         n_iterations = (
             anchoring_iterations
@@ -596,8 +521,6 @@ class MissAlignment(WarpBasePipeline):
         with open(config_file, 'w', encoding='utf-8') as handle:
             handle.writelines(lines)
 
-        self.inferenceConfig = config_file
-        self.inferenceDir = data_directory
         self.modelRunDirectory = model_run_directory
 
         self.log(
@@ -631,12 +554,8 @@ class MissAlignment(WarpBasePipeline):
             )
 
         n_gpus = len(self.gpuList)
-        n_training = self._positive_int(
-            self._args.get('train.training_gpus', 1),
-            'train.training_gpus')
-        n_reconstruction = self._positive_int(
-            self._args.get('train.reconstruction_gpus', 1),
-            'train.reconstruction_gpus')
+        n_training = int(self._args.get('train.training_gpus', 1))
+        n_reconstruction = int(self._args.get('train.reconstruction_gpus', 1))
 
         workers_per_reconstruction_gpu = 3
 
@@ -820,17 +739,18 @@ class MissAlignment(WarpBasePipeline):
 
         self.updateBatchInfo(batch)
 
-        self.trainingBestModel = os.path.join(training_directory, 'model.ckpt')
-        if not os.path.isfile(self.trainingBestModel):
+        trainingBestModel = os.path.join(training_directory, 'model.ckpt')
+        
+        if not os.path.isfile(trainingBestModel):
             raise FileNotFoundError(
                 'Miss-Alignment training finished but the best model was not found: '
-                f'{self.trainingBestModel}')
-
-        self.modelPath = self.trainingBestModel
+                f'{trainingBestModel}')
 
         self.log(
             f'Miss-Alignment training finished. '
-            f'Best model: {self.trainingBestModel}')
+            f'Best model: {trainingBestModel}')
+
+        return training_directory
 
     def launch_inference(self, model_run_directory, mode):
         """Prepare the full Warp dataset and launch Miss-Alignment inference."""
@@ -881,20 +801,15 @@ class MissAlignment(WarpBasePipeline):
                 'No Warp tilt-series XML files were found for XF export in: '
                 f'{data_directory}')
 
-        pixel_size = self._positive_float(pixel_size, 'xf.pixel_size')
-
         xf_files = []
         for xml_file in xml_files:
             xf_file = os.path.splitext(xml_file)[0] + '.xf'
             warp_xml_to_imod_xf(xml_file, xf_file, pixel_size)
             xf_files.append(xf_file)
 
-        self.imodXfFiles = xf_files
         self.log(
             f'Exported {len(xf_files)} IMOD XF alignment file(s) to: '
             f'{data_directory}')
-
-        return xf_files
 
     # ------------------------------------------------------------------
     # Output registration
@@ -1006,8 +921,6 @@ class MissAlignment(WarpBasePipeline):
         output_table = Table(input_table.getColumnNames())
         individual_stars = []
 
-        pixel_size = self._positive_float(pixel_size, 'output.pixel_size')
-
         for ts_row in input_table:
             output_ts_star = self._write_individual_tilt_series_star(
                 batch,
@@ -1036,45 +949,6 @@ class MissAlignment(WarpBasePipeline):
             'TomogramGroupMetadata.star.relion.tomo.aligntiltseries',
         ]])
 
-        files = [[output_star, 'TomogramGroupMetadata']]
-
-        for star_file in individual_stars:
-            files.append([star_file, 'TiltSeriesMetadata'])
-
-        for xf_file in getattr(self, 'imodXfFiles', []):
-            if os.path.exists(xf_file):
-                files.append([xf_file, 'ImodAlignment'])
-
-        if os.path.exists(self.join(self.TSS)):
-            files.append([self.join(self.TSS), 'WarpTiltSeriesSettings'])
-
-        inference_config = getattr(self, 'inferenceConfig', None)
-        if inference_config and os.path.exists(inference_config):
-            files.append([inference_config, 'MissAlignmentInferenceConfig'])
-
-        training_directory = getattr(self, 'trainingDir', None)
-        if training_directory:
-            config_file = os.path.join(training_directory, self.CONFIG_NAME)
-            if os.path.exists(config_file):
-                files.append([config_file, 'MissAlignmentConfig'])
-
-            best_model = os.path.join(training_directory, 'model.ckpt')
-            if os.path.exists(best_model):
-                files.append([best_model, 'MissAlignmentCheckpoint'])
-
-        model_run_directory = getattr(self, 'modelRunDirectory', training_directory)
-
-        self.outputs['MissAlignment'] = {
-            'label': 'Miss-Alignment',
-            'type': 'MissAlignmentRun',
-            'info': (
-                f'Model run directory: {model_run_directory}. '
-                'RELION per-tilt alignment columns were updated from the '
-                'optimized Miss-Alignment global XF transforms.'
-            ),
-            'files': files,
-        }
-
         self.updateBatchInfo(batch)
 
     # ------------------------------------------------------------------
@@ -1093,23 +967,19 @@ class MissAlignment(WarpBasePipeline):
             model_run_directory = str(self._args.get('infer.model_run_directory', ''))
             if not model_run_directory:
                 raise ValueError('Infer-only mode requires infer.model_run_directory.')
+        else:
+            training_subset = self._wait_for_training_set()
+            self.log(f'Starting training with {len(training_subset)} tilt series')
+            model_run_directory = self.launch_training(training_subset)
 
-            self.launch_inference(model_run_directory, mode)
-            return
-
-        training_subset = self._wait_for_training_set()
-        self.log(f'Starting training with {len(training_subset)} tilt series')
-        self.launch_training(training_subset)
-
-        if mode == self.MODE_TRAIN_ONLY:
-            self.log('Training-only mode finished. '
-                f'Best model: {self.modelPath}')
-            return
+            if mode == self.MODE_TRAIN_ONLY:
+                self.log('Training-only mode finished.')
+                return
 
         self.log('Training completed. Starting inference using model run: '
-            f'{self.trainingDir}')
+            f'{model_run_directory}')
 
-        self.launch_inference(self.trainingDir, mode)
+        self.launch_inference(model_run_directory, mode)        
 
 
 if __name__ == '__main__':
