@@ -39,7 +39,8 @@
                     "name": "ts_etomo_patches.angpix",
                     "label": "Output pixel size (A/pix)",
                     "paramClass": "FloatParam",
-                    "help": "Rescale tilt images to this pixel size; normally 10–15 A for cryo data; leave out to keep the original pixel size."
+                    "help": "Rescale tilt images to this pixel size; normally 10\u201315 A for cryo data; leave out to keep the original pixel size.",
+                    "allowsEmpty": true
                 },
                 {
                     "name": "ts_etomo_patches.patch_size",
@@ -58,7 +59,8 @@
                     "name": "ts_etomo_patches.initial_axis",
                     "label": "Initial axis",
                     "paramClass": "FloatParam",
-                    "help": "Override initial tilt axis angle with this value"
+                    "help": "Override initial tilt axis angle with this value",
+                    "allowsEmpty": true
                 },
                 {
                     "name": "ts_etomo_patches.do_axis_search",
@@ -80,7 +82,7 @@
             "params": [
                 {
                     "name": "gpus",
-                    "label": "GPUs",                    
+                    "label": "GPUs",
                     "help": "If it is a single number (N), it will represent the total number of GPUs (0..N-1). It there are multiple values, it will be the specific GPUs ID."
                 },
                 {

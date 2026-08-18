@@ -17,12 +17,13 @@
                 {
                     "label": "Reconstruct",
                     "paramClass": "Group",
-                    "params": [                
+                    "params": [
                         {
                             "name": "ts_reconstruct.angpix",
                             "label": "Reconstruction Voxel size (A/pix)",
                             "paramClass": "FloatParam",
-                            "help": ""
+                            "help": "",
+                            "allowsEmpty": true
                         },
                         {
                             "name": "ts_reconstruct.halfmap_frames",
@@ -86,13 +87,13 @@
                     ]
                 }
             ]
-        },               
+        },
         {
             "label": "Compute",
             "params": [
                 {
                     "name": "gpus",
-                    "label": "GPUs",                    
+                    "label": "GPUs",
                     "help": "If it is a single number (N), it will represent the total number of GPUs (0..N-1). It there are multiple values, it will be the specific GPUs ID."
                 },
                 {

@@ -2,12 +2,11 @@
     "sections": [
         {
             "label": "Input",
-            "params": [                             
+            "params": [
                 {
                     "name": "tilt_images",
                     "label": "Tilt images folder",
-                    "paramClass": "PathParam",
-                    "default": ""
+                    "paramClass": "PathParam"
                 },
                 {
                     "name": "mdoc_files",
@@ -20,12 +19,11 @@
                     "name": "acq.gain",
                     "label": "Gain file",
                     "paramClass": "PathParam",
-                    "help": "",
-                    "default": ""                
+                    "help": ""
                 },
                 {
                     "name": "tilt_axis_angle",
-                    "label": "Tilt axis angle (deg)",                    
+                    "label": "Tilt axis angle (deg)",
                     "paramClass": "FloatParam",
                     "default": 85,
                     "help": "This is the nominal value for the tilt-axis orientation to the Y-axis (positive is CCW from Y))"
@@ -36,7 +34,7 @@
                     "params": [
                         {
                             "name": "acq.pixel_size",
-                            "label": "Pixel Size (Å)",
+                            "label": "Pixel Size (\u00c5)",
                             "paramClass": "FloatParam",
                             "help": ""
                         },
@@ -65,7 +63,8 @@
                             "name": "acq.total_dose",
                             "label": "Total dose per tilt",
                             "paramClass": "FloatParam",
-                            "help": "Total dose per tilt image."
+                            "help": "Total dose per tilt image.",
+                            "allowsEmpty": true
                         }
                     ]
                 }
@@ -73,7 +72,7 @@
         },
         {
             "label": "Streaming",
-            "params": [                             
+            "params": [
                 {
                     "name": "wait.timeout",
                     "label": "Wait time for new files",

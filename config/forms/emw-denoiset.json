@@ -15,7 +15,7 @@
                             "paramClass": "PathParam",
                             "pointerClass": "Tomograms",
                             "help": "STAR file with input tomograms"
-                        }, 
+                        },
                         {
                             "name": "mode",
                             "label": "Mode",
@@ -24,7 +24,7 @@
                                 "0": "Train & Infer",
                                 "1": "Train only",
                                 "2": "Infer only"
-                            }, 
+                            },
                             "default": "0",
                             "help": "Select the mode of operation for the denoising process. Train and inference by default. Train only will train a model without performing inference. Infer only will use an existing model to denoise tomograms."
                         }
@@ -56,11 +56,10 @@
                         {
                             "name": "train.dn3.metrics_file",
                             "label": "Quality metrics file (optional):",
-                            "default": "",
                             "paramClass": "PathParam",
                             "allowsEmpty": true,
                             "help": "(--metrics_file) AreTomo3 TiltSeries_Metrics.csv used to score and select training tomograms. Leave empty to skip quality-based filtering."
-                        },   
+                        },
                         {
                             "name": "train.dn3.tilt_axis",
                             "label": "Max tilt axis deviation (deg):",
@@ -70,14 +69,14 @@
                         },
                         {
                             "name": "train.dn3.thickness",
-                            "label": "Min sample thickness (Å):",
+                            "label": "Min sample thickness (\u00c5):",
                             "default": 1000,
                             "paramClass": "FloatParam",
                             "help": "(--thickness) Minimum sample thickness, in Angstrom."
                         },
                         {
                             "name": "train.dn3.global_shift",
-                            "label": "Max global shift (Å):",
+                            "label": "Max global shift (\u00c5):",
                             "default": 750,
                             "paramClass": "FloatParam",
                             "help": "(--global_shift) Maximum global shift, in Angstrom."
@@ -98,7 +97,7 @@
                         },
                         {
                             "name": "train.dn3.ctf_res",
-                            "label": "Max CTF resolution (Å):",
+                            "label": "Max CTF resolution (\u00c5):",
                             "default": 20,
                             "paramClass": "FloatParam",
                             "help": "(--ctf_res) Maximum resolution of the CTF score, in Angstrom, for the zero-tilt image."
@@ -110,7 +109,7 @@
                             "paramClass": "FloatParam",
                             "help": "(--ctf_score) Minimum CTF score for the zero-tilt image."
                         }
-                   ]
+                    ]
                 },
                 {
                     "label": "Training hyperparameters",
@@ -134,28 +133,27 @@
                         {
                             "name": "train.dn3.optimizer",
                             "label": "Optimizer:",
-                            "default": "",
                             "paramClass": "StringParam",
                             "help": "(--optimizer) Optimizer used for training, e.g. adam. Leave empty to use the program default."
                         },
                         {
                             "name": "train.dn3.learning_rate",
                             "label": "Learning rate:",
-                            "default": "",
+                            "allowsEmpty": true,
                             "paramClass": "FloatParam",
                             "help": "(--learning_rate) Learning rate for training. Leave empty to use the program default."
                         },
                         {
                             "name": "train.dn3.batch_size",
                             "label": "Batch size:",
-                            "default": "",
+                            "allowsEmpty": true,
                             "paramClass": "IntParam",
                             "help": "(--batch_size) Number of paired subvolumes per training batch. Leave empty to use the program default."
                         },
                         {
                             "name": "train.dn3.n_denoise",
                             "label": "Tomograms denoised per epoch (inspection):",
-                            "default": "",
+                            "allowsEmpty": true,
                             "paramClass": "IntParam",
                             "help": "(--n_denoise) Number of tomograms denoised per epoch for visual inspection of training progress."
                         }
@@ -169,7 +167,6 @@
                         {
                             "name": "train.dn3.model",
                             "label": "Pre-trained model to continue from:",
-                            "default": "",
                             "paramClass": "PathParam",
                             "allowsEmpty": true,
                             "help": "(--model) Pre-trained UNet3d model file to resume/continue training from. Leave empty to train a new model from scratch."
@@ -188,7 +185,6 @@
                         {
                             "name": "infer.dn3.model",
                             "label": "Pretrained model (optional):",
-                            "default": "",
                             "paramClass": "PathParam",
                             "allowsEmpty": true,
                             "help": "(--model) Pre-trained UNet3d model file to use for inference. Leave empty to automatically use the best model (lowest ch_mean) from the associated training job."
@@ -203,14 +199,14 @@
                         {
                             "name": "infer.dn3.inf_length",
                             "label": "Inference subvolume side length (px):",
-                            "default": "",
+                            "allowsEmpty": true,
                             "paramClass": "IntParam",
                             "help": "(--inf_length) Side length of cubic subvolumes to extract during inference, in pixels. Leave empty to use the program default."
                         },
                         {
                             "name": "infer.dn3.inf_padding",
                             "label": "Inference padding (px):",
-                            "default": "",
+                            "allowsEmpty": true,
                             "paramClass": "IntParam",
                             "help": "(--inf_padding) Padding length, in pixels, applied during inference."
                         }
@@ -221,39 +217,38 @@
         {
             "label": "Compute",
             "params": [
-                    {
-                        "name": "gpus",
-                        "label": "GPUs",
-                        "help": "If a single number (N), it represents the total number of GPUs (0..N-1). If multiple values, these are specific GPU IDs."
-                    },
-                    {
-                        "name": "cpus",
-                        "label": "CPUs",
-                        "default": "",
-                        "help": "If empty, the program will use the number of GPUs * 10 CPUs."
-                    },
-                    {
-                        "label": "Launchers",
-                        "paramClass": "Group",
-                        "help": "Launchers to use for the different programs",
-                        "collapsed": true,
-                        "params": [
-                            {
-                                "name": "register_output_only",
-                                "label": "Register output only",
-                                "paramClass": "BooleanParam",
-                                "default": false,
-                                "help": "If enabled, the job will only register the output files, but not run the program."
-                            },
-                            {
-                                "name": "launcher_denoiset",
-                                "label": "DenoisET",
-                                "paramClass": "StringParam",
-                                "help": "Launcher to use for DenoisET (denoise3d / predict3d)"
-                            }
-                        ]
-                    }
-                ]
+                {
+                    "name": "gpus",
+                    "label": "GPUs",
+                    "help": "If a single number (N), it represents the total number of GPUs (0..N-1). If multiple values, these are specific GPU IDs."
+                },
+                {
+                    "name": "cpus",
+                    "label": "CPUs",
+                    "help": "If empty, the program will use the number of GPUs * 10 CPUs."
+                },
+                {
+                    "label": "Launchers",
+                    "paramClass": "Group",
+                    "help": "Launchers to use for the different programs",
+                    "collapsed": true,
+                    "params": [
+                        {
+                            "name": "register_output_only",
+                            "label": "Register output only",
+                            "paramClass": "BooleanParam",
+                            "default": false,
+                            "help": "If enabled, the job will only register the output files, but not run the program."
+                        },
+                        {
+                            "name": "launcher_denoiset",
+                            "label": "DenoisET",
+                            "paramClass": "StringParam",
+                            "help": "Launcher to use for DenoisET (denoise3d / predict3d)"
+                        }
+                    ]
+                }
+            ]
         }
     ]
 }

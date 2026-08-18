@@ -2,7 +2,7 @@
     "name": "emw-warp-mctf",
     "label": "Warp - Motioncor and CTF",
     "help": "Warp wrapper to run the motion correction and CTF estimation. It will run the following programs:\n\n[[https://warpem.github.io/warp/reference/warptools/api/frame_series/?h=fs_motion_and_ctf][fs_motion_and_ctf]]",
-    "sections": [        
+    "sections": [
         {
             "label": "Motion",
             "params": [
@@ -47,7 +47,7 @@
                 },
                 {
                     "name": "fs_motion_and_ctf.m_bfac",
-                    "label": "Bfactor (Aˆ2)",
+                    "label": "Bfactor (A\u02c62)",
                     "default": -500,
                     "paramClass": "FloatParam",
                     "help": "(--m_bfac)  Default: -500. Downweight higher spatial frequencies using a B-factor, in Angstrom^2"
@@ -71,8 +71,7 @@
                     "paramClass": "PathParam",
                     "pattern": "*.{mrc,gain}",
                     "allowsEmpty": true,
-                    "help": "Optional gain reference file for motion correction. If set, overrides the value from the emw-import-ts job stored in the input tilt-series STAR file.",
-                    "default": ""
+                    "help": "Optional gain reference file for motion correction. If set, overrides the value from the emw-import-ts job stored in the input tilt-series STAR file."
                 }
             ]
         },
@@ -118,14 +117,14 @@
                             "help": "(--c_defocus_max) Default: 10. Maximum resolution in Angstrom to consider in fit"
                         }
                     ]
-                },                
+                },
                 {
                     "name": "fs_motion_and_ctf.c_window",
                     "label": "Window (px)",
                     "default": 512,
                     "paramClass": "FloatParam",
                     "help": "(--c_window) Default: 512. Patch size for CTF estimation in binned pixels"
-                },                
+                },
                 {
                     "name": "fs_motion_and_ctf.c_grid",
                     "label": "Grid (XxYxN):",
@@ -146,13 +145,13 @@
                     "help": "(--out_average_halves) "
                 }
             ]
-        }, 
+        },
         {
             "label": "Compute",
             "params": [
                 {
                     "name": "gpus",
-                    "label": "GPUs",                    
+                    "label": "GPUs",
                     "help": "If it is a single number (N), it will represent the total number of GPUs (0..N-1). It there are multiple values, it will be the specific GPUs ID."
                 },
                 {
