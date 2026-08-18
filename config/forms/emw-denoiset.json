@@ -58,6 +58,7 @@
                             "label": "Quality metrics file (optional):",
                             "default": "",
                             "paramClass": "PathParam",
+                            "allowsEmpty": true,
                             "help": "(--metrics_file) AreTomo3 TiltSeries_Metrics.csv used to score and select training tomograms. Leave empty to skip quality-based filtering."
                         },   
                         {
@@ -170,6 +171,7 @@
                             "label": "Pre-trained model to continue from:",
                             "default": "",
                             "paramClass": "PathParam",
+                            "allowsEmpty": true,
                             "help": "(--model) Pre-trained UNet3d model file to resume/continue training from. Leave empty to train a new model from scratch."
                         }
                     ]
@@ -188,6 +190,7 @@
                             "label": "Pretrained model (optional):",
                             "default": "",
                             "paramClass": "PathParam",
+                            "allowsEmpty": true,
                             "help": "(--model) Pre-trained UNet3d model file to use for inference. Leave empty to automatically use the best model (lowest ch_mean) from the associated training job."
                         }
                     ]

@@ -24,6 +24,7 @@
                     "label": "Gain reference",
                     "paramClass": "PathParam",
                     "pattern": "*.{mrc,gain}",
+                    "allowsEmpty": true,
                     "help": "Optional gain reference file for motion correction. If set, overrides the value from the emw-import-ts job stored in the input tilt-series STAR file.",
                     "default": ""
                 },

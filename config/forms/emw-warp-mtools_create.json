@@ -64,6 +64,7 @@
               "condition": "false",
               "default": "",
               "paramClass": "PathParam",
+              "allowsEmpty": true,
               "help": "Optional (--files). STAR file with a list of files to intersect with the full list of frame or tilt series referenced by the settings."
             }
           ]

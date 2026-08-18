@@ -12,8 +12,8 @@
                 {
                     "name": "mdoc_files",
                     "label": "Mdoc files",
-                    "paramClass": "PathParam",
-                    "help": "Leave it empty for using all GPUs",
+                    "paramClass": "FilesPatternParam",
+                    "help": "Pattern to match the mdoc files.",
                     "default": "mdocs/Position*[1-9].mdoc"
                 },
                 {

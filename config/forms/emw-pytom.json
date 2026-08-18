@@ -27,7 +27,7 @@
                         {
                             "name": "pytom.mask",
                             "label": "Template mask (MRC)",
-                            "paramClass": "PointerParam",
+                            "paramClass": "PathParam",
                             "pointerClass": "VolumeMask"
                         }
                     ]
