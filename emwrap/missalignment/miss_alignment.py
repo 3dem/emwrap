@@ -22,7 +22,7 @@ from emtools.utils import FolderManager
 
 from emwrap.warp.warp import WarpBasePipeline
 
-from .utils import warp_xml_to_imod_xf 
+from .utils import warp_xml_to_imod_xf, get_warp_movie_names
 
 
 class MissAlignment(WarpBasePipeline):
@@ -949,7 +949,12 @@ class MissAlignment(WarpBasePipeline):
         )
 
     def _write_individual_tilt_series_star(self, batch, ts_row, pixel_size):
-        """Copy one input TS STAR while replacing only RELION alignment fields."""
+        """Copy one input TS STAR while replacing only RELION alignment fields.
+
+        Warp XML/XF entries are matched to RELION rows by movie basename rather
+        than by row position. The output STAR keeps the original RELION row
+        order.
+        """
         ts_name = str(ts_row.rlnTomoName)
         input_star = ts_row.rlnTomoTiltSeriesStarFile
 
@@ -962,21 +967,73 @@ class MissAlignment(WarpBasePipeline):
             raise ValueError(
                 f'Input tilt-series STAR is empty for {ts_name}: {input_star}')
 
-        tilt_angles = []
-        for tilt_row in input_table:
-            tilt_dict = tilt_row._asdict()
-            tilt_angle = tilt_dict.get('rlnTomoNominalStageTiltAngle', None)
-            if tilt_angle in ('', None):
-                raise ValueError(
-                    f'{ts_name}: rlnTomoNominalStageTiltAngle is required '
-                    'to convert the IMOD XF transform to RELION alignment.')
-            
-            tilt_angles.append(float(tilt_angle))
+        data_directory = os.path.abspath(self.join(self.TS))
+        xml_file = os.path.join(data_directory, f'{ts_name}.xml')
+        xf_file = os.path.join(data_directory, f'{ts_name}.xf')
 
-        xf_file = os.path.join(os.path.abspath(self.join(self.TS)), f'{ts_name}.xf')
+        if not os.path.isfile(xml_file):
+            raise FileNotFoundError(
+                f'Miss-Alignment Warp XML not found for {ts_name}: {xml_file}')
+
         if not os.path.isfile(xf_file):
             raise FileNotFoundError(
                 f'Miss-Alignment XF file not found for {ts_name}: {xf_file}')
+
+        # Movie order in the Warp XML is the order used to write the XF.
+        warp_movie_names = get_warp_movie_names(xml_file)
+
+        # Build a lookup from movie basename to the corresponding RELION row.
+        star_rows_by_movie = {}
+
+        for tilt_row in input_table:
+            tilt_dict = tilt_row._asdict()
+            movie_path = tilt_dict.get('rlnMicrographMovieName', None)
+
+            if movie_path in ('', None):
+                raise ValueError(
+                    f'{ts_name}: rlnMicrographMovieName is required to match '
+                    'RELION rows to Warp MoviePath entries.')
+
+            movie_name = os.path.basename(str(movie_path))
+
+            if movie_name in star_rows_by_movie:
+                raise ValueError(
+                    f'{ts_name}: duplicate rlnMicrographMovieName basename: '
+                    f'{movie_name}')
+
+            star_rows_by_movie[movie_name] = tilt_row
+
+        # Require an exact one-to-one identity match between Warp and RELION.
+        warp_movies = set(warp_movie_names)
+        star_movies = set(star_rows_by_movie)
+
+        missing_from_star = sorted(warp_movies - star_movies)
+        missing_from_warp = sorted(star_movies - warp_movies)
+
+        if missing_from_star or missing_from_warp:
+            raise ValueError(
+                f'{ts_name}: Warp/RELION movie identity mismatch. '
+                f'Missing from STAR: {missing_from_star}; '
+                f'Missing from Warp XML: {missing_from_warp}')
+
+        # RelionStar.alignments_from_imod is positional, so build the tilt-angle
+        # list in the exact Warp/XF order.
+        # NOTE: We intentionally keep rlnTomoNominalStageTiltAngle here for now.
+        # Choosing between RELION nominal angles and Warp XML Angles is handled
+        # as a separate alignment-convention issue.
+        tilt_angles = []
+
+        for movie_name in warp_movie_names:
+            tilt_row = star_rows_by_movie[movie_name]
+            tilt_dict = tilt_row._asdict()
+            tilt_angle = tilt_dict.get('rlnTomoNominalStageTiltAngle', None)
+
+            if tilt_angle in ('', None):
+                raise ValueError(
+                    f'{ts_name}: rlnTomoNominalStageTiltAngle is required '
+                    f'for movie {movie_name}.')
+
+            tilt_angles.append(float(tilt_angle))
 
         relion_alignments = self._compute_relion_alignments_from_xf(
             xf_file,
@@ -984,11 +1041,14 @@ class MissAlignment(WarpBasePipeline):
             pixel_size,
         )
 
-        if len(relion_alignments) != len(input_table):
-            raise ValueError(
-                f'RELION alignment count mismatch for {ts_name}: '
-                f'{len(relion_alignments)} alignments versus '
-                f'{len(input_table)} STAR rows.')
+        # Associate each converted alignment with its movie identity.
+        alignments_by_movie = {
+            movie_name: alignment
+            for movie_name, alignment in zip(
+                warp_movie_names,
+                relion_alignments,
+            )
+        }
 
         alignment_columns = (
             'rlnTomoXTilt',
@@ -999,27 +1059,20 @@ class MissAlignment(WarpBasePipeline):
         )
 
         input_columns = input_table.getColumnNames()
-        missing_columns = [
-            column
-            for column in alignment_columns
-            if column not in input_columns
-        ]
-        if missing_columns:
-            raise ValueError(
-                f'{ts_name}: input STAR does not contain the expected '
-                'RELION alignment columns: '
-                + ', '.join(missing_columns))
-
         output_table = Table(input_columns)
 
-        for tilt_row, alignment in zip(input_table, relion_alignments):
+        # Preserve the original STAR row order, but look up each alignment by
+        # movie identity instead of assuming STAR and XF have the same order.
+        for tilt_row in input_table:
             tilt_dict = tilt_row._asdict()
+            movie_name = os.path.basename(str(tilt_dict['rlnMicrographMovieName']))
+            alignment = alignments_by_movie[movie_name]
 
             for column in alignment_columns:
                 if column not in alignment:
                     raise ValueError(
                         f'{ts_name}: converted RELION alignment is missing '
-                        f'{column}.'
+                        f'{column} for movie {movie_name}.'
                     )
                 tilt_dict[column] = alignment[column]
 

@@ -1,6 +1,31 @@
 import math
 import xml.etree.ElementTree as ET
 from pathlib import Path
+import os
+
+
+def get_warp_movie_names(xml_file):
+    """Return Warp MoviePath basenames in Warp/XF alignment order."""
+    root = ET.parse(xml_file).getroot()
+
+    movie_path = root.find('MoviePath')
+    if movie_path is None or not movie_path.text:
+        raise ValueError(
+            f'Warp XML does not contain MoviePath entries: {xml_file}'
+        )
+
+    movie_names = [
+        os.path.basename(path.strip())
+        for path in movie_path.text.splitlines()
+        if path.strip()
+    ]
+
+    if len(movie_names) != len(set(movie_names)):
+        raise ValueError(
+            f'Warp XML contains duplicate MoviePath basenames: {xml_file}'
+        )
+
+    return movie_names
 
 
 def _read_float_array(root, tag):
