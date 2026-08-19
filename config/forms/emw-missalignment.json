@@ -282,15 +282,19 @@
                 },
                 {
                     "name": "train.training_gpus",
-                    "label": "GPUs for training",
-                    "default": 1,
-                    "paramClass": "IntParam"
+                    "label": "Training GPUs:",
+                    "paramClass": "StringParam",
+                    "default": "",
+                    "allowsEmpty": true,
+                    "help": "Comma-separated logical GPU device indices used for model training, for example '0,1'. One training worker is started per GPU. Device indices refer to the GPUs visible inside the EMHub job after CUDA_VISIBLE_DEVICES is applied. Leave empty to automatically use the first half of the GPUs reserved for the job."
                 },
                 {
                     "name": "train.reconstruction_gpus",
-                    "label": "GPUs for reconstruction",
-                    "default": 1,
-                    "paramClass": "IntParam"
+                    "label": "Reconstruction GPUs:",
+                    "paramClass": "StringParam",
+                    "default": "",
+                    "allowsEmpty": true,
+                    "help": "Comma-separated logical GPU device indices used for reconstruction workers. Each entry starts one worker and devices may be repeated, for example '2,2,2,3,3,3' starts three workers on GPU 2 and three on GPU 3. Reconstruction devices may overlap with training devices. Leave empty to automatically use GPUs not assigned to training with three reconstruction workers per GPU."
                 },
                 {
                     "label": "Launchers",

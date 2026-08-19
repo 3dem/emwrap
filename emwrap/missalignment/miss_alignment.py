@@ -538,51 +538,168 @@ class MissAlignment(WarpBasePipeline):
     # ------------------------------------------------------------------
     # Miss-Alignment training
     # ------------------------------------------------------------------
-    def _training_gpu_devices(self):
-        """Build logical GPU assignments for Miss-Alignment training.
-
-        ``self.gpuList`` contains the physical GPUs selected/reserved by EMHub.
-        Once those GPUs are exposed through CUDA_VISIBLE_DEVICES, Miss-Alignment
-        sees them as logical devices 0..N-1.
-
-        Training devices are assigned first, followed by reconstruction devices.
-        Each reconstruction GPU runs three reconstruction workers.
+    @staticmethod
+    def _parse_gpu_device_list(value, name, available_gpus, allow_repeats=False):
+        """Parse comma-separated physical GPU IDs.
+        Parameters
+        - value: User-provided GPU list, e.g. ``"2,5"`` or ``"7,7,9,9"``.
+        - name: Parameter name used in error messages.
+        - available_gpus: Physical GPUs reserved by EMHub, e.g. ``[2, 5, 7, 9]``.
+        - allow_repeats: Whether the same physical GPU may appear more than once.
+        Reconstruction allows this because every entry creates a worker.
         """
-        if not self.gpuList:
+        if value is None:
+            return []
+
+        text = str(value).strip()
+        if not text:
+            return []
+
+        devices = []
+
+        for token in text.split(','):
+            token = token.strip()
+
+            if not token:
+                raise ValueError(f'{name} contains an empty GPU device entry: {value!r}')
+
+            try:
+                device = int(token)
+            except ValueError as exc:
+                raise ValueError(
+                    f'{name} must be a comma-separated list of GPU device '
+                    f'indices, received: {value!r}'
+                ) from exc
+
+            if device not in available_gpus:
+                raise ValueError(
+                    f'{name} requests GPU {device}, but the GPUs reserved '
+                    f'for this EMHub job are: '
+                    f'{",".join(str(gpu) for gpu in available_gpus)}'
+                )
+
+            devices.append(device)
+
+        if not allow_repeats and len(devices) != len(set(devices)):
             raise ValueError(
-                'Miss-Alignment training requires at least one GPU.'
+                f'{name} contains repeated GPU devices: {value!r}. '
+                'Training uses one worker per GPU, so training devices '
+                'must be unique.'
             )
 
-        n_gpus = len(self.gpuList)
-        n_training = int(self._args.get('train.training_gpus', 1))
-        n_reconstruction = int(self._args.get('train.reconstruction_gpus', 1))
+        return devices
 
-        workers_per_reconstruction_gpu = 3
+    def _training_gpu_devices(self):
+        """Build Miss-Alignment logical GPU assignments.
+        self.gpuList contains the physical GPU IDs reserved by EMHub.
+        The form parameters also use physical GPU IDs. For example, with:
+            self.gpuList = [2, 5, 7, 9]
+        the user may request::
+            train.training_gpus = "2,5"
+            train.reconstruction_gpus = "7,9"
 
-        # A single large GPU is shared by training and reconstruction.
-        if n_gpus == 1:
-            if n_training != 1 or n_reconstruction != 1:
-                raise ValueError(
-                    'With one reserved GPU, train.training_gpus and '
-                    'train.reconstruction_gpus must both be 1.')
-            return '0', ','.join(
-                ['0'] * workers_per_reconstruction_gpu)
+        Because CUDA_VISIBLE_DEVICES is set to ``2,5,7,9``, Miss-Alignment sees
+        these GPUs as logical devices ``0,1,2,3``. Therefore the physical IDs
+        selected in the form are translated to their corresponding logical IDs
+        before building the Miss-Alignment command.
 
-        if n_training + n_reconstruction > n_gpus:
-            raise ValueError(
-                f'Requested {n_training} training GPU(s) and '
-                f'{n_reconstruction} reconstruction GPU(s), but only '
-                f'{n_gpus} GPU(s) are available to the job.')
+        If training devices are empty, the first half of the reserved GPUs is
+        used for training.
 
-        logical_gpus = list(range(n_gpus))
-        training_ids = logical_gpus[:n_training]
-        reconstruction_ids = logical_gpus[n_training:n_training + n_reconstruction]
+        If reconstruction devices are empty, the remaining GPUs are used with
+        three workers per GPU. If no separate reconstruction GPU is available,
+        reconstruction shares the training GPU(s).
+        """
+        if not self.gpuList:
+            raise ValueError('Miss-Alignment training requires at least one GPU.')
 
-        training_devices = ','.join(str(device) for device in training_ids)
-        reconstruction_devices = ','.join(
-            str(device)
-            for device in reconstruction_ids
-            for _ in range(workers_per_reconstruction_gpu)
+        physical_gpus = [int(gpu) for gpu in self.gpuList]
+
+        # CUDA_VISIBLE_DEVICES maps physical -> logical GPU IDs.
+        # Example:
+        #   CUDA_VISIBLE_DEVICES=2,5,7,9
+        # gives:
+        #   physical 2 -> logical 0
+        #   physical 5 -> logical 1
+        #   physical 7 -> logical 2
+        #   physical 9 -> logical 3
+        physical_to_logical = {
+            physical: logical
+            for logical, physical in enumerate(physical_gpus)
+        }
+
+        # --------------------------------------------------------------
+        # Training and Reconstruction GPUs
+        # --------------------------------------------------------------
+        training_physical = self._parse_gpu_device_list(
+            self._args.get('train.training_gpus', ''),
+            'train.training_gpus',
+            physical_gpus,
+            allow_repeats=False,
+        )
+
+        reconstruction_physical = self._parse_gpu_device_list(
+            self._args.get('train.reconstruction_gpus', ''),
+            'train.reconstruction_gpus',
+            physical_gpus,
+            allow_repeats=True,
+        )
+
+        if (not training_physical and reconstruction_physical) or (training_physical and not reconstruction_physical):
+            raise ValueError('Miss-Alignment requires that both training and reconstructions GPUs are set, leave both empty for automatic estimation.')
+        
+        if not training_physical:
+            if len(physical_gpus) == 1:
+                training_physical = physical_gpus[:]
+            else:
+                # Prioritize training when the number of GPUs is odd.
+                n_training = max(1, (len(physical_gpus) + 1) // 2)
+                training_physical = physical_gpus[:n_training]
+       
+        if not reconstruction_physical:
+            # Prefer GPUs not used for training.
+            reconstruction_gpus = [
+                gpu
+                for gpu in physical_gpus
+                if gpu not in training_physical
+            ]
+
+            # Single GPU / all GPUs explicitly used for training:
+            # allow reconstruction to overlap with training.
+            if not reconstruction_gpus:
+                reconstruction_gpus = list(training_physical)
+
+            workers_per_gpu = 3
+
+            reconstruction_physical = [
+                gpu
+                for gpu in reconstruction_gpus
+                for _ in range(workers_per_gpu)
+            ]
+
+        # --------------------------------------------------------------
+        # Translate physical GPU IDs into CUDA-visible logical IDs.
+        # --------------------------------------------------------------
+        training_logical = [
+            physical_to_logical[gpu]
+            for gpu in training_physical
+        ]
+
+        reconstruction_logical = [
+            physical_to_logical[gpu]
+            for gpu in reconstruction_physical
+        ]
+
+        training_devices = ','.join(str(device) for device in training_logical)
+        reconstruction_devices = ','.join(str(device) for device in reconstruction_logical)
+
+        self.log(
+            'Miss-Alignment GPU mapping: '
+            f'physical={physical_gpus}; '
+            f'training physical={training_physical} -> '
+            f'logical={training_logical}; '
+            f'reconstruction physical={reconstruction_physical} -> '
+            f'logical={reconstruction_logical}'
         )
 
         return training_devices, reconstruction_devices
@@ -592,7 +709,7 @@ class MissAlignment(WarpBasePipeline):
         omp_threads = 1
         mkl_threads = 1
 
-        training_devices, reconstruction_devices = (self._training_gpu_devices())
+        training_devices, reconstruction_devices = self._training_gpu_devices()
 
         if isinstance(self.gpuList, str):
             visible_devices = self.gpuList.strip().replace(' ', ',')
