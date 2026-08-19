@@ -1113,17 +1113,6 @@ class MissAlignment(WarpBasePipeline):
 
         return output_star, individual_stars
 
-    def _output(self, batch, pixel_size):
-        """Register RELION metadata containing Miss-Alignment global alignment."""
-        
-
-        self.writeRelionOutputNodes([[
-            output_star,
-            'TomogramGroupMetadata.star.relion.tomo.aligntiltseries',
-        ]])
-
-        
-
     # ------------------------------------------------------------------
     # Pipeline lifecycle
     # ------------------------------------------------------------------
