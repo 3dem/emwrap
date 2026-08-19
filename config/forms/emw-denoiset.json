@@ -45,6 +45,13 @@
                             "default": "10",
                             "paramClass": "IntParam",
                             "help": "Number of tomograms to use for training. Tomograms are chosen automatically based on quality metrics; used only when a metrics file is provided."
+                        }, 
+                        {
+                            "name": "train.dn3.n_extract",
+                            "label": "Number of subvolumes:",
+                            "default": 250,
+                            "paramClass": "IntParam",
+                            "help": "(--n_extract) Number of subvolumes to extract per tomogram."
                         }
                     ]
                 },
