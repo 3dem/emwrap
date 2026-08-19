@@ -183,6 +183,7 @@
                             "default": "",
                             "allowsEmpty": true,
                             "paramClass": "PathParam",
+                            "pointerClass": "MissAlignmentModelDir",
                             "help": "Finished Miss-Alignment training run containing iter1/model.ckpt ... iterN/model.ckpt. Required for Infer only mode. In Train & Infer mode, the training directory produced by the current job will be used automatically."
                         }
                     ]

@@ -867,6 +867,8 @@ class MissAlignment(WarpBasePipeline):
             f'Miss-Alignment training finished. '
             f'Best model: {trainingBestModel}')
 
+        self.updateBatchInfo(batch)
+
         return training_directory
 
     def launch_inference(self, model_run_directory, mode):
@@ -896,13 +898,16 @@ class MissAlignment(WarpBasePipeline):
 
         self._write_imod_xfs(data_directory, geometry['pixel_size'])
 
-        # Convert the optimized global XF transforms back into the RELION 5
-        # alignment columns and register a new aligned_tilt_series.star.
-        self._output(batch, geometry['pixel_size'])
-
         self.log(
             'Miss-Alignment inference finished. '
             f'Aligned snapshots are in: {data_directory}/iterN/')
+
+        # Convert the optimized global XF transforms back into the RELION 5
+        # alignment columns and register a new aligned_tilt_series.star.
+        output_star, individual_stars = self._build_relion_output_metadata(batch, geometry['pixel_size'])
+        self.updateBatchInfo(batch)
+
+        return output_star
 
     def _write_imod_xfs(self, data_directory, pixel_size):
         """Export updated Warp global alignments as IMOD XF files.
@@ -1110,16 +1115,14 @@ class MissAlignment(WarpBasePipeline):
 
     def _output(self, batch, pixel_size):
         """Register RELION metadata containing Miss-Alignment global alignment."""
-        output_star, individual_stars = self._build_relion_output_metadata(
-            batch,
-            pixel_size)
+        
 
         self.writeRelionOutputNodes([[
             output_star,
             'TomogramGroupMetadata.star.relion.tomo.aligntiltseries',
         ]])
 
-        self.updateBatchInfo(batch)
+        
 
     # ------------------------------------------------------------------
     # Pipeline lifecycle
@@ -1128,28 +1131,34 @@ class MissAlignment(WarpBasePipeline):
         self.inputTs = self._args['input_tiltseries']
         self.n_training = int(self._args.get('train.n_training', 10))
         mode = self._get_mode()
+        do_train = mode in [self.MODE_TRAIN_ONLY, self.MODE_TRAIN_INFER]
+        do_infer = mode in [self.MODE_INFER_ONLY, self.MODE_TRAIN_INFER]
 
         # TODO: remove once scheduler is ready
         self.inputTsTable = self._wait_for_input_table()
         self.log(f'Found input tilt series: {len(self.inputTsTable)}')
+        output_nodes = []
 
-        if mode == self.MODE_INFER_ONLY:
-            model_run_directory = str(self._args.get('infer.model_run_directory', ''))
-            if not model_run_directory:
-                raise ValueError('Infer-only mode requires infer.model_run_directory.')
-        else:
+        if do_train:
             training_subset = self._wait_for_training_set()
             self.log(f'Starting training with {len(training_subset)} tilt series')
             model_run_directory = self.launch_training(training_subset)
+            output_nodes.append([
+                model_run_directory,
+                'TomogramGroupMetadata.star.relion.tomo.MissAlignmentModelDir',
+            ])
+        else:
+            model_run_directory = str(self._args.get('infer.model_run_directory', ''))
+            self.log(f'Skipping training. Input model provided from directory: {model_run_directory}')
+        
+        if do_infer:
+            output_star = self.launch_inference(model_run_directory, mode)
+            output_nodes.append([
+                output_star,
+                'TomogramGroupMetadata.star.relion.tomo.aligntiltseries',
+            ])
 
-            if mode == self.MODE_TRAIN_ONLY:
-                self.log('Training-only mode finished.')
-                return
-
-        self.log('Training completed. Starting inference using model run: '
-            f'{model_run_directory}')
-
-        self.launch_inference(model_run_directory, mode)        
+        self.writeRelionOutputNodes(output_nodes)
 
 
 if __name__ == '__main__':
