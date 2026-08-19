@@ -77,6 +77,12 @@ class ProcessingConfig:
         return cls.get_jobs().get(jobtype)
 
     @classmethod
+    def is_job_visible(cls, jobtype):
+        """Return whether a job appears in the processing menu (default: True)."""
+        job_conf = cls.get_job_conf(jobtype) or {}
+        return job_conf.get('visible', True)
+
+    @classmethod
     def get_job_form_file(cls, jobtype):
         return os.path.join(cls._get_config('forms'), f'{jobtype}.json')
 
