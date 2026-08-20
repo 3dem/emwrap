@@ -174,8 +174,10 @@
                         {
                             "name": "train.dn3.model",
                             "label": "Pre-trained model to continue from:",
-                            "paramClass": "PathParam",
+                            "default": "",
                             "allowsEmpty": true,
+                            "paramClass": "PathParam",
+                            "pointerClass": "DenoisETModel",
                             "help": "(--model) Pre-trained UNet3d model file to resume/continue training from. Leave empty to train a new model from scratch."
                         }
                     ]
@@ -192,8 +194,10 @@
                         {
                             "name": "infer.dn3.model",
                             "label": "Pretrained model (optional):",
-                            "paramClass": "PathParam",
+                            "default": "",
                             "allowsEmpty": true,
+                            "paramClass": "PathParam",
+                            "pointerClass": "DenoisETModel",
                             "help": "(--model) Pre-trained UNet3d model file to use for inference. Leave empty to automatically use the best model (lowest ch_mean) from the associated training job."
                         }
                     ]

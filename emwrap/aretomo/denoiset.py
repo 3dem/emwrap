@@ -94,19 +94,16 @@ class DenoisET(ProcessingPipeline):
         self.trainingDir = 'training'
 
         self.inputLen = 0
-        self.inputToms = None
         self.inputTomTable = None      # set in prerun via _getInputTomTable
         self.n_training = 0            # set in prerun
 
-        self.trainingBestModel = None  # best epoch*.pth found after training
         self.modelPath = None          # model actually used for inference
         self.metricsFile = None        # metrics file actually used for training
-        self.modelStored = False
 
         self._allResults = {}  # tsName -> result dict, accumulated by _output
         self.registerOnly = self._register_output_only() # DEBUG flag
         self.launcher_denoiset = self._args.get('launcher_denoiset', None)
-
+        self.modelNode = None          # one-time model node
     
     # ------------------------------------------------------------------
     # Configuration / column definitions
@@ -355,20 +352,18 @@ class DenoisET(ProcessingPipeline):
                 tomogramsTable.addRowValues(**finalTomoRow)
 
         outputNodes = []
-
         if len(failedTable) > 0:
             self.write_tomo_table('global', failedTable, failedStarFile)
             outputNodes.append(
                 [failedStarFile, 'TomogramGroupMetadata.star.relion.tomo.tomograms-failed'])
 
         self.write_tomo_table('global', tomogramsTable, tomogramsStarFile)
-        outputNodes.append([tomogramsStarFile, 'TomogramGroupMetadata.star.relion.tomo.tomograms'])
-
-        if self.trainingBestModel and not self.modelStored:
-            outputNodes.append([self.trainingBestModel, 'TomogramGroupMetadata.star.relion.tomo.DenoisETModel'])
-            self.modelStored = True
+        outputNodes.append([tomogramsStarFile, 'TomogramGroupMetadata.star.relion.tomo.tomograms']) 
         
-        self.writeRelionOutputNodes(outputNodes)    
+        if self.modelNode is not None:
+            outputNodes.append(self.modelNode)
+        
+        self.writeRelionOutputNodes(outputNodes)   
         
     
     # ------------------------------------------------------------------
@@ -383,7 +378,7 @@ class DenoisET(ProcessingPipeline):
         epoch with the single lowest ch_mean -- is the safe model to use.
 
         The selected model is copied into the top-level model/ directory and
-        the copied path is returned so self.trainingBestModel always points to
+        the copied path is returned so trainingBestModel always points to
         the user-facing copy. The epoch number is read from the first column
         of the CSV.
         """
@@ -424,9 +419,8 @@ class DenoisET(ProcessingPipeline):
 
     def launch_training(self, tomTable):
         """ Symlink the training subset into self.trainingDir and run
-        denoise3d in --train_only mode. Populates self.trainingBestModel
+        denoise3d in --train_only mode. Returns trainingBestModel
         once training has finished. """
-        self.log(f"Training set size: {len(tomTable)} tomograms")
 
         trainingInputDir = self.join(self.trainingDir)
         trainingOutputDir = self.join(self.trainingDir, 'output')  
@@ -474,19 +468,20 @@ class DenoisET(ProcessingPipeline):
         trainingBatch.log(f"DenoisET denoise3d argv: {launcher} {' '.join(argv)}")
         trainingBatch.call(launcher, argv)
 
-        self.trainingBestModel = self._get_best_training_model(os.path.abspath(trainingOutputDir))
+        trainingBestModel = self._get_best_training_model(os.path.abspath(trainingOutputDir))
 
         with open(self.join(self.trainingDir, 'training_done.txt'), 'w') as f:
-            f.write(f"best_model={self.trainingBestModel}\n")
+            f.write(f"best_model={trainingBestModel}\n")
 
         self.info['training'] = {
             'n_training': len(tomTable),
             'training_stats_csv': os.path.join(trainingOutputDir, 'training_stats.csv'),
-            'best_model': self.trainingBestModel,
+            'best_model': trainingBestModel,
         }
 
-        self.log(f"Training finished. Best model: {self.trainingBestModel}")
         self.updateBatchInfo(trainingBatch)
+
+        return trainingBestModel
 
     # ------------------------------------------------------------------
     # Batch execution (inference)
@@ -792,7 +787,7 @@ class DenoisET(ProcessingPipeline):
         return rows
     
     def prerun(self):
-        self.inputToms = self._args['input_tomograms']
+        inputToms = self._args['input_tomograms']
         self.n_training = int(self._args['train.n_training'])
         mode = self._get_mode()
 
@@ -803,40 +798,42 @@ class DenoisET(ProcessingPipeline):
         self.inputTomTable = self._wait_for_input_table()
         self.log(f"Found input tomograms: {len(self.inputTomTable)}")
 
-        if mode == self.MODE_INFER_ONLY:
-            self.modelPath = self._args.get('infer.dn3.model', '')
-            if not self.modelPath:
-                raise Exception("Infer-only mode requires Inference - Pretrained model to be set.")
-            if not os.path.exists(self.modelPath):
-                raise Exception(f"Selected model not found: {self.modelPath}")
-            self.log(f"Infer-only mode selected, using model: {self.modelPath}")
+        do_train = mode in [self.MODE_TRAIN_ONLY, self.MODE_TRAIN_AND_INFER]
+        do_infer = mode in [self.MODE_INFER_ONLY, self.MODE_TRAIN_AND_INFER]
 
-        else:
+        if do_train:
             self.metricsFile = self._args.get('train.dn3.metrics_file', '')
             if self.metricsFile and not os.path.exists(self.metricsFile):
                 raise Exception(f"Metrics file not found: {self.metricsFile}")
 
             trainingSubset = self._wait_for_training_set()
-
             self.log(f"Starting training with {len(trainingSubset)} tomograms")
-            self.launch_training(trainingSubset)
 
-            self.modelPath = self.trainingBestModel
+            self.modelPath = self.launch_training(trainingSubset)
 
-            if mode == self.MODE_TRAIN_ONLY:
-                self.log(f"Training-only mode finished. Best model: {self.modelPath}")
+            self.log(f"Training finished. Best model: {self.modelPath}")
+            self.modelNode = [self.modelPath, 'TomogramGroupMetadata.star.relion.tomo.DenoisETModel']
+
+            if not do_infer:
+                self.writeRelionOutputNodes([self.modelNode])
                 return
+        else:
+            self.modelPath = self._args.get('infer.dn3.model', '')
+            if not self.modelPath:
+                raise Exception("Infer-only mode requires Inference - Pretrained model to be set.")
+            if not os.path.exists(self.modelPath):
+                raise Exception(f"Selected model not found: {self.modelPath}")
 
-        self.log(f"Using model for inference: {self.modelPath}")
+        if do_infer:
+            self.log(f"Using model for inference: {self.modelPath}")
+            self.mkdir(self.outputTomDir)
 
-        self.mkdir(self.outputTomDir)
-
-        monitor = StarMonitor(self.inputToms, 'global',
-                               lambda row: row.rlnTomoName, timeout=30)
-        batchMgr = BatchManager(1, monitor.newItems(), self.tmpDir,
-                                 itemFileNameFunc=self._filename)
-        g = self.addGenerator(batchMgr.generate)
-        self.addGpuProcessors(g, self.get_denoiset_proc, self._output)
+            monitor = StarMonitor(inputToms, 'global',
+                                lambda row: row.rlnTomoName, timeout=30)
+            batchMgr = BatchManager(1, monitor.newItems(), self.tmpDir,
+                                    itemFileNameFunc=self._filename)
+            g = self.addGenerator(batchMgr.generate)
+            self.addGpuProcessors(g, self.get_denoiset_proc, self._output)
 
 
 if __name__ == '__main__':
