@@ -116,7 +116,7 @@ class PyTomPipeline(ProcessingPipeline):
     def _processedTomoNames(self):
         if self.outTable is None:
             return set()
-        return {row.rlnTomoName for row in self.outTable}
+        return {row.rlnTomoName for row in self.outTable if row is not None}
 
     def _ensureOptimisationSet(self):
         if os.path.exists(self.outTomoOptimisationSet):
@@ -139,7 +139,7 @@ class PyTomPipeline(ProcessingPipeline):
         else:
             ptsTable = Table(columns=self.PARTICLES_COLUMNS)
 
-        if any(row.rlnTomoName == tsName for row in ptsTable):
+        if any(row is not None and row.rlnTomoName == tsName for row in ptsTable):
             batch.log(
                 f"WARNING: particles for tomogram '{tsName}' already in "
                 f"{self.outParticlesStar}, skipping")
@@ -148,6 +148,8 @@ class PyTomPipeline(ProcessingPipeline):
         if coordsStar and os.path.exists(coordsStar):
             coordsTable = StarFile.getTableFromFile('particles', coordsStar)
             for coord in coordsTable:
+                if coord is None:
+                    continue
                 values = {c: getattr(coord, c) for c in self.PARTICLES_COLUMNS}
                 values['rlnTomoName'] = tsName
                 ptsTable.addRowValues(**values)
