@@ -108,11 +108,21 @@ def _eval_atom(params, atom):
     return not result if neg else result
 
 
+def _normalize_condition(condition):
+    if condition is None:
+        return None
+    expr = str(condition).strip()
+    if not expr or expr.lower() == 'null':
+        return None
+    return expr
+
+
 def _eval_condition(params, condition):
     """Evaluate a form condition expression against flat param values."""
+    condition = _normalize_condition(condition)
     if condition is None:
         return True
-    expr = str(condition).strip()
+    expr = condition
     if not expr:
         return True
 
@@ -165,6 +175,18 @@ def _is_valid_int(value):
         return value.is_integer()
     text = str(value).strip()
     return bool(text) and re.fullmatch(r'[-+]?\d+', text) is not None
+
+
+def _container_visible(container_def, params, parent_visible=True):
+    """Return whether a form container and its descendants should be active."""
+    if not parent_visible:
+        return False
+    if container_def.get('paramClass') not in ('Group', 'Line'):
+        return parent_visible
+    condition = _normalize_condition(container_def.get('condition'))
+    if condition is None:
+        return parent_visible
+    return _eval_condition(params, condition)
 
 
 def _is_valid_float(value):
@@ -231,19 +253,25 @@ class JobForm:
         merged.update(params or {})
         errors = []
 
-        for param_def in JobForm.iter_params(job_form):
-            if not JobForm._should_validate_param(param_def, merged):
-                continue
+        def _validate_def(container_def, parent_visible=True):
+            visible = _container_visible(container_def, merged, parent_visible)
+            if container_def.get('params'):
+                for child in container_def['params']:
+                    _validate_def(child, visible)
+                return
 
-            param_class = _param_class(param_def)
+            if not JobForm._should_validate_param(container_def, merged, visible):
+                return
+
+            param_class = _param_class(container_def)
             if param_class not in (
                     'PathParam', 'FilesPatternParam',
                     'IntParam', 'FloatParam', 'StringParam'):
-                continue
+                return
 
-            name = param_def['name']
-            label = param_def.get('label') or name
-            allows_empty = _allows_empty(param_def, param_class)
+            name = container_def['name']
+            label = container_def.get('label') or name
+            allows_empty = _allows_empty(container_def, param_class)
             value = merged.get(name, '')
 
             if param_class == 'PathParam':
@@ -286,17 +314,19 @@ class JobForm:
                     if not allows_empty:
                         errors.append(f"{label} is required.")
 
+        for section_def in job_form['sections']:
+            _validate_def(section_def)
+
         return errors
 
     @staticmethod
-    def _should_validate_param(param_def, params):
+    def _should_validate_param(param_def, params, parent_visible=True):
+        if not parent_visible:
+            return False
         if not param_def.get('name'):
             return False
         if param_def.get('hidden'):
             return False
         if param_def.get('paramClass') in ('LabelParam', 'Group', 'Line', 'Section'):
             return False
-        condition = param_def.get('condition')
-        if condition is not None and str(condition).strip().lower() == 'null':
-            condition = None
-        return _eval_condition(params, condition)
+        return _eval_condition(params, param_def.get('condition'))
