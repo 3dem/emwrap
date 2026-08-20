@@ -389,10 +389,9 @@ class ProjectData(FolderManager):
 
         outputs_star = self.join(job_id, 'RELION_OUTPUT_NODES.star')
         if os.path.exists(outputs_star):
-            output_table = StarFile.getTableFromFile('pipeline_nodes', outputs_star)
-            for row in output_table:
-                if row.rlnPipeLineNodeName not in outputs:
-                    outputs.append(row.rlnPipeLineNodeName)
+            if output_table := StarFile.getTableFromFile('pipeline_nodes', outputs_star):
+                new_outputs = [row.rlnPipeLineNodeName for row in output_table if row.rlnPipeLineNodeName not in outputs]
+                outputs.extend(new_outputs)
 
         for output_id in self._jobs.get(job_id, {}).get('outputs', []):
             if output_id not in outputs:
