@@ -1,0 +1,219 @@
+{
+    "name": "relion.initialmodel.tomo",
+    "label": "Relion Tomo Initial Volume",
+    "help": "RELION de novo 3D initial model for subtomogram averaging (InitialModel, tomography). Matches RelionJob::initialiseInimodelJob with is_tomo=true: relion_refine --grad --denovo_3dref with --ios or direct tomography inputs, followed by relion_align_symmetry to write initial_model.mrc.",
+    "sections": [
+        {
+            "label": "I/O",
+            "params": [
+                {
+                    "name": "in_optimisation",
+                    "label": "Input optimisation set:",
+                    "pattern": "Optimisation set STAR file (*optimisation_set.star)",
+                    "help": "Input optimisation set. This will be passed with a --ios argument to relion_refine. If any individual components of the optimisation set are specified below, then they will override the components in this optimisation set.",
+                    "paramClass": "PathParam",
+                    "pointerClass": "TomoParticles",
+                    "condition": "use_direct_entries == False"
+                },
+                {
+                    "name": "use_direct_entries",
+                    "label": "OR: use direct entries?",
+                    "default": false,
+                    "paramClass": "BooleanParam",
+                    "help": "If set to Yes, the optimisation set will be ignored and the direct entries below will be used instead."
+                },
+                {
+                    "name": "in_particles",
+                    "label": "Input particle set:",
+                    "pattern": "Particle STAR file (*.star)",
+                    "help": "Input particle set.",
+                    "paramClass": "PathParam",
+                    "pointerClass": "TomoParticles",
+                    "condition": "use_direct_entries == True"
+                },
+                {
+                    "name": "in_tomograms",
+                    "label": "Input tomogram set:",
+                    "pattern": "Tomogram set STAR file (*.star)",
+                    "help": "Input tomogram set STAR file. This file gets generated during Tomogram Reconstruction, and updated during Tomogram Frame Alignment or Tomogram CTF Refinement.",
+                    "paramClass": "PathParam",
+                    "pointerClass": "Tomograms",
+                    "condition": "use_direct_entries == True"
+                },
+                {
+                    "name": "in_trajectories",
+                    "label": "Input trajectory set:",
+                    "pattern": "Trajectory set STAR file (*.star)",
+                    "help": "Input trajectory set. Leave empty if no particle motion tracks have been estimated during tomogram frame alignment.",
+                    "paramClass": "PathParam",
+                    "condition": "use_direct_entries == True"
+                },
+                {
+                    "name": "fn_cont",
+                    "label": "Continue from here:",
+                    "pattern": "STAR Files (*_optimiser.star)",
+                    "help": "Select the *_optimiser.star file for the iteration from which you want to continue a previous run. Note that the Output rootname of the continued run and the rootname of the previous run cannot be the same. If they are the same, the program will automatically add a '_ctX' to the output rootname, with X being the iteration from which one continues the previous run.",
+                    "paramClass": "PathParam",
+                    "allowsEmpty": true
+                }
+            ]
+        },
+        {
+            "label": "Optimisation",
+            "params": [
+                {
+                    "name": "nr_iter",
+                    "label": "Number of VDAM mini-batches:",
+                    "default": 200,
+                    "paramClass": "IntParam",
+                    "help": "How many iterations (i.e. mini-batches) to perform with the VDAM algorithm?"
+                },
+                {
+                    "name": "tau_fudge",
+                    "label": "Regularisation parameter T:",
+                    "default": 4,
+                    "paramClass": "FloatParam",
+                    "help": "Bayes law strictly determines the relative weight between the contribution of the experimental data and the prior. However, in practice one may need to adjust this weight to put slightly more weight on the experimental data to allow optimal results. Values greater than 1 for this regularisation parameter (T in the JMB2011 paper) put more weight on the experimental data. Values around 2-4 have been observed to be useful for 3D initial model calculations."
+                },
+                {
+                    "name": "nr_classes",
+                    "label": "Number of classes:",
+                    "default": 1,
+                    "paramClass": "IntParam",
+                    "help": "The number of classes (K) for a multi-reference ab initio SGD refinement. These classes will be made in an unsupervised manner, starting from a single reference in the initial iterations of the SGD, and the references will become increasingly dissimilar during the inbetween iterations."
+                },
+                {
+                    "name": "sym_name",
+                    "label": "Symmetry:",
+                    "default": "C1",
+                    "paramClass": "StringParam",
+                    "help": "The initial model is always generated in C1 and then aligned to and symmetrized with the specified point group. If the automatic alignment fails, please manually rotate run_itNNN_class001.mrc (NNN is the number of iterations) so that it conforms the symmetry convention."
+                },
+                {
+                    "name": "do_run_C1",
+                    "label": "Run in C1 and apply symmetry later?",
+                    "default": true,
+                    "paramClass": "BooleanParam",
+                    "help": "If set to Yes, the gradient-driven optimisation is run in C1 and the symmetry orientation is searched and applied later. If set to No, the entire optimisation is run in the symmetry point group indicated above."
+                },
+                {
+                    "name": "particle_diameter",
+                    "label": "Mask diameter (A):",
+                    "default": 200,
+                    "paramClass": "FloatParam",
+                    "help": "The experimental images will be masked with a soft circular mask with this diameter. Make sure this radius is not set too small because that may mask away part of the signal! If set to a value larger than the image size no masking will be performed. The same diameter will also be used for a spherical mask of the reference structures if no user-provided mask is specified."
+                },
+                {
+                    "name": "do_solvent",
+                    "label": "Flatten and enforce non-negative solvent?",
+                    "default": true,
+                    "paramClass": "BooleanParam",
+                    "help": "If set to Yes, the job will apply a spherical mask and enforce all values in the reference to be non-negative."
+                },
+                {
+                    "name": "sigma_tilt",
+                    "label": "Prior width on tilt angle (deg):",
+                    "default": -1,
+                    "paramClass": "FloatParam",
+                    "help": "The width of the prior on the tilt angle: angular searches will be +/-3 times this value. Tilt priors will be defined when particles have been picked as filaments, on spheres or on manifolds. Setting this width to a negative value will lead to no prior being used on the tilt angle."
+                }
+            ]
+        },
+        {
+            "label": "CTF",
+            "params": [
+                {
+                    "name": "do_ctf_correction",
+                    "label": "Do CTF-correction?",
+                    "paramClass": "BooleanParam",
+                    "default": true,
+                    "help": "If set to Yes, CTFs will be corrected inside the MAP refinement. The resulting algorithm intrinsically implements the optimal linear, or Wiener filter. Note that CTF parameters for all images need to be given in the input STAR file. The command 'relion_refine --print_metadata_labels' will print a list of all possible metadata labels for that STAR file. See the RELION Wiki for more details.\n\n Also make sure that the correct pixel size (in Angstrom) is given above!"
+                },
+                {
+                    "name": "ctf_intact_first_peak",
+                    "label": "Ignore CTFs until first peak?",
+                    "paramClass": "BooleanParam",
+                    "default": false,
+                    "help": "If set to Yes, then CTF-amplitude correction will only be performed from the first peak of each CTF onward. This can be useful if the CTF model is inadequate at the lowest resolution. Still, in general using higher amplitude contrast on the CTFs (e.g. 10-20%) often yields better results. Therefore, this option is not generally recommended: try increasing amplitude contrast (in your input STAR file) first!"
+                }
+            ]
+        },
+        {
+            "label": "Compute",
+            "params": [
+                {
+                    "name": "do_parallel_discio",
+                    "label": "Use parallel disc I/O?",
+                    "paramClass": "BooleanParam",
+                    "default": true,
+                    "help": "If set to Yes, all MPI followers will read their own images from disc. Otherwise, only the leader will read images and send them through the network to the followers. Parallel file systems like gluster of fhgfs are good at parallel disc I/O. NFS may break with many followers reading in parallel. If your datasets contain particles with different box sizes, you have to say Yes."
+                },
+                {
+                    "name": "nr_pool",
+                    "label": "Number of pooled particles:",
+                    "paramClass": "IntParam",
+                    "default": 3,
+                    "help": "Particles are processed in individual batches by MPI followers. During each batch, a stack of particle images is only opened and closed once to improve disk access times. All particle images of a single batch are read into memory together. The size of these batches is at least one particle per thread used. The nr_pooled_particles parameter controls how many particles are read together for each thread. If it is set to 3 and one uses 8 threads, batches of 3x8=24 particles will be read together. This may improve performance on systems where disk access, and particularly metadata handling of disk access, is a problem. It has a modest cost of increased RAM usage."
+                },
+                {
+                    "name": "do_preread_images",
+                    "label": "Pre-read all particles into RAM?",
+                    "paramClass": "BooleanParam",
+                    "default": false,
+                    "help": "If set to Yes, all particle images will be read into computer memory, which will greatly speed up calculations on systems with slow disk access. However, one should of course be careful with the amount of RAM available. Because particles are read in float-precision, it will take ( N * box_size * box_size * 8 / (1024 * 1024 * 1024) ) Giga-bytes to read N particles into RAM. For 100 thousand 200x200 images, that becomes 15Gb, or 60 Gb for the same number of 400x400 particles. Remember that running a single MPI follower on each node that runs as many threads as available cores will have access to all available RAM. If parallel disc I/O is set to No, then only the leader reads all particles into RAM and sends those particles through the network to the MPI followers during the refinement iterations."
+                },
+                {
+                    "name": "scratch_dir",
+                    "label": "Copy particles to scratch directory:",
+                    "default": "",
+                    "paramClass": "StringParam",
+                    "allowsEmpty": true,
+                    "help": "If a directory is provided here, then the job will create a sub-directory in it called relion_volatile. If that relion_volatile directory already exists, it will be wiped. Then, the program will copy all input particles into a large stack inside the relion_volatile subdirectory. Provided this directory is on a fast local drive (e.g. an SSD drive), processing in all the iterations will be faster. If the job finishes correctly, the relion_volatile directory will be wiped. If the job crashes, you may want to remove it yourself."
+                },
+                {
+                    "name": "do_combine_thru_disc",
+                    "label": "Combine iterations through disc?",
+                    "paramClass": "BooleanParam",
+                    "default": false,
+                    "help": "If set to Yes, at the end of every iteration all MPI followers will write out a large file with their accumulated results. The MPI leader will read in all these files, combine them all, and write out a new file with the combined results. All MPI slaves will then read in the combined results. This reduces heavy load on the network, but increases load on the disc I/O. This will affect the time it takes between the progress-bar in the expectation step reaching its end (the mouse gets to the cheese) and the start of the ensuing maximisation step. It will depend on your system setup which is most efficient."
+                },
+                {
+                    "name": "use_gpu",
+                    "label": "Use GPU acceleration?",
+                    "paramClass": "BooleanParam",
+                    "default": false,
+                    "help": "If set to Yes, the job will try to use GPU acceleration."
+                },
+                {
+                    "name": "gpu_ids",
+                    "label": "Which GPUs to use:",
+                    "default": "",
+                    "paramClass": "StringParam",
+                    "allowsEmpty": true,
+                    "condition": "use_gpu == True",
+                    "help": "This argument is not necessary. If left empty, the job itself will try to allocate available GPU resources. You can override the default allocation by providing a list of which GPUs (0,1,2,3, etc) to use. MPI-processes are separated by ':', threads by ','. For example: '0,0:1,1:0,0:1,1'"
+                },
+                {
+                    "name": "nr_mpi",
+                    "label": "Number of MPI procs:",
+                    "default": 1,
+                    "paramClass": "IntParam",
+                    "help": "Number of MPI nodes to use in parallel. When set to 1, MPI will not be used. Gradient refinement is not supported together with MPI."
+                },
+                {
+                    "name": "nr_threads",
+                    "label": "Number of threads:",
+                    "default": 1,
+                    "paramClass": "IntParam",
+                    "help": "Number of shared-memory (POSIX) threads to use in parallel. When set to 1, no multi-threading will be used. The maximum can be set through the environment variable RELION_THREAD_MAX."
+                },
+                {
+                    "name": "other_args",
+                    "label": "Additional arguments:",
+                    "paramClass": "StringParam",
+                    "help": "In this box command-line arguments may be provided that are not generated by the GUI. This may be useful for testing developmental options and/or expert use of the program. To print a list of possible options, run the corresponding program from the command line without any arguments."
+                }
+            ]
+        }
+    ]
+}

@@ -96,6 +96,29 @@ export EMWRAP_CONFIG=$(cat <<EOF
             "label": "Relion Extract Subtomograms",
             "output": "Extract"
         },
+        "relion.reconstructparticletomo": {
+            "launcher": "$SCRIPTS/relion_job_launcher.sh",
+            "label": "Relion Tomo Reconstruct Particles",
+            "output": "Reconstruct"
+        },
+        "relion.initialmodel.tomo": {
+            "launcher": "$SCRIPTS/relion_job_launcher.sh",
+            "label": "Relion Tomo Initial Volume",
+            "output": "InitialModel",
+            "tomo": true
+        },
+        "relion.class3d.tomo": {
+            "launcher": "$SCRIPTS/relion_job_launcher.sh",
+            "label": "Relion Tomo 3D Classification",
+            "output": "Class3D",
+            "tomo": true
+        },
+        "relion.refine3d.tomo": {
+            "launcher": "$SCRIPTS/relion_job_launcher.sh",
+            "label": "Relion Tomo Refine",
+            "output": "Refine3D",
+            "tomo": true
+        },
         "emw-denoiset": {
             "launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.aretomo.denoiset",
             "label": "DenoisET",
