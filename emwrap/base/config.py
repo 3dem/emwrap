@@ -43,12 +43,6 @@ class ProcessingConfig:
             "label": "Warp Motion and CTF",
             "output": "WarpMctf"
         },
-        "emw-warp-aretomo": {
-            "launcher": "emwrap.warp.warp_aretomo",
-            "label": "Warp Aretomo",
-            "output": "WarpTsAlign",
-            "visible": False
-        },
         "emw-warp-ctfrec": {
             "launcher": "emwrap.warp.warp_ctfrec",
             "label": "Warp CTF and Reconstruction",
@@ -74,12 +68,7 @@ class ProcessingConfig:
             "label": "Warp Export Particles",
             "output": "WarpExportParticles"
         },
-        "emw-warp-etomo_patches": {"launcher": "emwrap.warp.warp_etomo_patches", "visible": False},
         "emw-pytme": {"launcher": "emwrap.pytme", "visible": False},        
-        "emw-relion-tomorecons": {"launcher": "emwrap.relion.tomorecons", "visible": False},
-        "emw-relion-tomoinitial": {"launcher": "emwrap.relion.tomoinitial", "visible": False},
-        "emw-relion-tomorefine": {"launcher": "emwrap.relion.tomorefine", "visible": False},
-        "emw-relion-tomoclassify": {"launcher": "emwrap.relion.tomoclassify", "visible": False},
         "emw-relion-symmetrize_volume": {"launcher": "emwrap.relion.symmetrize_volume"},
         "emw-relion-mask_create": {"launcher": "emwrap.relion.mask_create"},
         "emw-warp-mtools_create": {"launcher": "emwrap.warp.warp_mtools_create"},
