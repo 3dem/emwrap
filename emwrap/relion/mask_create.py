@@ -85,7 +85,7 @@ class RelionMaskCreate(RelionBasePipeline):
         self.log(f"Output mask: {Color.bold(out_mask_local)}")
         subargs['--o'] = out_mask_local
 
-        args = Args({'relion_mask_create': 1})
+        args = Args({'relion_mask_create': ''})
         args.update(subargs)
 
         self.batch_execute('relion_mask_create', batch, args)

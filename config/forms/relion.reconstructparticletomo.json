@@ -1,0 +1,119 @@
+{
+    "name": "relion.reconstructparticletomo",
+    "label": "Relion Tomo Reconstruct Particles",
+    "help": "RELION subtomogram particle reconstruction (Reconstruct): relion_tomo_reconstruct_particle builds high-resolution 3D maps directly from tilt series using an optimisation set or direct tomography inputs. Matches RelionJob::initialiseTomoReconPartJob.",
+    "sections": [
+        {
+            "label": "I/O",
+            "params": [
+                {
+                    "name": "in_optimisation",
+                    "label": "Input optimisation set:",
+                    "pattern": "Optimisation set STAR file (*optimisation_set.star)",
+                    "help": "Input optimisation set. This will be passed with a --i argument to relion_tomo_reconstruct_particle. If any individual components of the optimisation set are specified below, then they will override the components in this optimisation set.",
+                    "paramClass": "PathParam",
+                    "pointerClass": "TomoParticles",
+                    "condition": "use_direct_entries == False"
+                },
+                {
+                    "name": "use_direct_entries",
+                    "label": "OR: use direct entries?",
+                    "default": false,
+                    "paramClass": "BooleanParam",
+                    "help": "If set to Yes, the optimisation set will be ignored and the direct entries below will be used instead."
+                },
+                {
+                    "name": "in_particles",
+                    "label": "Input particle set:",
+                    "pattern": "Particle STAR file (*.star)",
+                    "help": "Input particle set.",
+                    "paramClass": "PathParam",
+                    "pointerClass": "TomoParticles",
+                    "condition": "use_direct_entries == True"
+                },
+                {
+                    "name": "in_tomograms",
+                    "label": "Input tomogram set:",
+                    "pattern": "Tomogram set STAR file (*.star)",
+                    "help": "Input tomogram set STAR file. This file gets generated during Tomogram Reconstruction, and updated during Tomogram Frame Alignment or Tomogram CTF Refinement.",
+                    "paramClass": "PathParam",
+                    "pointerClass": "Tomograms",
+                    "condition": "use_direct_entries == True"
+                },
+                {
+                    "name": "in_trajectories",
+                    "label": "Input trajectory set:",
+                    "pattern": "Trajectory set STAR file (*.star)",
+                    "help": "Input trajectory set. Leave empty if no particle motion tracks have been estimated during tomogram frame alignment.",
+                    "paramClass": "PathParam",
+                    "condition": "use_direct_entries == True"
+                }
+            ]
+        },
+        {
+            "label": "Average",
+            "params": [
+                {
+                    "name": "binning",
+                    "label": "Binning factor:",
+                    "default": 1,
+                    "paramClass": "IntParam",
+                    "help": "The tilt series images will be binned by this (real-valued) factor and then reconstructed in the specified box size above. Note that thereby the reconstructed region becomes larger when specifying binning factors larger than one."
+                },
+                {
+                    "name": "box_size",
+                    "label": "Box size (binned pix):",
+                    "default": 128,
+                    "paramClass": "IntParam",
+                    "help": "Box size of the reconstruction. Note that this is independent of the box size that has been used to refine the particle. This allows the user to construct a 3D map of arbitrary size to gain an overview of the structure surrounding the particle. A sufficiently large box size also allows more of the high-frequency signal to be captured that has been delocalised by the CTF."
+                },
+                {
+                    "name": "crop_size",
+                    "label": "Cropped box size (binned pix):",
+                    "default": -1,
+                    "paramClass": "IntParam",
+                    "help": "If set to a positive value, the program will output an additional set of maps that have been cropped to this size. This is useful if a map is desired that is smaller than the box size required to retrieve the CTF-delocalised signal."
+                },
+                {
+                    "name": "snr",
+                    "label": "Wiener SNR constant:",
+                    "default": 0,
+                    "paramClass": "FloatParam",
+                    "help": "If set to a positive value, apply a Wiener filter with this signal-to-noise ratio. If omitted, the reconstruction will use a heuristic to prevent divisions by excessively small numbers. Please note that using a low (even though realistic) SNR might wash out the higher frequencies, which could make the map unsuitable to be used for further refinement."
+                },
+                {
+                    "name": "sym_name",
+                    "label": "Symmetry:",
+                    "default": "C1",
+                    "paramClass": "StringParam",
+                    "help": "If the molecule is asymmetric, set Symmetry group to C1. Note their are multiple possibilities for icosahedral symmetry: \n * I1: No-Crowther 222 (standard in Heymann, Chagoyen & Belnap, JSB, 151 (2005) 196–207) \n * I2: Crowther 222 \n * I3: 52-setting (as used in SPIDER?)\n * I4: A different 52 setting \n The command 'relion_refine --sym D2 --print_symmetry_ops' prints a list of all symmetry operators for symmetry group D2. RELION uses XMIPP's libraries for symmetry operations. Therefore, look at the XMIPP Wiki for more details:  http://xmipp.cnb.csic.es/twiki/bin/view/Xmipp/WebHome?topic=Symmetry"
+                }
+            ]
+        },
+        {
+            "label": "Compute",
+            "params": [
+                {
+                    "name": "nr_mpi",
+                    "label": "Number of MPI procs:",
+                    "default": 1,
+                    "paramClass": "IntParam",
+                    "help": "Number of MPI nodes to use in parallel. When set to 1, MPI will not be used. The maximum can be set through the environment variable RELION_MPI_MAX."
+                },
+                {
+                    "name": "nr_threads",
+                    "label": "Number of threads:",
+                    "default": 1,
+                    "paramClass": "IntParam",
+                    "help": "Number of shared-memory (POSIX) threads to use in parallel. When set to 1, no multi-threading will be used. The maximum can be set through the environment variable RELION_THREAD_MAX."
+                },
+                {
+                    "name": "other_args",
+                    "label": "Additional arguments:",
+                    "paramClass": "StringParam",
+                    "help": "In this box command-line arguments may be provided that are not generated by the GUI. This may be useful for testing developmental options and/or expert use of the program. To print a list of possible options, run the corresponding program from the command line without any arguments."
+                }
+            ]
+        }
+    ]
+}
