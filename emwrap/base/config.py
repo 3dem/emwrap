@@ -43,6 +43,16 @@ class ProcessingConfig:
             "label": "Warp Motion and CTF",
             "output": "WarpMctf"
         },
+        "emw-warp-tsalign": {
+            "launcher": "emwrap.warp.warp_tsalign",
+            "label": "Warp Tilt Series Alignment",
+            "output": "WarpTsAlign"
+        },
+        "emw-missalignment": {
+            "launcher": "emwrap.missalignment.miss_alignment",
+            "label": "MissAlignment",
+            "output": "MissAlignment"
+        },
         "emw-warp-ctfrec": {
             "launcher": "emwrap.warp.warp_ctfrec",
             "label": "Warp CTF and Reconstruction",
