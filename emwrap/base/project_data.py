@@ -408,6 +408,45 @@ class ProjectData(FolderManager):
         extended['outputs'] = outputs
         return extended
 
+    def _optimisationSetLinkedFiles(self, optimisation_set_path):
+        """Return particles/tomograms STAR files referenced by an optimisation_set."""
+        linked = []
+        seen = set()
+        if not os.path.isfile(optimisation_set_path):
+            return linked
+        if not RelionStar.isTomoOptimisationSet(optimisation_set_path):
+            return linked
+        try:
+            row = RelionStar.readTomoOptimisationSet(optimisation_set_path)[0]
+            for col in ('rlnTomoParticlesFile', 'rlnTomoTomogramsFile'):
+                path = getattr(row, col, None)
+                if not path:
+                    continue
+                star_path = self.join(path)
+                if star_path in seen or not os.path.isfile(star_path):
+                    continue
+                seen.add(star_path)
+                linked.append(star_path)
+        except Exception:
+            pass
+        return linked
+
+    def _outputInfoFiles(self, *info_files):
+        """Return output files whose mtimes should invalidate cached info."""
+        files = []
+        seen = set()
+        for info_file in info_files:
+            if info_file in seen:
+                continue
+            seen.add(info_file)
+            files.append(info_file)
+            if info_file.endswith('optimisation_set.star'):
+                for linked in self._optimisationSetLinkedFiles(info_file):
+                    if linked not in seen:
+                        seen.add(linked)
+                        files.append(linked)
+        return files
+
     def _shouldRefreshOutputInfo(self, output_id, job):
         """Return True when a running job likely has newer output metadata."""
         if job is None or not self.isActiveJob(job):
@@ -417,9 +456,10 @@ class ProjectData(FolderManager):
         cached_ts = cached.get('ts', 0) if cached else 0
 
         output_path = self.join(output_id)
-        if os.path.exists(output_path):
-            if os.stat(output_path).st_mtime > cached_ts:
-                return True
+        for info_file in self._outputInfoFiles(output_path):
+            if os.path.exists(info_file):
+                if os.stat(info_file).st_mtime > cached_ts:
+                    return True
 
         run_out = self.join(job.id, 'run.out')
         if os.path.exists(run_out):
@@ -478,6 +518,7 @@ class ProjectData(FolderManager):
     def _get_info(self, info_dict, item_id, info_files, compute_info_func):
         info, computed = info_dict.get(item_id, None), False
         force = self._project.force
+        info_files = self._outputInfoFiles(*info_files)
 
         if info and not force:
             # Check if the info is up to date by checking the timestamp of the info files
@@ -520,12 +561,13 @@ class ProjectData(FolderManager):
             if job.hasInput(rel_value):
                 data = job.getInput(rel_value)
             else:
-                parent_job = self._wf.getJob(pid)                
-                if not parent_job.hasOutput(rel_value):
-                    data = parent_job.registerOutput(rel_value)
-                else:
-                    data = parent_job.getOutput(rel_value)
-                job.addInputs([data])
+                # If the parent job has been deleted, it might be None
+                if parent_job := self._wf.getJob(pid):
+                    if not parent_job.hasOutput(rel_value):
+                        data = parent_job.registerOutput(rel_value)
+                    else:
+                        data = parent_job.getOutput(rel_value)
+                    job.addInputs([data])
 
             _update_data(data, rel_value)
 
