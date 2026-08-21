@@ -26,11 +26,12 @@ from .relion_base import RelionBasePipeline
 
 class RelionNative(RelionBasePipeline):
     """ Class to run native Relion pipelines, using the relion_pipeliner. """
+    name = 'emw-relion-native'
 
     def prerun(self):
         # Let's get the job name from the job.star
         job_star = self.join('job.star')
-        job = StarFile.getTableFromFile('job', job_star)
+        job = StarFile.getTableFromFile('job', job_star)[0]
 
         batch = Batch(id=job.rlnJobTypeLabel, path=self.workingDir)
 
@@ -38,9 +39,12 @@ class RelionNative(RelionBasePipeline):
         if os.path.exists(self.join('.relion_lock')):
             shutil.rmtree(self.join('.relion_lock'))
 
-        self.batch_execute('relion_pipeliner', batch, '--version')
+        # Get Relion's version
+        self.batch_execute('version', batch, {'relion_pipeliner': '--version'})
+        
+        # Run the job via the relion_pipeliner
         jobId = Path.addslash(self.outputDir)
-        self.batch_execute('relion_pipeliner', batch, f'--RunJobs {jobId}')
+        self.batch_execute('pipeliner', batch, {'relion_pipeliner': '', '--RunJobs': jobId})
        
         self.updateBatchInfo(batch)
 
