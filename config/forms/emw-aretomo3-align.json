@@ -1,0 +1,134 @@
+{
+    "name": "emw-aretomo3-align",
+    "label": "AreTomo3 - Align tilt series",
+    "help": "Run AreTomo3 Cmd 1 on motion-corrected RELION5 tilt images. EMwrap builds one MRC stack and tilt-angle file per tilt series and writes aligned_tilt_series.star.",
+    "sections": [
+        {
+            "label": "Input",
+            "params": [
+                {
+                    "name": "input_tiltseries",
+                    "label": "Input tilt series",
+                    "paramClass": "PathParam",
+                    "pointerClass": "TiltSeries",
+                    "help": "RELION5 tilt_series.star; every per-series STAR must contain rlnMicrographName and nominal tilt angles."
+                },
+                {
+                    "name": "ctf_mode",
+                    "label": "CTF metadata",
+                    "paramClass": "EnumParam",
+                    "default": "estimate",
+                    "choices": {
+                        "estimate": "Estimate CTF with AreTomo3",
+                        "preserve": "Preserve existing CTF metadata"
+                    },
+                    "help": "Preserve disables AreTomo3 CTF correction and retains input CTF columns unchanged."
+                }
+            ]
+        },
+        {
+            "label": "Alignment and CTF",
+            "params": [
+                {
+                    "name": "aretomo3.AlignZ",
+                    "label": "Volume height for alignment",
+                    "paramClass": "IntParam",
+                    "default": 800,
+                    "help": "(--AlignZ) Internal volume height used during tilt series alignment. Should be ~1.5–2× expected sample thickness in voxels at the alignment binning. Does not affect final tomogram Z."
+                },
+                {
+                    "name": "aretomo3.TiltAxis",
+                    "label": "Tilt axis angle (deg)",
+                    "paramClass": "StringParam",
+                    "help": "(--TiltAxis) 1st value known tilt axis angle in degrees. 2nd value Controls refinement range around the provided angle. Only relevant when an angle is provided. 0 = refine ±10°, any positive value = refine ±3°, any negative value = use angle as-is with no refinement. Leave empty to let AreTomo3 search the full range automatically."
+                },
+                {
+                    "name": "aretomo3.AtPatch",
+                    "label": "Local alignment patches (X Y)",
+                    "paramClass": "StringParam",
+                    "help": "(--AtPatch) e.g. '4 4'. Improves alignment for samples with local thickness variation. Empty = global alignment only."
+                },
+                {
+                    "name": "aretomo3.DarkTol",
+                    "label": "Dark image tolerance",
+                    "paramClass": "FloatParam",
+                    "default": 0.7,
+                    "help": "(--DarkTol) Threshold (0–1) for discarding dark/empty tilt images. Higher = more aggressive. Set to 0 to disable (recommended when debugging)."
+                },
+                {
+                    "name": "aretomo3.AmpContrast",
+                    "label": "Amplitude contrast",
+                    "paramClass": "FloatParam",
+                    "default": 0.07,
+                    "help": "(--AmpContrast) Typically 0.07–0.10 for cryo-ET. Affects CTF fit quality."
+                },
+                {
+                    "name": "aretomo3.CorrCTF",
+                    "label": "Enable local CTF correction",
+                    "paramClass": "BooleanParam",
+                    "default": true,
+                    "help": "(--CorrCTF) Apply local CTF correction on the raw tilt series before reconstruction. Leave on by default; disable only if data is pre-corrected."
+                }
+            ]
+        },
+        {
+            "label": "Output",
+            "params": [
+                {
+                    "name": "aretomo3.OutImod",
+                    "label": "IMOD output format",
+                    "paramClass": "EnumParam",
+                    "default": "1",
+                    "choices": {
+                        "0": "None",
+                        "1": "Relion",
+                        "2": "WARP",
+                        "3": "Aligned tilt series"
+                    },
+                    "help": "(--OutImod) Generates IMOD-compatible files needed for downstream subtomogram averaging, saved in a subfolder named after the output MRC file."
+                },
+                {
+                    "name": "aretomo3.SplitSum",
+                    "label": "Generate odd/even sums",
+                    "paramClass": "BooleanParam",
+                    "default": true,
+                    "help": "(--SplitSum) When enabled, 3 tilt series and 3 tomograms are generated. Odd/even outputs are appended _ODD and _EVN."
+                },
+                {
+                    "name": "aretomo3.ExtraArgs",
+                    "label": "AreTomo3 extra arguments",
+                    "paramClass": "StringParam",
+                    "help": "Extra arguments to pass to AreTomo3"
+                }
+            ]
+        },
+        {
+            "label": "Compute",
+            "params": [
+                {
+                    "name": "gpus",
+                    "label": "GPUs",
+                    "help": "If a single number (N), it represents the total number of GPUs (0..N-1). If multiple values, these are specific GPU IDs."
+                },
+                {
+                    "name": "cpus",
+                    "label": "CPUs",
+                    "help": "If empty, the program will use the number of GPUs * 10 CPUs."
+                },
+                {
+                    "name": "register_output_only",
+                    "label": "Register output only",
+                    "paramClass": "BooleanParam",
+                    "default": false,
+                    "help": "If enabled, the job will only register the output files, but not run the program."
+                },
+                {
+                    "name": "launcher_aretomo3",
+                    "label": "AreTomo3 launcher",
+                    "paramClass": "StringParam",
+                    "help": "Launcher to use for AreTomo3"
+                }
+            ]
+        }
+    ]
+}

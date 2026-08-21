@@ -89,7 +89,15 @@ class AreTomo3:
         if not os.path.exists(fileName):
             raise Exception(f"Missing expected output: {fileName}")
     
-    def process_batch(self, batch, **kwargs):
+    def process_batch(self, batch, cmd=0, input_prefix=None, input_suffix=None,
+                      ts_name=None, expect_tilt_series=True,
+                      expect_split_tilt_series=True, expect_ctf_output=True,
+                      **kwargs):
+        """Run AreTomo3 on assets staged in *batch*.
+
+        Cmd 0 keeps the historical MDOC/movie convention.  Cmd 1 and Cmd 2
+        use a pre-built MRC stack and its basename as the input prefix.
+        """
         gpu = kwargs['gpu']
 
         batch.mkdir('output')
@@ -97,18 +105,20 @@ class AreTomo3:
         # batch.mkdir('log')
 
         items = batch['items']
-        mdoc = batch['tsMdoc']
-        mdocBase = os.path.basename(mdoc)
-        tsName = Path.removeExt(mdocBase) # 'Position_46' from 'Position_46.mdoc'
+        mdoc = batch.get('tsMdoc', '')
+        mdocBase = os.path.basename(mdoc) if mdoc else ''
+        tsName = ts_name or (Path.removeExt(mdocBase) if mdocBase else batch['tsName'])
+        input_prefix = input_prefix or f'./{Path.removeExt(mdocBase)}'
+        input_suffix = input_suffix or '.mdoc'
 
         kwargs = {
-            '-InPrefix': f'./{Path.removeExt(mdocBase)}',
-            '-InSuffix': '.mdoc',
+            '-InPrefix': input_prefix,
+            '-InSuffix': input_suffix,
             '-OutDir': './output',
             '-LogDir': './log/',
             '-TmpDir': './tmp/',
             '-Serial': 60,
-            '-Cmd': 0,
+            '-Cmd': cmd,
             '-Gpu': gpu,
         }
         kwargs.update(self.args)
@@ -129,22 +139,22 @@ class AreTomo3:
 
         result = {'rlnTomoName': tsName}
         try:
-            # Tilt series MRC is always produced, regardless of
-            # whether tomogram reconstruction is enabled.
+            # Cmd 2 may only write volumes. Cmd 0/1 always write a tilt stack.
             outTiltSeriesMrc = batch.join('output', f'{tsName}.mrc')
-            self.__expect(outTiltSeriesMrc)
-            batch['outputs'].append(outTiltSeriesMrc)
-            result['rlnTiltSeriesAligned'] = outTiltSeriesMrc
+            if expect_tilt_series:
+                self.__expect(outTiltSeriesMrc)
+                batch['outputs'].append(outTiltSeriesMrc)
+                result['rlnTiltSeriesAligned'] = outTiltSeriesMrc
 
             # Mapping file Mic index vs Tilt Angle
             outTiltSeriesMapping = batch.join('output', f'{tsName}_TLT.txt')
-            self.__expect(outTiltSeriesMapping)
-            result['at3MappingFile'] = outTiltSeriesMapping
+            if os.path.exists(outTiltSeriesMapping):
+                result['at3MappingFile'] = outTiltSeriesMapping
 
             # Alignment file (.aln) is always produced alongside it.
             alnFile = batch.join('output', f'{tsName}.aln')
-            self.__expect(alnFile)
-            result['at3TomoAlignmentFile'] = alnFile
+            if os.path.exists(alnFile):
+                result['at3TomoAlignmentFile'] = alnFile
 
             suffix = ''
             if self.reconstruct:
@@ -165,7 +175,7 @@ class AreTomo3:
                         batch['outputs'].append(thickCsv)
                         result['at3ThicknessCsv'] = thickCsv
 
-            if self.ctf_estimation:
+            if self.ctf_estimation and expect_ctf_output:
                 ctfFileTxt = batch.join('output', f'{tsName}_CTF.txt')
                 self.__expect(ctfFileTxt)
                 batch['outputs'].append(ctfFileTxt)
@@ -184,14 +194,15 @@ class AreTomo3:
                     self.__expect(splitName)
                     batch['outputs'].append(splitName)
                     result[key] = splitName
-                # Tilt series
-                suffix = ''
-                for tag, key in (('_ODD', 'rlnTiltSeriesAlignedOdd'),
-                                  ('_EVN', 'rlnTiltSeriesAlignedEvn')):
-                    splitName = batch.join('output', f'{tsName}{tag}{suffix}.mrc')
-                    self.__expect(splitName)
-                    batch['outputs'].append(splitName)
-                    result[key] = splitName
+                if expect_split_tilt_series:
+                    # Tilt series
+                    suffix = ''
+                    for tag, key in (('_ODD', 'rlnTiltSeriesAlignedOdd'),
+                                     ('_EVN', 'rlnTiltSeriesAlignedEvn')):
+                        splitName = batch.join('output', f'{tsName}{tag}{suffix}.mrc')
+                        self.__expect(splitName)
+                        batch['outputs'].append(splitName)
+                        result[key] = splitName
 
             imodFolder = batch.join('output', f'{tsName}_Imod')
             if os.path.isdir(imodFolder):
@@ -208,7 +219,8 @@ class AreTomo3:
                 batch['outputs'].append(timestampCsv)
                 result['at3TimeStampCsv'] = timestampCsv
             
-            result['rlnTomoMdocFile'] = mdoc
+            if mdoc:
+                result['rlnTomoMdocFile'] = mdoc
             total += 1
 
         except Exception as e:

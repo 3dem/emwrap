@@ -1,0 +1,151 @@
+{
+    "name": "emw-aretomo3-reconstruct",
+    "label": "AreTomo3 - Reconstruct tomograms",
+    "help": "Run AreTomo3 Cmd 2 from RELION5 aligned_tilt_series.star. For generic RELION inputs EMwrap synthesizes a rigid AreTomo3 ALN file; local alignment, X tilt, and in-plane rotation cannot be represented and are reported as warnings.",
+    "sections": [
+        {
+            "label": "Input",
+            "params": [
+                {
+                    "name": "input_tiltseries",
+                    "label": "Input aligned tilt series",
+                    "paramClass": "PathParam",
+                    "pointerClass": "TiltSeriesAligned",
+                    "help": "RELION5 aligned_tilt_series.star."
+                }
+            ]
+        },
+        {
+            "label": "Reconstruction",
+            "params": [
+                {
+                    "name": "aretomo3.VolZ",
+                    "label": "Volume Z height",
+                    "paramClass": "IntParam",
+                    "default": -1,
+                    "help": "(--VolZ) Must be > 0 to produce a tomogram. 0 = aligned tilt series only (no reconstruction). -1 = auto-estimate thickness."
+                },
+                {
+                    "name": "aretomo3.ExtZ",
+                    "label": "Extra volume Z padding",
+                    "paramClass": "IntParam",
+                    "default": 0,
+                    "help": "(--ExtZ) Extra space added to the estimated sample thickness for final reconstruction. Only relevant when Volume Z height = -1."
+                },
+                {
+                    "name": "aretomo3.AtBin",
+                    "label": "Tomogram binning",
+                    "paramClass": "StringParam",
+                    "default": "1 0",
+                    "help": "(--AtBin) 1st value primary tomogram binning relative to motion-corrected tilt series. 2nd value optional for second resolution tomogram. Leave empty to disable."
+                },
+                {
+                    "name": "aretomo3.CorrCTF",
+                    "label": "Enable CTF correction",
+                    "paramClass": "BooleanParam",
+                    "default": false,
+                    "help": "(--CorrCTF) Apply local CTF correction on the raw tilt series before reconstruction. Requires per-tilt Relion CTF values; disabled by default for this Cmd 2 job."
+                },
+                {
+                    "name": "aretomo3.Wbp",
+                    "label": "Use weighted back-projection",
+                    "paramClass": "BooleanParam",
+                    "default": true,
+                    "help": "(--Wbp) Recommended over SART for most cryo-ET. When disabled, SART is used instead (see below)."
+                },
+                {
+                    "name": "aretomo3.Sart",
+                    "label": "SART",
+                    "paramClass": "StringParam",
+                    "default": "15 5",
+                    "help": "(--Sart) 1st value number of SART iterations. 2nd value number of projections per update."
+                },
+                {
+                    "name": "aretomo3.TiltCor",
+                    "label": "Tilt angle correction",
+                    "paramClass": "EnumParam",
+                    "default": "1",
+                    "choices": {
+                        "-1": "Skip",
+                        "0": "Measure only",
+                        "1": "Measure and apply"
+                    },
+                    "help": "(--TiltCor) Controls whether the tilt angle offset is measured, and whether that correction is carried through to the reconstructed volume. It is not recommended to enable this option (-TiltCor 1) when subtomogram average is part of your workflow since this option rotates the volume around its tilt axis. The z coordinates of particles picked from the rotated tomogram would be different from the coordinates in the sample."
+                },
+                {
+                    "name": "aretomo3.ReconRange",
+                    "label": "Reconstruction tilt range",
+                    "paramClass": "StringParam",
+                    "default": "-60 60",
+                    "help": "(--ReconRange) 1st value minimum tilt angle (deg) included in reconstruction. 2nd value maximum tilt angle (deg) included in reconstruction."
+                }
+            ]
+        },
+        {
+            "label": "Output",
+            "params": [
+                {
+                    "name": "aretomo3.FlipVol",
+                    "label": "Save volume as XYZ",
+                    "paramClass": "BooleanParam",
+                    "default": true,
+                    "help": "(--FlipVol) Save the tomogram in XYZ order instead of default XZY. Enable for compatibility with IMOD, Relion, and WARP."
+                },
+                {
+                    "name": "aretomo3.OutImod",
+                    "label": "IMOD output format",
+                    "paramClass": "EnumParam",
+                    "default": "1",
+                    "choices": {
+                        "0": "None",
+                        "1": "Relion",
+                        "2": "WARP",
+                        "3": "Aligned tilt series"
+                    },
+                    "help": "(--OutImod) Generates IMOD-compatible files needed for downstream subtomogram averaging, saved in a subfolder named after the output MRC file."
+                },
+                {
+                    "name": "aretomo3.SplitSum",
+                    "label": "Generate odd/even sums",
+                    "paramClass": "BooleanParam",
+                    "default": true,
+                    "help": "(--SplitSum) When enabled, 3 tilt series and 3 tomograms are generated. Odd/even outputs are appended _ODD and _EVN."
+                },
+                {
+                    "name": "aretomo3.ExtraArgs",
+                    "label": "AreTomo3 extra arguments",
+                    "paramClass": "StringParam",
+                    "help": "Extra arguments to pass to AreTomo3"
+                }
+            ]
+        },
+        {
+            "label": "Compute",
+            "params": [
+                {
+                    "name": "gpus",
+                    "label": "GPUs",
+                    "help": "If a single number (N), it represents the total number of GPUs (0..N-1). If multiple values, these are specific GPU IDs."
+                },
+                {
+                    "name": "cpus",
+                    "label": "CPUs",
+                    "help": "If empty, the program will use the number of GPUs * 10 CPUs."
+                },
+                {
+                    "name": "register_output_only",
+                    "label": "Register output only",
+                    "paramClass": "BooleanParam",
+                    "default": false,
+                    "help": "If enabled, the job will only register the output files, but not run the program."
+                },
+                {
+                    "name": "launcher_aretomo3",
+                    "label": "AreTomo3 launcher",
+                    "paramClass": "StringParam",
+                    "help": "Launcher to use for AreTomo3"
+                }
+            ]
+        }
+    ]
+}

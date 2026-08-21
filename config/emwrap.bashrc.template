@@ -69,6 +69,16 @@ export EMWRAP_CONFIG=$(cat <<EOF
             "label": "Aretomo3",
             "output": "Aretomo3"
         },
+        "emw-aretomo3-align": {
+            "launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.aretomo.aretomo3_align",
+            "label": "Aretomo3 Align",
+            "output": "Aretomo3Align"
+        },
+        "emw-aretomo3-reconstruct": {
+            "launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.aretomo.aretomo3_reconstruct",
+            "label": "Aretomo3 Reconstruct",
+            "output": "Aretomo3Reconstruct"
+        },
         "emw-imod-reconstruct": {
             "launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.imod.imod_reconstruct",
             "label": "IMOD Reconstruct",
