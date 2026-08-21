@@ -62,7 +62,8 @@ export EMWRAP_CONFIG=$(cat <<EOF
         "BATCHTOMO": {"launcher": "$SCRIPTS/batchruntomo.sh"},
         "CTFFIND": {"launcher": "$SCRIPTS/ctffind5.sh", "version": 5},
         "CRYOCARE": {"launcher": "$SCRIPTS/cryocare_launcher.sh"},
-        "DENOISET": {"launcher": "$SCRIPTS/denoiset_launcher.sh"}
+        "DENOISET": {"launcher": "$SCRIPTS/denoiset_launcher.sh"},
+        "MISSALIGNMENT": {"launcher": "$SCRIPTS/missalignment.sh"}
     },
     "testdata": {
         "WarpApofTutorial": {

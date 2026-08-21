@@ -562,6 +562,7 @@ class ProjectData(FolderManager):
                 data = job.getInput(rel_value)
             else:
                 # If the parent job has been deleted, it might be None
+                data = None
                 if parent_job := self._wf.getJob(pid):
                     if not parent_job.hasOutput(rel_value):
                         data = parent_job.registerOutput(rel_value)
@@ -569,7 +570,8 @@ class ProjectData(FolderManager):
                         data = parent_job.getOutput(rel_value)
                     job.addInputs([data])
 
-            _update_data(data, rel_value)
+            if data:
+                _update_data(data, rel_value)
 
         outputs = jobInfo.get('outputs', [])
         output_ids = set(outputs)
