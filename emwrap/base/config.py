@@ -26,6 +26,115 @@ from emtools.utils import Pretty, Color
 class ProcessingConfig:
     _config = None
     _forms_dict = {}
+    # AVAILABLE JOBS in EMWRAP
+    _jobs = {
+        "emw-import-ts": {
+            "launcher": "emwrap.base.import_ts",
+            "label": "EMwrap Import TS",
+            "output": "EMwrap"
+        },
+        "emw-subset-ts": {
+            "launcher": "emwrap.base.subset_ts",
+            "label": "EMwrap Subset TS",
+            "output": "EMwrap"
+        },
+        "emw-warp-mctf": {
+            "launcher": "emwrap.warp.warp_mctf",
+            "label": "Warp Motion and CTF",
+            "output": "WarpMctf"
+        },
+        "emw-warp-aretomo": {
+            "launcher": "emwrap.warp.warp_aretomo",
+            "label": "Warp Aretomo",
+            "output": "WarpTsAlign",
+            "visible": False
+        },
+        "emw-warp-ctfrec": {
+            "launcher": "emwrap.warp.warp_ctfrec",
+            "label": "Warp CTF and Reconstruction",
+            "output": "WarpCtfRec"
+        },
+        "emw-warp-otf": {
+            "launcher": "emwrap.warp.warp_otf",
+            "label": "Warp OTF Preprocessing",
+            "output": "WarpOtf"
+        }, 
+        "emw-pytom-create_template": {
+            "launcher": "emwrap.pytom.pytom_create_template",
+            "label": "PyTom Create Template",
+            "output": "PyTom"
+        },
+        "emw-pytom": {
+            "launcher": "emwrap.pytom.pytom_pipeline",
+            "label": "PyTom Template Matching",
+            "output": "PyTom"
+        },
+        "emw-warp-export_particles": {
+            "launcher": "emwrap.warp.warp_export_particles",
+            "label": "Warp Export Particles",
+            "output": "WarpExportParticles"
+        },
+        "emw-warp-etomo_patches": {"launcher": "emwrap.warp.warp_etomo_patches", "visible": False},
+        "emw-pytme": {"launcher": "emwrap.pytme", "visible": False},        
+        "emw-relion-tomorecons": {"launcher": "emwrap.relion.tomorecons", "visible": False},
+        "emw-relion-tomoinitial": {"launcher": "emwrap.relion.tomoinitial", "visible": False},
+        "emw-relion-tomorefine": {"launcher": "emwrap.relion.tomorefine", "visible": False},
+        "emw-relion-tomoclassify": {"launcher": "emwrap.relion.tomoclassify", "visible": False},
+        "emw-relion-symmetrize_volume": {"launcher": "emwrap.relion.symmetrize_volume"},
+        "emw-relion-mask_create": {"launcher": "emwrap.relion.mask_create"},
+        "emw-warp-mtools_create": {"launcher": "emwrap.warp.warp_mtools_create"},
+        "emw-warp-mcore": {"launcher": "emwrap.warp.warp_mcore"},
+        "emw-warp-estimate_weights": {"launcher": "emwrap.warp.warp_estimate_weights"},
+        "emw-warp-mtools_resample": {"launcher": "emwrap.warp.warp_mtools_resample"},
+        "relion.reconstructtomograms": {
+            "launcher": "emwrap.relion.native",
+            "label": "Relion Reconstruct Tomograms",
+            "output": "Tomograms"
+        },
+        "relion.pseudosubtomo": {
+            "launcher": "emwrap.relion.native",
+            "label": "Relion Extract Subtomograms",
+            "output": "Extract",
+            "tomo": True
+        },
+        "relion.reconstructparticletomo": {
+            "launcher": "emwrap.relion.native",
+            "label": "Relion Tomo Reconstruct Particles",
+            "output": "Reconstruct"
+        },
+        "relion.initialmodel.tomo": {
+            "launcher": "emwrap.relion.native",
+            "label": "Relion Tomo Initial Volume",
+            "output": "InitialModel",
+            "tomo": True
+        },
+        "relion.class3d.tomo": {
+            "launcher": "emwrap.relion.native",
+            "label": "Relion Tomo 3D Classification",
+            "output": "Class3D",
+            "tomo": True
+        },
+        "relion.refine3d.tomo": {
+            "launcher": "emwrap.relion.native",
+            "label": "Relion Tomo Refine",
+            "output": "Refine3D",
+            "tomo": True
+        },
+        "emw-denoiset": {
+            "launcher": "emwrap.aretomo.denoiset",
+            "label": "DenoisET",
+            "output": "DenoisET"
+        }
+    }
+
+    # PACKAGES to group the jobs depending on their prefixes
+    _packages = [
+        { "name": "emwrap"},
+        { "name": "warp", "prefixes": ["emw-warp"] },
+        { "name": "relion", "prefixes": ["emw-relion", "relion."] },
+        { "name": "pytom", "prefixes": ["emw-pytom"] },
+        { "name": "aretomo", "prefixes": ["emw-aretomo", "emw-denoiset"] }
+    ]
 
     @classmethod
     def _get_config(cls, key='', default=None):
@@ -36,7 +145,7 @@ class ProcessingConfig:
 
     @classmethod
     def get_jobs(cls):
-        return cls._get_config('jobs')
+        return cls._jobs
 
     @classmethod
     def get_programs(cls):
@@ -58,7 +167,7 @@ class ProcessingConfig:
 
     @classmethod
     def get_packages(cls):
-        return cls._get_config().get('packages')
+        return cls._packages
 
     @classmethod
     def get_queues(cls):
@@ -159,8 +268,33 @@ class ProcessingConfig:
         return workflowFile
 
     @classmethod
+    def resolve_launcher(cls, launcher):
+        """Expand job launcher specs that reference emwrap modules.
+
+        If the launcher value starts with 'emwrap.' it is treated as a Python
+        module path and prefixed with the EMWRAP program launcher from config.
+        """
+        if not launcher or not launcher.startswith('emwrap.'):
+            return launcher
+
+        emwrap_launcher = cls.get_programs().get('EMWRAP', {}).get('launcher', '')
+        if not emwrap_launcher:
+            raise Exception(
+                "EMWRAP launcher not found in EMWRAP_CONFIG['programs'] "
+                f"but required for job launcher: {launcher}")
+
+        return f"{emwrap_launcher} {launcher}"
+
+    @classmethod
     def get_job_launcher(cls, jobtype):
-        return cls.get_job_conf(jobtype).get('launcher', None)
+        job_conf = cls.get_job_conf(jobtype)
+        if not job_conf:
+            return None
+
+        launcher = job_conf.get('launcher', None)
+        if launcher:
+            return cls.resolve_launcher(launcher)
+        return None
 
     @classmethod
     def print_config(cls):
@@ -173,7 +307,8 @@ class ProcessingConfig:
 
     @classmethod
     def get_launcher_info(cls, item):
-        launcher = item.get('launcher', '')
+        raw_launcher = item.get('launcher', '')
+        launcher = raw_launcher
 
         if not launcher:
             return {
@@ -186,6 +321,21 @@ class ProcessingConfig:
                 'status': 'error',
                 'status_label': 'Missing'
             }
+
+        if launcher.startswith('emwrap.'):
+            try:
+                launcher = cls.resolve_launcher(launcher)
+            except Exception as exc:
+                return {
+                    'launcher': raw_launcher,
+                    'program': '',
+                    'arguments': '',
+                    'display_program': '',
+                    'display': str(exc),
+                    'exists': False,
+                    'status': 'error',
+                    'status_label': 'Unresolved'
+                }
 
         parts = launcher.split()
         program = parts[0]
@@ -404,11 +554,11 @@ class ProcessingConfig:
 
         g = p.add_mutually_exclusive_group()
 
-        g.add_argument('--print', '-p', action='store_true',
+        g.add_argument('--print', '-p', action='store_True',
                        help="Print the existing configuration.")
         g.add_argument('--form', '-f', metavar='JOB_TYPE',
                        help="Print the corresponding form for this job type.")
-        g.add_argument('--check', '-c', action='store_true',
+        g.add_argument('--check', '-c', action='store_True',
                        help="Check the current configuration is valid.")
 
         args = p.parse_args()
