@@ -598,10 +598,8 @@ class ProjectData(FolderManager):
             or cached.get('inputs') != jobInfo.get('inputs')
         )
         if cached.get('status') != status or info_changed:
-            info = dict(cached) if cached else dict(jobInfo)
+            info = dict(jobInfo)
             info['status'] = status
-            info['inputs'] = jobInfo.get('inputs', info.get('inputs', []))
-            info['outputs'] = jobInfo.get('outputs', info.get('outputs', []))
             self._set_info(self._jobs, job.id, info)
             return True
         return False
@@ -611,7 +609,7 @@ class ProjectData(FolderManager):
         for job in self._wf.jobs():
             info, computed = self._getJobInfo(job.id)
             active = self.isActiveJob(job)
-            if active:
+            if active or not info.get('outputs'):
                 extended = self._extendJobInfoOutputs(job.id, info, job=job)
                 if extended['outputs'] != info.get('outputs'):
                     info = extended
@@ -631,7 +629,7 @@ class ProjectData(FolderManager):
         # is updated, which would otherwise recompute and prune inactive jobs while
         # another job is running and the GUI auto-refreshes.
         jobFiles = [self.join(job_id, fn) for fn in [
-            'job.star', 'RELION_OUTPUT_NODES.star',
+            'job.star', 'RELION_OUTPUT_NODES.star', 'info.json',
             *self.JOB_STATUS_FILES.keys(),
         ]]
         return self._get_info(self._jobs, job_id, jobFiles, self._computeJobInfo)

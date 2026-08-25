@@ -204,13 +204,20 @@ class ProjectManager(FolderManager):
         # Clear jobs inputs and add new ones
         job.clearInputs()
         for k, v in params.items():
-            for job2 in self._wf.jobs():
-                if self._param_references_job(v, job2.id):
-                    # In this case the saved job is taking an input from this job
-                    data = job2.getOutput(v)
-                    if data is None:
-                        data = job2.registerOutput(v, datatype="File")
-                    job.addInputs([data])
+            values = v if isinstance(v, list) else [v]
+            for item in values:
+                if not isinstance(item, str):
+                    continue
+                for job2 in self._wf.jobs():
+                    if self._param_references_job(item, job2.id):
+                        data = job2.getOutput(item)
+                        if data is None:
+                            data = job2.registerOutput(item, datatype="File")
+                        elif 'datatype' not in data:
+                            info = self._data.getOutputInfo(item)
+                            data['datatype'] = info['type']
+                            data['info'] = info.get('info', '')
+                        job.addInputs([data])
 
     def saveJob(self, jobTypeOrId, params, update=True):
         """ Save a job. If jobId = None, a new job is created
@@ -839,7 +846,11 @@ class ProjectManager(FolderManager):
         job_conf = ProcessingConfig.get_job_conf(job_type)
         job_form = ProcessingConfig.get_job_form(job_type)
         values = JobForm.get_values(job_form)
-        values.update(params)
+        params_to_write = params
+        if job_form:
+            params_to_write = JobForm.encode_table_params(job_form, params)
+            params_to_write = JobForm.encode_multi_pointer_params(job_form, params_to_write)
+        values.update(params_to_write)
         is_continue = 1 if os.path.exists(job_star) else 0
         is_tomo = 1 if job_conf.get('tomo', False) else 0
 
@@ -1049,6 +1060,10 @@ class ProjectManager(FolderManager):
         job_params = RelionStar.read_jobstar(self.join(job.id, 'job.star'))
         if extraParams:
             job_params.update(extraParams)
+        job_form = ProcessingConfig.get_job_form(job['jobtype'])
+        if job_form:
+            job_params = JobForm.decode_table_params(job_form, job_params)
+            job_params = JobForm.decode_multi_pointer_params(job_form, job_params)
         return job_params
 
     def _createJob(self, jobType, params, update=True):

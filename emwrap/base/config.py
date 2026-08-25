@@ -38,6 +38,11 @@ class ProcessingConfig:
             "label": "EMwrap Subset TS",
             "output": "EMwrap"
         },
+        "emw-merge-sets": {
+            "launcher": "emwrap.base.merge_sets",
+            "label": "EMwrap Merge Sets",
+            "output": "EMwrap"
+        },
         "emw-warp-mctf": {
             "launcher": "emwrap.warp.warp_mctf",
             "label": "Warp Motion and CTF",
