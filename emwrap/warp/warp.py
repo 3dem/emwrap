@@ -356,6 +356,9 @@ class WarpBasePipeline(ProcessingPipeline):
             os.path.join(imodDir, f'{tsName}_st.xf'),
             os.path.join(imodDir, f'{tsName}_st.tlt')
         )
+
+    def alignedTS(self, tsName):
+        return self.join(self.TS, 'tiltstack', tsName, f"{tsName}_aligned.mrc")
     
     def parseAlignmentParams(self, tsDict, ps):
         """ Parse AreTomo alignment parameters from .st.aln into Relion convention. """
@@ -392,7 +395,7 @@ class WarpBasePipeline(ProcessingPipeline):
         tsName = tsDict['rlnTomoName']
         inputTsStar = tsDict['rlnTomoTiltSeriesStarFile']
         tsStarFile = self.join('tilt_series', tsName + '.star')
-        tsAligned = self.join(self.TS, 'tiltstack', tsName, f"{tsName}_aligned.mrc")
+        tsAligned = self.alignedTS(tsName)
 
         ok = os.path.exists(tsAligned)
         dims = None
