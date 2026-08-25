@@ -22,58 +22,88 @@ from emtools.jobs import Batch, Args
 from .warp import WarpBasePipeline
 
 
-
 class WarpMtoolsCreate(WarpBasePipeline):
     """ Script to run MTools create_population, create_source, and create_species.
     Uses form emw-warp-mtools_create.json and follows the command structure
     from sample_scripts/MCore_alliters.txt.
     """
     name = 'emw-warp-mtools_create'
+    SOURCES = 'warp_sources'
+    SOURCE_IMPORT_KEYS = ['fs', 'fss', 'ts', 'tss', 'tm']
+
+    def _get_sources(self):
+        """Return validated source rows from the sources TableParam."""
+        sources = self._args.get('sources', [])
+        if isinstance(sources, str):
+            from emwrap.base.job_form import _parse_table_param_value
+            sources = _parse_table_param_value(sources)
+
+        if not sources:
+            raise Exception("At least one source is required.")
+
+        result = []
+        seen_names = set()
+        for row in sources:
+            if not isinstance(row, dict):
+                continue
+            name = str(row.get('name', '')).strip()
+            warp_folder = str(row.get('warp_folder', '')).strip()
+            if not name and not warp_folder:
+                continue
+            if not name:
+                raise Exception("Source name is required for each source.")
+            if ' ' in name:
+                raise Exception(f"Source name must not contain spaces: '{name}'")
+            if name in seen_names:
+                raise Exception(f"Duplicate source name: '{name}'")
+            if not warp_folder:
+                raise Exception(f"Previous WARP run is required for source '{name}'.")
+            seen_names.add(name)
+            result.append({'name': name, 'warp_folder': warp_folder})
+
+        if not result:
+            raise Exception("At least one source is required.")
+        return result
 
     def runBatch(self, batch, **kwargs):
-        new_population = self._args.get('new_population', True)        
         batch.mkdir(self.M)
-
-        if new_population:
-            pop_name = self._args.get('create_population.name', 'population')
-            # MTools create_population --directory m --name <name>
-            args = Args({
-                'MTools': 'create_population',
-                '--directory': self.M,
-                '--name': pop_name
-            })
-            self.batch_execute('create_population', batch, args, call=True)
-            pop_path = f"{self.M}/{pop_name}.population"
-            warpFolder = self._args['warp_folder']
-        else:
-            raise Exception("Not implemented: to import an existing population.")
-            input_population = self._args.get('input_population', '')
-            warpFolder = None  # FIXME: Get warp folder from input population
-            pop_name = None # FIXME: Get name from input population
-            if not input_population:
-                raise Exception("input_population is required when not creating a new population.")
-            pop_path = input_population
+        pop_name = self._args.get('create_population.name', 'population')
+        args = Args({
+            'MTools': 'create_population',
+            '--directory': self.M,
+            '--name': pop_name
+        })
+        self.batch_execute('create_population', batch, args, call=True)
+        pop_path = f"{self.M}/{pop_name}.population"
 
         if not self.exists(pop_path):
             raise Exception(f"create_population: Error, population file was not generated: {pop_path}")
 
-        self.log(f"Importing import folder from previous WARP run: {warpFolder}")
-        self._importInputs(warpFolder, keys=['fs', 'fss', 'ts', 'tss', 'tm'])
+        sources = self._get_sources()
+        self.mkdir(self.SOURCES)
 
         pop_arg = '--population'
-
-        # MTools create_source ${POPULATION} --name <name> --processing_settings warp_tiltseries.settings
-        args = Args({
-            'MTools': 'create_source',
-            pop_arg: pop_path,
-            '--name': self._args.get('create_source.name') or pop_name,
-            '--processing_settings': self.TSS
-        })
         subargs = self.get_subargs('create_source', '--')
-        # Filter out empty so --nframes 0 is not passed if that means "use max"
-        subargs = {k: v for k, v in subargs.items() if v is not None and str(v).strip() != ''}
-        args.update(subargs)
-        self.batch_execute('create_source', batch, args, call=True)
+        subargs = {k: v for k, v in subargs.items()
+                   if v is not None and str(v).strip() != ''}
+
+        for source in sources:
+            source_name = source['name']
+            warp_folder = source['warp_folder']
+            source_dir = self.join(self.SOURCES, source_name)
+            self.mkdir(source_dir)
+            self.log(f"Importing inputs for source '{source_name}' from previous WARP run: {warp_folder}")
+            self._importInputs(warp_folder, keys=self.SOURCE_IMPORT_KEYS, dest=source_dir)
+
+            tss = os.path.join(self.SOURCES, source_name, self.TSS)
+            args = Args({
+                'MTools': 'create_source',
+                pop_arg: pop_path,
+                '--name': source_name,
+                '--processing_settings': tss
+            })
+            args.update(subargs)
+            self.batch_execute('create_source', batch, args, call=True)
 
         def _validate(key, value):
             if not value or not os.path.exists(value):
@@ -85,10 +115,10 @@ class WarpMtoolsCreate(WarpBasePipeline):
             'MTools': 'create_species',
             pop_arg: pop_path,
         })
-     
+
         subargs = self.get_subargs('create_species', '--')
         subargs = {k: v for k, v in subargs.items() if v is not None and str(v).strip() != ''}
-        
+
         if _validate('mask', subargs.get('--mask', '')):
             subargs['--mask'] = self.link(subargs['--mask'])
 
@@ -101,7 +131,7 @@ class WarpMtoolsCreate(WarpBasePipeline):
                     subargs[f'--half{i}'] = self.link(half)
 
         extra = Args.fromString(self._args.get('extra_create_species', ''))
-        args.update(subargs)        
+        args.update(subargs)
         args.update(extra)
         self.batch_execute('create_species', batch, args, call=True)
 
@@ -110,17 +140,11 @@ class WarpMtoolsCreate(WarpBasePipeline):
     def _output(self, batch):
         """ Register output population and species paths. """
         self.log("Registering output population and species.")
-        new_population = self._args.get('new_population', True)
         pop_name = self._args.get('create_population.name', 'population')
-        population_file = (
-            batch.join(self.M, f"{pop_name}.population")
-            if new_population
-            else self._args.get('input_population', '')
-        )
-        species_dir = batch.join(self.M, 'species')
-        
+        population_file = batch.join(self.M, f"{pop_name}.population")
+
         #TODO: Review registration and info for population outputs
-        if population_file and (os.path.isfile(population_file) or not new_population):
+        if os.path.isfile(population_file):
             outputNodes = [[population_file, 'WarpPopulation']]
             self.writeRelionOutputNodes(outputNodes)
 

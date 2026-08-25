@@ -86,7 +86,11 @@ class ProcessingConfig:
         "emw-pytme": {"launcher": "emwrap.pytme", "visible": False},        
         "emw-relion-symmetrize_volume": {"launcher": "emwrap.relion.symmetrize_volume"},
         "emw-relion-mask_create": {"launcher": "emwrap.relion.mask_create"},
-        "emw-warp-mtools_create": {"launcher": "emwrap.warp.warp_mtools_create"},
+        "emw-warp-mtools_create": {
+            "launcher": "emwrap.warp.warp_mtools_create",
+            "label": "Warp M Create Population",
+            "output": "WarpMCreatePopulation"
+        },
         "emw-warp-mcore": {"launcher": "emwrap.warp.warp_mcore"},
         "emw-warp-estimate_weights": {"launcher": "emwrap.warp.warp_estimate_weights"},
         "emw-warp-mtools_resample": {"launcher": "emwrap.warp.warp_mtools_resample"},

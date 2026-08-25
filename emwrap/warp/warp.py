@@ -123,13 +123,14 @@ class WarpBasePipeline(ProcessingPipeline):
         else:
             self.gain = None
 
-    def _importInputs(self, inputRunFolder, keys=None):
+    def _importInputs(self, inputRunFolder, keys=None, dest=None):
         """ Inspect the input run folder and copy or link input folder/files
         if necessary. If gain is present in the acquisition, it will be linked.
 
         Args:
             inputRunFolder: the input run folder
             keys: input keys to import, if None, all inputs will be imported
+            dest: optional destination folder (defaults to the job folder)
         """
         print(f"{self.name}: Import inputs ", self.gain)
         if keys is None:
@@ -140,6 +141,13 @@ class WarpBasePipeline(ProcessingPipeline):
         else:
             ifm = FolderManager(inputRunFolder)
 
+        if dest is None:
+            destFm = self
+        elif isinstance(dest, FolderManager):
+            destFm = dest
+        else:
+            destFm = FolderManager(dest)
+
         inputs = [ifm.join(self.INPUTS[k]) for k in keys]
         if m := [fn for fn in inputs if not os.path.exists(fn)]:
             raise Exception("Missing expected paths: " + str(m))
@@ -147,7 +155,7 @@ class WarpBasePipeline(ProcessingPipeline):
         def _copyFolder(inputFolder):
             baseFolder = os.path.basename(inputFolder)
             inputFm = FolderManager(inputFolder)
-            outputFm = FolderManager(self.join(baseFolder))
+            outputFm = FolderManager(destFm.join(baseFolder))
             outputFm.create()
             for fn in inputFm.listdir():
                 inputPath = inputFm.join(fn)
@@ -160,21 +168,23 @@ class WarpBasePipeline(ProcessingPipeline):
                     outputFm.copy(inputPath)
 
         def _copyMFolder(inputFolder):
+            if dest is not None:
+                raise Exception("Cannot import 'm' folder into a subfolder.")
             dst = self.mkdir(self.M)
-            Path.rsync(inputFolder, dst, '--exclude', 'versions')         
+            Path.rsync(inputFolder, dst, '--exclude', 'versions')
 
         for inputPath in inputs:
             if inputPath.endswith('.settings'):
-                self.copy(inputPath)
+                destFm.copy(inputPath)
             elif inputPath.endswith('/m'):
                 _copyMFolder(inputPath)
             elif inputPath.endswith(self.TS) or inputPath.endswith(self.TM):
-                _copyFolder(inputPath)            
+                _copyFolder(inputPath)
             else:  # warp_frameseries
-                self.link(inputPath)
+                destFm.link(inputPath)
 
-        # Link input gain file
-        if gain := self.acq.get('gain', None):
+        # Link input gain file (only at job root)
+        if dest is None and (gain := self.acq.get('gain', None)):
             self.log(f"{self.name}: Linking gain gain: {gain}")
             self.link(gain)
 

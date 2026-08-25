@@ -203,8 +203,8 @@
             "params": {
                 "create_population.name": "ApoF",
                 "create_source.files": "",
-                "create_source.name": "ApoF",
                 "create_source.nframes": "",
+                "sources": "[{'name':'ApoF','warp_folder':'WarpExportParticles/job008'}]",
                 "create_species.angpix_resample": "0.7894",
                 "create_species.diameter": "140",
                 "create_species.lowpass": "10",
@@ -214,9 +214,6 @@
                 "create_species.sym": "O",
                 "extra_create_species": "",
                 "gpus": "1",
-                "input_population": "",
-                "new_population": true,
-                "warp_folder": "WarpExportParticles/job008"
             }
         },
         {
