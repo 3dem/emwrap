@@ -76,12 +76,3 @@ export EMWRAP_CONFIG=$(cat <<EOF
 }
 EOF
 )
-
-# Some alias for shortcut access
-# Shortcut to PurifiedApoF benchmark
-alias bench='python -m emwrap.tests.benchmark_apof_purified'
-
-alias emw-relion='python -m emwrap.relion'
-alias emw-otf='python -m emwrap.mix.otf'
-alias emw-pytom='python -m emwrap.pytom.pytom_pipeline'
-alias emw-warp='python -m emwrap.warp'

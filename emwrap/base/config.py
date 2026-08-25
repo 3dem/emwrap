@@ -124,9 +124,14 @@ class ProcessingConfig:
             "output": "Refine3D",
             "tomo": True
         },
+        "emw-aretomo3": {
+            "launcher": "emwrap.aretomo.aretomo3_pipeline",
+            "label": "Aretomo3",
+            "output": "Aretomo3"
+        },
         "emw-denoiset": {
-            "launcher": "emwrap.aretomo.denoiset",
-            "label": "DenoisET",
+            "launcher": "emwrap.aretomo.denoiset_pipeline",
+            "label": "DenoisET Pipeline",
             "output": "DenoisET"
         }
     }
