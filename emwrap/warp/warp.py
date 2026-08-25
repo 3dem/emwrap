@@ -347,24 +347,31 @@ class WarpBasePipeline(ProcessingPipeline):
              self._args.get('wat.ts_aretomo.angpix', '') or 0)
         return float(v)
 
+    def alignmentFiles(self, tsName):
+        """Return IMOD transform and tilt-angle files for alignment."""
+        imodDir = self.join(
+            self.TS, 'tiltstack', tsName, f'{tsName}_Imod'
+        )
+        return (
+            os.path.join(imodDir, f'{tsName}_st.xf'),
+            os.path.join(imodDir, f'{tsName}_st.tlt')
+        )
+    
     def parseAlignmentParams(self, tsDict, ps):
         """ Parse AreTomo alignment parameters from .st.aln into Relion convention. """
-        tsName = tsDict['rlnTomoName']
-        xfFile = self.join(self.TS, 'tiltstack', tsName, f'{tsName}_Imod/{tsName}_st.xf')
-        tltFile = self.join(self.TS, 'tiltstack', tsName, f'{tsName}_Imod/{tsName}_st.tlt')
+        tsName = tsDict['rlnTomoName']     
+        xfFile, tltFile = self.alignmentFiles(tsName)
 
         self.log(f"Parsing alignments for tomo: {tsName} from: {xfFile}, pixel size: {ps}")
 
         tlt_angles = Imod.get_angles_from_tlt(tltFile)
-        #tlt_angles.reverse()
         xf_alignments = Imod.get_alignment_from_xf(xfFile)
-        #xf_alignments.reverse()
-
+        
         alignments = RelionStar.alignments_from_imod(tlt_angles, xf_alignments, ps)
         for aln in alignments:
             del aln['tilt']
             del aln['rlnCtfScalefactor']
-            aln['rlnTomoYTilt'] *= -1
+            aln['rlnTomoYTilt'] *= -1 
 
         return alignments
 
@@ -397,8 +404,8 @@ class WarpBasePipeline(ProcessingPipeline):
             })
             return False, None
 
-        xfFile = self.join(self.TS, 'tiltstack', tsName, f'{tsName}_Imod/{tsName}_st.xf')
-        tltFile = self.join(self.TS, 'tiltstack', tsName, f'{tsName}_Imod/{tsName}_st.tlt')
+        xfFile, tltFile = self.alignmentFiles(tsName)
+        
         if not os.path.exists(xfFile) or not os.path.exists(tltFile):
             self.log(f"ERROR: Missing IMOD alignment files for TS {tsName}: "
                      f"{xfFile}, {tltFile}")

@@ -41,12 +41,21 @@ class WarpTsAlign(WarpBaseTsAlign):
             key = 'ts_etomo_patches.angpix'
         else:
             key = 'ts_aretomo.angpix'
-        v = (self._args.get(key, '') or
-             self._args.get('wat.ts_aretomo.angpix', '') or 0)
+        v = (self._args.get(key, '') or 0)        
         return float(v)
 
     def _alignmentPerdevice(self):
         return self._args.get('perdevice', None)
+
+    def alignmentFiles(self, tsName):
+        if self._method() == 2:
+            tsDir = self.join(self.TS, 'tiltstack', tsName)
+            return (
+                os.path.join(tsDir, f'{tsName}.xf'),
+                os.path.join(tsDir, f'{tsName}.tlt')
+            )
+
+        return super().alignmentFiles(tsName)
 
     def runAlignment(self, batch):
         method = self._method()
