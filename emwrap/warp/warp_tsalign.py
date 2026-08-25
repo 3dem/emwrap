@@ -41,17 +41,33 @@ class WarpTsAlign(WarpBaseTsAlign):
             key = 'ts_etomo_patches.angpix'
         else:
             key = 'ts_aretomo.angpix'
-        v = (self._args.get(key, '') or
-             self._args.get('wat.ts_aretomo.angpix', '') or 0)
+        v = (self._args.get(key, '') or 0)        
         return float(v)
 
     def _alignmentPerdevice(self):
         return self._args.get('perdevice', None)
 
+    def alignmentFiles(self, tsName):
+        if self._method() == 2:
+            tsDir = self.join(self.TS, 'tiltstack', tsName)
+            return (
+                os.path.join(tsDir, f'{tsName}.xf'),
+                os.path.join(tsDir, f'{tsName}.tlt')
+            )
+
+        return super().alignmentFiles(tsName)
+
+    def alignedTS(self, tsName):
+        if self._method() == 1:
+            return self.join(self.TS, 'tiltstack', tsName, f'{tsName}_Imod', f"{tsName}_st.mrc" )
+        return super().alignedTS(tsName)
+
     def runAlignment(self, batch):
         method = self._method()
         if method == 0:
             self._runAlignmentAretomo2(batch)
+        elif method == 1:
+            self._runAlignmentAretomo3(batch)
         elif method == 2:
             self._runAlignmentEtomoPatches(batch)
         else:
@@ -70,6 +86,10 @@ class WarpTsAlign(WarpBaseTsAlign):
 
         subargs = self._args.subset('ts_aretomo', '--',
                                     filters=['remove_false', 'remove_empty'])
+        commargs = self._args.subset('ts_align', '--',
+                                    filters=['remove_false', 'remove_empty'])
+        subargs.update(commargs)
+        
         if perdevice := self._alignmentPerdevice():
             subargs['--perdevice'] = perdevice
         if patches := subargs.pop('--patches', None):
@@ -78,6 +98,32 @@ class WarpTsAlign(WarpBaseTsAlign):
                 args['--patches'] = patches
         args.update(subargs)
         self.batch_execute('ts_aretomo', batch, args)
+
+    def _runAlignmentAretomo3(self, batch):
+        aretomo3_launcher = self.get_launcher_arg('launcher_aretomo', 'ARETOMO3')
+
+        args = Args({
+            'WarpTools': 'ts_aretomo3',
+            '--settings': self.TSS,
+            '--exe': aretomo3_launcher
+        })
+        if self.gpuList:
+            args['--device_list'] = self.gpuList
+
+        subargs = self._args.subset('ts_aretomo', '--',
+                                    filters=['remove_false', 'remove_empty'])
+        commargs = self._args.subset('ts_align', '--',
+                                    filters=['remove_false', 'remove_empty'])
+        subargs.update(commargs)
+        
+        if perdevice := self._alignmentPerdevice():
+            subargs['--perdevice'] = perdevice
+        if patches := subargs.pop('--patches', None):
+            patches = patches.lower().strip()
+            if patches not in ['0x0', '1x1']:
+                args['--patches'] = patches
+        args.update(subargs)
+        self.batch_execute('ts_aretomo3', batch, args)
 
     def _runAlignmentEtomoPatches(self, batch):
         args = Args({
@@ -89,6 +135,10 @@ class WarpTsAlign(WarpBaseTsAlign):
 
         subargs = self._args.subset('ts_etomo_patches', '--',
                                     filters=['remove_false', 'remove_empty'])
+        commargs = self._args.subset('ts_align', '--',
+                                    filters=['remove_false', 'remove_empty'])
+        subargs.update(commargs)
+        
         if perdevice := self._alignmentPerdevice():
             subargs['--perdevice'] = perdevice
         args.update(subargs)
