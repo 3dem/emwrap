@@ -21,13 +21,6 @@
                     "default": 35
                 },
                 {
-                    "name": "ts_import.override_axis",
-                    "label": "Angle for Tilt Axis (REMOVE)",
-                    "default": 85,
-                    "paramClass": "FloatParam",
-                    "help": ""
-                },
-                {
                     "name": "create_settings.tomo_dimensions",
                     "label": "Tomogram dimensions:",
                     "default": "4096x4096x2000",

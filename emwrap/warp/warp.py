@@ -696,6 +696,10 @@ class WarpBaseTsAlign(WarpBasePipeline):
             '--mdocs': 'mdocs'
         })
         subargs = self.get_subargs('ts_import', '--')
+        tilt_axis = getattr(tsAllTable[0], 'rlnTomoNominalTiltAxisAngle', None)
+        if tilt_axis not in (None, ''):
+            subargs['--override_axis'] = tilt_axis
+            self.log(f"Using tilt axis angle from input STAR: {tilt_axis}")
         if ts_import_extra := self._args.get('extra_ts_import', None):
             subargs.update(Args.fromString(ts_import_extra))
 

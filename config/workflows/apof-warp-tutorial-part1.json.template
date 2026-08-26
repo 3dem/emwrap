@@ -61,8 +61,7 @@
                 "ts_aretomo.axis_iter": "0",
                 "ts_aretomo.patches": "",
                 "ts_aretomo.perdevice": "1",
-                "ts_import.min_ntilts": "3",
-                "ts_import.override_axis": "-85.6"
+                "ts_import.min_ntilts": "3"
             }
         },
         {
