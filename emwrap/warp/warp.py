@@ -40,6 +40,8 @@ class WarpBasePipeline(ProcessingPipeline):
     TSS = f'{TS}.settings'
     TM = 'warp_tomostar'
     M = 'm'
+    M_IMPORT_EXCLUDES = ('versions', 'sources')
+    WARP_PARTICLES_STAR = 'warp_particles.star'
     WARP_FOLDERS = [FS, TS, TM]
 
     INPUTS = {
@@ -107,6 +109,11 @@ class WarpBasePipeline(ProcessingPipeline):
         if gain:
             ofm.link(gain)
 
+    def _get_acquisition_input_star(self):
+        """Return a Relion STAR file path used to load acquisition metadata."""
+        return (self._args.get('input_tiltseries')
+                or self._args.get('input_tomograms'))
+
     def __init__(self, args, output):
         ProcessingPipeline.__init__(self, args, output)
         gpus = self._args.get('gpus', '')
@@ -115,8 +122,7 @@ class WarpBasePipeline(ProcessingPipeline):
         else:
             gpus = ''
         self.gpuList = self.get_gpu_list(gpus) if gpus else []
-        inputStar = (self._args.get('input_tiltseries')
-                     or self._args.get('input_tomograms'))
+        inputStar = self._get_acquisition_input_star()
         self.acq = self.loadAcquisition(inputStar)
         if gainFile := self.acq.get('gain', None):
             self.gain = os.path.basename(gainFile)
@@ -139,41 +145,57 @@ class WarpBasePipeline(ProcessingPipeline):
         if isinstance(inputRunFolder, FolderManager):
             ifm = inputRunFolder
         else:
-            ifm = FolderManager(inputRunFolder)
+            ifm = FolderManager(self.toProjectPath(inputRunFolder))
 
         if dest is None:
             destFm = self
         elif isinstance(dest, FolderManager):
             destFm = dest
         else:
-            destFm = FolderManager(dest)
+            destFm = FolderManager(self.toProjectPath(dest))
 
-        inputs = [ifm.join(self.INPUTS[k]) for k in keys]
-        if m := [fn for fn in inputs if not os.path.exists(fn)]:
+        inputs = [self.toProjectPath(ifm.join(self.INPUTS[k])) for k in keys]
+        if m := [fn for fn in inputs if not self.projectExists(fn)]:
             raise Exception("Missing expected paths: " + str(m))
 
         def _copyFolder(inputFolder):
+            inputFolder = self.toProjectPath(inputFolder)
             baseFolder = os.path.basename(inputFolder)
             inputFm = FolderManager(inputFolder)
-            outputFm = FolderManager(destFm.join(baseFolder))
+            output_folder = destFm.join(baseFolder)
+            outputFm = FolderManager(output_folder)
             outputFm.create()
             for fn in inputFm.listdir():
-                inputPath = inputFm.join(fn)
-                if os.path.isdir(inputPath):
+                inputPath = self.toProjectPath(inputFm.join(fn))
+                if os.path.isdir(os.path.join(self.workingDir, inputPath)):
                     if fn.endswith('logs'):
                         outputFm.mkdir('logs')  # Don't copy logs
                     else:
-                        outputFm.link(inputPath)
+                        self.linkProjectPath(output_folder, inputPath)
                 else:
                     outputFm.copy(inputPath)
 
         def _copyMFolder(inputFolder):
             if dest is not None:
                 raise Exception("Cannot import 'm' folder into a subfolder.")
+            inputFolder = self.toProjectPath(inputFolder)
             dst = self.mkdir(self.M)
-            Path.rsync(inputFolder, dst, '--exclude', 'versions')
+            rsync_args = [
+                arg for name in self.M_IMPORT_EXCLUDES
+                for arg in ('--exclude', name)
+            ]
+            Path.rsync(
+                self.toProjectPath(inputFolder),
+                dst,
+                *rsync_args,
+            )
+            sources_src = os.path.join(inputFolder, 'sources')
+            if self.projectExists(sources_src):
+                self.linkProjectPath(self.toProjectPath(dst), sources_src,
+                                     name='sources')
 
         for inputPath in inputs:
+            inputPath = self.toProjectPath(inputPath)
             if inputPath.endswith('.settings'):
                 destFm.copy(inputPath)
             elif inputPath.endswith('/m'):
@@ -181,7 +203,7 @@ class WarpBasePipeline(ProcessingPipeline):
             elif inputPath.endswith(self.TS) or inputPath.endswith(self.TM):
                 _copyFolder(inputPath)
             else:  # warp_frameseries
-                destFm.link(inputPath)
+                self.linkProjectPath(destFm.path, inputPath)
 
         # Link input gain file (only at job root)
         if dest is None and (gain := self.acq.get('gain', None)):
@@ -555,9 +577,33 @@ class WarpBasePopulationPipeline(WarpBasePipeline):
     an output population (e.g. MCore, EstimateWeights, MTools resample).
     """
 
+    def _population_arg_from_args(self):
+        """Return the population STAR path from job parameters, if any."""
+        for key, value in self._args.items():
+            if key.endswith('.population') and value:
+                return str(value).strip()
+        return None
+
     def _split_population(self, population):
         """Split the population path into input folder and relative population."""
         return population.split('/m/')
+
+    def _get_acquisition_input_star(self):
+        pop_arg = self._population_arg_from_args()
+        if pop_arg and '/m/' in pop_arg:
+            input_warp, pop_file = self._split_population(pop_arg)
+            pop_path = os.path.join(input_warp, self.M, pop_file)
+            if self.projectExists(pop_path):
+                for rel in (f'{self.M}/{self.WARP_PARTICLES_STAR}',
+                            self.WARP_PARTICLES_STAR):
+                    star = os.path.join(input_warp, rel)
+                    if self.projectExists(star):
+                        self.log(
+                            f"Using acquisition metadata from population "
+                            f"input: {self.toProjectPath(star)}"
+                        )
+                        return self.toProjectPath(star)
+        return super()._get_acquisition_input_star()
 
     def _setup_population_input(self, subargs, population_key='--population', alt_key=None):
         """Parse population from subargs, set self.population, import inputs.
@@ -571,7 +617,7 @@ class WarpBasePopulationPipeline(WarpBasePipeline):
         input_warp, self.population = self._split_population(pop_arg)
         population_file = os.path.join('m', self.population)
         self.log(f"Input Warp folder: {input_warp}, population: {self.population}")
-        self._importInputs(input_warp, keys=['fs', 'fss', 'ts', 'tss', 'tm', 'm'])
+        self._importInputs(input_warp, keys=['m'])
         return population_file
 
     def _output(self, batch):
