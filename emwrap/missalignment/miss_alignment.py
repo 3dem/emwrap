@@ -708,6 +708,9 @@ class MissAlignment(WarpBasePipeline):
         """Launch Miss-Alignment training through the configured launcher."""
         omp_threads = 1
         mkl_threads = 1
+        nccl_p2p_disable = 1 # force NCCL to use the shared-memory transport
+        # The shared-memory path is slightly lower bandwidth than direct P2P, 
+        # but is stable across all PCIe topologies and typically has negligible impact on overall training time. 
 
         training_devices, reconstruction_devices = self._training_gpu_devices()
 
@@ -725,6 +728,7 @@ class MissAlignment(WarpBasePipeline):
 
         args = Args({
             'env': '',
+            f'NCCL_P2P_DISABLE={nccl_p2p_disable}': '', 
             f'OMP_NUM_THREADS={omp_threads}': '',
             f'MKL_NUM_THREADS={mkl_threads}': '',
             f'CUDA_VISIBLE_DEVICES={visible_devices}': '',
@@ -760,6 +764,9 @@ class MissAlignment(WarpBasePipeline):
 
         omp_threads = 1
         mkl_threads = 1
+        nccl_p2p_disable = 1 # force NCCL to use the shared-memory transport
+        # The shared-memory path is slightly lower bandwidth than direct P2P, 
+        # but is stable across all PCIe topologies and typically has negligible impact on overall training time. 
 
         if isinstance(self.gpuList, str):
             visible_devices = self.gpuList.strip().replace(' ', ',')
@@ -768,6 +775,7 @@ class MissAlignment(WarpBasePipeline):
 
         args = Args({
             'env': '',
+            f'NCCL_P2P_DISABLE={nccl_p2p_disable}': '', 
             f'OMP_NUM_THREADS={omp_threads}': '',
             f'MKL_NUM_THREADS={mkl_threads}': '',
             f'CUDA_VISIBLE_DEVICES={visible_devices}': '',
@@ -854,8 +862,6 @@ class MissAlignment(WarpBasePipeline):
         # Launch training.
         self._run_miss_alignment(batch, config_file)
 
-        self.updateBatchInfo(batch)
-
         trainingBestModel = os.path.join(training_directory, 'model.ckpt')
         
         if not os.path.isfile(trainingBestModel):
@@ -894,8 +900,7 @@ class MissAlignment(WarpBasePipeline):
             model_run_directory)
 
         self._run_miss_alignment_infer(batch, config_file)
-        self.updateBatchInfo(batch)
-
+        
         self._write_imod_xfs(data_directory, geometry['pixel_size'])
 
         self.log(
