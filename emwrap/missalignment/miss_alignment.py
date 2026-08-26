@@ -13,6 +13,7 @@ import json
 import os
 import shutil
 import time
+import uuid
 from glob import glob
 
 from emtools.image import Image
@@ -56,6 +57,25 @@ class MissAlignment(WarpBasePipeline):
 
     def _get_mode(self):
         return int(self._args.get('mode', self.MODE_TRAIN_INFER))
+
+    def _get_tmpdir(self):
+        """Return a TMPDIR path short enough for multiprocessing Unix sockets."""
+        tmpdir = os.path.abspath(self.tmpDir)
+      
+        if len(tmpdir.strip()) < 94:  # 107 the limit - 14 exclusive from multiprocessing lib
+            return tmpdir
+
+        link = os.path.join('/tmp', f'emw-tmp-{os.getpid()}-{uuid.uuid4().hex[:8]}')
+        os.symlink(tmpdir, link)
+        self._tmpdir_link = link
+
+        return link
+
+    def _remove_tmpdir_link(self):
+        if link := getattr(self, '_tmpdir_link', None):
+            if os.path.islink(link):
+                os.unlink(link)
+            self._tmpdir_link = None
 
     @staticmethod
     def _as_bool(value):
@@ -533,7 +553,7 @@ class MissAlignment(WarpBasePipeline):
             f'alignment_batch_size={alignment_batch_size}'
         )
 
-        return config_file
+        return config_file, n_iterations
 
     # ------------------------------------------------------------------
     # Miss-Alignment training
@@ -726,18 +746,28 @@ class MissAlignment(WarpBasePipeline):
             f'reconstruction={reconstruction_devices}'
         )
 
+        # ENV Variables
         args = Args({
             'env': '',
             f'NCCL_P2P_DISABLE={nccl_p2p_disable}': '', 
             f'OMP_NUM_THREADS={omp_threads}': '',
             f'MKL_NUM_THREADS={mkl_threads}': '',
-            f'CUDA_VISIBLE_DEVICES={visible_devices}': '',
+            f'CUDA_VISIBLE_DEVICES={visible_devices}': ''
+        })
+
+        if self.scratchDir:
+            args.update({
+                f'TMPDIR={self._get_tmpdir()}': '',
+            })
+
+        # Command variables
+        args.update({
             'miss-alignment': '',
             'train': '',
             '--config-file': config_file,
             '--training-devices': training_devices,
             '--reconstruction-devices': reconstruction_devices
-        })
+            })
 
         # Adds:
         #   --dataloaders-per-trainer
@@ -747,12 +777,15 @@ class MissAlignment(WarpBasePipeline):
 
         self.log(f'Miss-Alignment training args: {args}')
 
-        self.batch_execute(
-            'miss_alignment_train',
-            batch,
-            args,
-            launcher=self._get_launcher(),
-        )
+        try:
+            self.batch_execute(
+                'miss_alignment_train',
+                batch,
+                args,
+                launcher=self._get_launcher(),
+            )
+        finally:
+            self._remove_tmpdir_link()
 
     # ------------------------------------------------------------------
     # Miss-Alignment inference
@@ -773,12 +806,22 @@ class MissAlignment(WarpBasePipeline):
         else:
             visible_devices = ','.join(str(device) for device in self.gpuList)
 
+        # ENV Variables
         args = Args({
             'env': '',
             f'NCCL_P2P_DISABLE={nccl_p2p_disable}': '', 
             f'OMP_NUM_THREADS={omp_threads}': '',
             f'MKL_NUM_THREADS={mkl_threads}': '',
-            f'CUDA_VISIBLE_DEVICES={visible_devices}': '',
+            f'CUDA_VISIBLE_DEVICES={visible_devices}': ''
+        })
+
+        if self.scratchDir:
+            args.update({
+                f'TMPDIR={self._get_tmpdir()}': '',
+            })
+
+        # Command variables
+        args.update({
             'miss-alignment': '',
             'infer': '',
             '--config-file': config_file,
@@ -793,12 +836,28 @@ class MissAlignment(WarpBasePipeline):
             f'CUDA_VISIBLE_DEVICES={visible_devices}')
         self.log(f'Miss-Alignment inference args: {args}')
 
-        self.batch_execute(
-            'miss_alignment_infer',
-            batch,
-            args,
-            launcher=self._get_launcher()
-        )
+        try:
+            self.batch_execute(
+                'miss_alignment_infer',
+                batch,
+                args,
+                launcher=self._get_launcher()
+            )
+        finally:
+            self._remove_tmpdir_link()
+
+    def _validate_inference_output(self, data_directory, n_iter):
+        """Ensure an output directory exists for every configured iteration."""
+        missing = [
+            os.path.join(data_directory, f'iter{iteration}')
+            for iteration in range(n_iter)
+            if not os.path.isdir(os.path.join(data_directory, f'iter{iteration}'))
+        ]
+        if missing:
+            raise RuntimeError(
+                'Miss-Alignment inference did not produce complete output; '
+                'missing iteration directories: ' + ', '.join(missing)
+            )
 
     # ------------------------------------------------------------------
     # Input monitoring
@@ -895,11 +954,13 @@ class MissAlignment(WarpBasePipeline):
             self._update_warp_xmls(batch, geometry)
 
         data_directory = os.path.abspath(self.join(self.TS))
-        config_file = self._update_inference_config_yaml(
+        config_file, n_iter = self._update_inference_config_yaml(
             data_directory,
             model_run_directory)
 
         self._run_miss_alignment_infer(batch, config_file)
+
+        self._validate_inference_output(data_directory, n_iter)
         
         self._write_imod_xfs(data_directory, geometry['pixel_size'])
 
