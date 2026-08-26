@@ -50,6 +50,7 @@
                     "paramClass": "EnumParam",
                     "choices": {
                         "0": "aretomo2",
+                        "1": "aretomo3",
                         "2": "etomo - patches"
                     },
                     "default": "0",
@@ -58,7 +59,7 @@
                 {
                     "label": "AreTomo",
                     "paramClass": "Group",
-                    "condition": "method == 0",
+                    "condition": "method < 2",
                     "params": [
                         {
                             "name": "ts_aretomo.angpix",
@@ -115,12 +116,6 @@
                             "help": "Patch size for patch tracking in Angstroms"
                         },
                         {
-                            "name": "ts_etomo_patches.mask",
-                            "label": "Mask",
-                            "paramClass": "BooleanParam",
-                            "help": "Apply mask to each image if available; masked areas will be filled with Gaussian noise"
-                        },
-                        {
                             "name": "ts_etomo_patches.initial_axis",
                             "label": "Initial axis",
                             "paramClass": "FloatParam",
@@ -132,9 +127,21 @@
                             "label": "Do axis search",
                             "paramClass": "BooleanParam",
                             "help": "Fit a new tilt axis angle for the whole dataset"
+                        }
+                    ]
+                }, 
+                {
+                    "label": "Shared Options",
+                    "paramClass": "Group",
+                    "params": [
+                        {
+                            "name": "ts_align.mask",
+                            "label": "Mask",
+                            "paramClass": "BooleanParam",
+                            "help": "Apply mask to each image if available; masked areas will be filled with Gaussian noise"
                         },
                         {
-                            "name": "ts_etomo_patches.min_fov",
+                            "name": "ts_align.min_fov",
                             "label": "Min FOV",
                             "default": 0,
                             "paramClass": "FloatParam",
