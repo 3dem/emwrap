@@ -39,6 +39,7 @@ class WarpCtfReconstruct(WarpBasePipeline):
         if kwargs.get('importInputs', True):
             inputFolder = FolderManager(os.path.dirname(inputTs))
             self._importInputs(inputFolder)
+            self._removeImportedTsReconstruction()
 
         # Run ts_ctf
         args = Args({
@@ -104,6 +105,16 @@ class WarpCtfReconstruct(WarpBasePipeline):
         outputNodes = [[newTsStarFile, 'TomogramGroupMetadata.star.relion.tomo.Tomograms']]
         self.writeRelionOutputNodes(outputNodes)
         self.updateBatchInfo(batch)
+
+    def _removeImportedTsReconstruction(self):
+        """Drop a previous reconstruction folder linked during input import."""
+        recpath = self.join(self.TS, 'reconstruction')
+        if os.pathos.path.lexists(recpath):
+            self.log(f"Removing previous reconstruction imported from input: {recpath}")
+            if os.path.islink(recpath):
+                os.unlink(recpath)
+            else:
+                raise ValueError(f"Reconstruction path {recpath} is not a link")
 
     def prerun(self):
         self.prerunTs()
