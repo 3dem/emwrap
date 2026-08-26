@@ -234,7 +234,11 @@ def _encode_json_param_value(value):
         text = value.strip()
         if not text:
             return '[]'
-        return text
+        try:
+            parsed = _parse_star_json_literal(text)
+        except (SyntaxError, ValueError):
+            return text
+        return _serialize_star_json(parsed)
     return _serialize_star_json(value)
 
 
@@ -401,13 +405,18 @@ class JobForm:
             if not name or name not in encoded:
                 continue
             value = encoded[name]
-            if isinstance(value, list):
+            if isinstance(value, (list, str)) or value is None:
                 encoded[name] = _encode_json_param_value(value)
-            elif value is None:
-                encoded[name] = '[]'
-            elif isinstance(value, str) and value.strip():
-                encoded[name] = value.strip()
         return encoded
+
+    @staticmethod
+    def decode_json_params(job_form, params):
+        """Decode TableParam and MultiPointerParam values from job.star."""
+        if not job_form or not params:
+            return params
+        params = JobForm.decode_table_params(job_form, params)
+        params = JobForm.decode_multi_pointer_params(job_form, params)
+        return params
 
     @staticmethod
     def decode_table_params(job_form, params):
@@ -452,12 +461,8 @@ class JobForm:
             if not name or name not in encoded:
                 continue
             value = encoded[name]
-            if isinstance(value, list):
+            if isinstance(value, (list, str)) or value is None:
                 encoded[name] = _encode_json_param_value(value)
-            elif value is None:
-                encoded[name] = '[]'
-            elif isinstance(value, str) and value.strip():
-                encoded[name] = value.strip()
         return encoded
 
     @staticmethod

@@ -1062,8 +1062,7 @@ class ProjectManager(FolderManager):
             job_params.update(extraParams)
         job_form = ProcessingConfig.get_job_form(job['jobtype'])
         if job_form:
-            job_params = JobForm.decode_table_params(job_form, job_params)
-            job_params = JobForm.decode_multi_pointer_params(job_form, job_params)
+            job_params = JobForm.decode_json_params(job_form, job_params)
         return job_params
 
     def _createJob(self, jobType, params, update=True):
@@ -1113,13 +1112,15 @@ class ProjectManager(FolderManager):
 
         return self._wf.getJob(jid)
 
+    def readJobInfo(self, job, default=None):
+        """Load info.json for a workflow job folder."""
+        job_id = getattr(job, 'id', job)
+        return ProcessingPipeline.readJobInfo(self.join(job_id, 'info.json'),
+                                              default=default)
+
     def loadJobInfo(self, job):
-        """ Load the info.json file for a given run. """
-        jobInfoFn = self.join(job.id, 'info.json')
-        if os.path.exists(jobInfoFn):
-            with open(jobInfoFn) as f:
-                return json.load(f)
-        return None
+        """Load the info.json file for a given run."""
+        return self.readJobInfo(job, default=None)
 
     def loadJobOutputs(self, job):
         filesDict = {}

@@ -146,7 +146,8 @@ class ProcessingPipeline(Pipeline, FolderManager):
             f.flush()
 
     def batch_execute(self, label, batch, args, 
-                      logfile=None, logcmd=True, launcher=None, call=True):
+                      logfile=None, logcmd=True, launcher=None, call=True,
+                      work_dir=None):
         """ Shortcut to execute a batch using the internal launcher.
         Args:
             label: label to identify the batch
@@ -156,6 +157,7 @@ class ProcessingPipeline(Pipeline, FolderManager):
             logcmd: if True, the command will be logged
             launcher: launcher to use, by default it will use the internal launcher for this Pipeline instance
             call: if True, the program will be executed, otherwise only logs will be written
+            work_dir: optional project-root-relative folder to run the command from
         """
         logfile = logfile or self.join('run.out')
         launcher = launcher or self._get_launcher()
@@ -164,7 +166,11 @@ class ProcessingPipeline(Pipeline, FolderManager):
             if logcmd:
                 self.log_cmd(args)
             if call:
-                batch.call(launcher, args, logfile=logfile)
+                cwd = True
+                if work_dir is not None:
+                    cwd = os.path.join(self.workingDir,
+                                       self.toProjectPath(work_dir))
+                batch.call(launcher, args, logfile=logfile, cwd=cwd)
 
     def prerun(self):
         """ This method will be called before the run. """
@@ -358,15 +364,35 @@ class ProcessingPipeline(Pipeline, FolderManager):
         self.info['batches'][batch.id] = batch.info
         self.writeInfo()
 
+    @staticmethod
+    def readJobInfo(info_file, default=None):
+        """Load a job info.json file safely.
+
+        Returns ``default`` when the file is missing, empty, or invalid JSON.
+        """
+        if not info_file or not os.path.isfile(info_file):
+            return default
+
+        try:
+            with open(info_file) as f:
+                content = f.read().strip()
+            if not content:
+                return default
+            return json.loads(content)
+        except (OSError, json.JSONDecodeError):
+            return default
+
     def readInfo(self):
-        if os.path.exists(self.infoFile):
-            with open(self.infoFile) as f:
-                self.info = json.load(f)
+        info = self.readJobInfo(self.infoFile, default=None)
+        if info is not None:
+            self.info = info
 
     def writeInfo(self):
         """ Write file with internal information to info.json. """
-        with open(self.infoFile, 'w') as f:
+        tmpFile = f'{self.infoFile}.tmp'
+        with open(tmpFile, 'w') as f:
             json.dump(self.info, f, indent=4)
+        os.replace(tmpFile, self.infoFile)
 
     def writeRelionOutputNodes(self, outputs):
         """ Write expected file by relion in case the jobs are launched
@@ -385,6 +411,33 @@ class ProcessingPipeline(Pipeline, FolderManager):
         (compatible with Relion/Scipion project's path rules)
         """
         return os.path.join(self.outputPrefix, path)
+
+    def toProjectPath(self, path):
+        """Return a path relative to the project root (workingDir)."""
+        if not path:
+            return path
+        path = os.path.normpath(str(path))
+        if os.path.isabs(path):
+            return os.path.relpath(path, self.workingDir)
+        return path
+
+    def projectExists(self, path):
+        """Return True when a project-root-relative path exists on disk."""
+        return os.path.exists(os.path.join(self.workingDir, self.toProjectPath(path)))
+
+    def linkProjectPath(self, dest_folder, src_path, name=None):
+        """Symlink src_path into dest_folder using project-root-relative paths."""
+        src = self.toProjectPath(src_path)
+        dest_folder = self.toProjectPath(dest_folder)
+        base = name or os.path.basename(src)
+        link_rel = os.path.join(dest_folder, base)
+        target = os.path.relpath(src, dest_folder)
+        link_full = os.path.join(self.workingDir, link_rel)
+        os.makedirs(os.path.dirname(link_full), exist_ok=True)
+        if os.path.lexists(link_full):
+            os.remove(link_full)
+        os.symlink(target, link_full)
+        return base
 
     def fixOutputRow(self, row, *pathKeys):
         """ Fix all output paths in the row defined by pathKeys. """
