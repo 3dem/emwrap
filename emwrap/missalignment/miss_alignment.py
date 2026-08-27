@@ -761,7 +761,7 @@ class MissAlignment(WarpBasePipeline):
 
         args.update(extra_args)
         try:
-            label = f'Miss-Alignment {mode}'
+            label = f'miss_alignment_{mode}'
             self.log(f'Running {label}, args: {args}')
             self.batch_execute(
                 label,
