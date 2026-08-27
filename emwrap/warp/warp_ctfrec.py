@@ -109,7 +109,7 @@ class WarpCtfReconstruct(WarpBasePipeline):
     def _removeImportedTsReconstruction(self):
         """Drop a previous reconstruction folder linked during input import."""
         recpath = self.join(self.TS, 'reconstruction')
-        if os.pathos.path.lexists(recpath):
+        if os.path.lexists(recpath):
             self.log(f"Removing previous reconstruction imported from input: {recpath}")
             if os.path.islink(recpath):
                 os.unlink(recpath)

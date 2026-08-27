@@ -26,17 +26,34 @@ from emtools.metadata import StarFile, Table
 
 from .warp import WarpBasePipeline
 from .warp_mctf import WarpMotionCtf
-from .warp_aretomo import WarpAreTomo
+from .warp_tsalign import WarpTsAlign
 from .warp_ctfrec import WarpCtfReconstruct
 
 
 class WarpOTF(WarpBasePipeline):
     """ Warp wrapper to the following steps in streaming:
         - warp_mctf
-        - warp_aretomo
+        - warp_tsalign
         - warp_ctfrec
     """
     name = 'emw-warp-otf'
+
+    def _tsalignArgs(self):
+        """Build WarpTsAlign args from the OTF wat.* parameter group."""
+        tsalign_args = self._args.subset('wat', '')
+        if perdevice := self._args.get('perdevice'):
+            tsalign_args['perdevice'] = perdevice
+        if launcher := self._args.get('launcher_warp'):
+            tsalign_args.setdefault('launcher_warp', launcher)
+        return tsalign_args
+
+    def _tsalignStep(self):
+        """Return a WarpTsAlign view of this job for alignment output handling."""
+        step = getattr(self, '_tsalign_step', None)
+        if step is None:
+            step = WarpTsAlign(self._tsalignArgs(), self.path)
+            self._tsalign_step = step
+        return step
 
     def get_preprocessing_proc(self, gpu):
 
@@ -91,12 +108,9 @@ class WarpOTF(WarpBasePipeline):
             _run(WarpMotionCtf, mctf_args, inputTs=inputTs)
 
             # 2. Run Alignment
-
-            wat_args = _subargs('wat')
-            wat_args['ts_import.override_axis'] = tsTable[0].rlnTomoNominalTiltAxisAngle
-
-            #mctf_args['input_tiltseries'] = inputTs
-            _run(WarpAreTomo, wat_args, inputTs=inputTs)
+            tsalign_args = self._tsalignArgs()
+            self.log(f"OTF - TS align arguments: {tsalign_args}")
+            _run(WarpTsAlign, tsalign_args, inputTs=inputTs)
 
             # 3. Run CTF Reconstruction
             # Update some CTF parameters from MCTF
@@ -165,8 +179,8 @@ class WarpOTF(WarpBasePipeline):
         ok, newTsTable, _ = self.updateMctfTsDict(tsDict, mdocFile, mdocsFm)
         if ok:
             self.write_ts_table(tsName, newTsTable, tsDict['rlnTomoTiltSeriesStarFile'])
-            # Enrich with AreTomo alignment labels (rewrites the per-TS star)
-            ok, _ = self.updateAlignTsDict(tsDict)
+            # Enrich with alignment labels (rewrites the per-TS star)
+            ok, _ = self._tsalignStep().updateAlignTsDict(tsDict)
             if ok:
                 self.appendGlobalTsRow(alignedStar, tsDict)
 
