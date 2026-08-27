@@ -9,6 +9,7 @@
 # *
 # **************************************************************************
 
+from cProfile import label
 import json
 import os
 import shutil
@@ -718,15 +719,15 @@ class MissAlignment(WarpBasePipeline):
 
         return training_devices, reconstruction_devices
 
-    def _run_miss_alignment(self, batch, config_file):
-        """Launch Miss-Alignment training through the configured launcher."""
+    def _run_miss_alignment(self, mode, batch, config_file, extra_args):
         omp_threads = 1
         mkl_threads = 1
         nccl_p2p_disable = 1 # force NCCL to use the shared-memory transport
         # The shared-memory path is slightly lower bandwidth than direct P2P, 
         # but is stable across all PCIe topologies and typically has negligible impact on overall training time. 
 
-        training_devices, reconstruction_devices = self._training_gpu_devices()
+        if not self.gpuList:
+            raise ValueError('Miss-Alignment requires at least one GPU.')
 
         if isinstance(self.gpuList, str):
             visible_devices = self.gpuList.strip().replace(' ', ',')
@@ -734,10 +735,8 @@ class MissAlignment(WarpBasePipeline):
             visible_devices = ','.join(str(device) for device in self.gpuList)
 
         self.log(
-            'Miss-Alignment GPU allocation: '
-            f'CUDA_VISIBLE_DEVICES={visible_devices}; '
-            f'training={training_devices}; '
-            f'reconstruction={reconstruction_devices}'
+            f'Miss-Alignment {mode}, GPU allocation: '
+            f'CUDA_VISIBLE_DEVICES={visible_devices};'
         )
 
         # ENV Variables
@@ -754,27 +753,18 @@ class MissAlignment(WarpBasePipeline):
                 f'TMPDIR={self._get_tmpdir()}': '',
             })
 
-        # Command variables
         args.update({
             'miss-alignment': '',
-            'train': '',
+            mode: '',
             '--config-file': config_file,
-            '--training-devices': training_devices,
-            '--reconstruction-devices': reconstruction_devices
             })
 
-        # Adds:
-        #   --dataloaders-per-trainer
-        #   --prepare-stacks
-        #   --start-at-iteration
-        args.update(self._get_args('train.missalign'))
-        args.update(self._get_args('missalign')) # common params (prepare-stack)
-
-        self.log(f'Miss-Alignment training args: {args}')
-
+        args.update(extra_args)
         try:
+            label = f'Miss-Alignment {mode}'
+            self.log(f'Running {label}, args: {args}')
             self.batch_execute(
-                'miss_alignment_train',
+                label,
                 batch,
                 args,
                 launcher=self._get_launcher(),
@@ -782,65 +772,30 @@ class MissAlignment(WarpBasePipeline):
         finally:
             self._remove_tmpdir_link()
 
+    def _run_miss_alignment_train(self, batch, config_file):
+        """Launch Miss-Alignment training through the configured launcher."""
+        training_devices, reconstruction_devices = self._training_gpu_devices()
+
+        extra_args = {
+            '--training-devices': training_devices,
+            '--reconstruction-devices': reconstruction_devices
+        }
+
+        extra_args.update(self._get_args('train.missalign'))
+        extra_args.update(self._get_args('missalign')) # common params (prepare-stack)
+
+        
+        self._run_miss_alignment('train', batch, config_file, extra_args)
+
     # ------------------------------------------------------------------
     # Miss-Alignment inference
     # ------------------------------------------------------------------
     def _run_miss_alignment_infer(self, batch, config_file):
         """Launch Miss-Alignment inference on all GPUs visible to the job."""
-        if not self.gpuList:
-            raise ValueError('Miss-Alignment inference requires at least one GPU.')
+        extra_args = self._get_args('infer.missalign')
+        extra_args.update(self._get_args('missalign')) # common params (prepare-stack)
 
-        omp_threads = 1
-        mkl_threads = 1
-        nccl_p2p_disable = 1 # force NCCL to use the shared-memory transport
-        # The shared-memory path is slightly lower bandwidth than direct P2P, 
-        # but is stable across all PCIe topologies and typically has negligible impact on overall training time. 
-
-        if isinstance(self.gpuList, str):
-            visible_devices = self.gpuList.strip().replace(' ', ',')
-        else:
-            visible_devices = ','.join(str(device) for device in self.gpuList)
-
-        # ENV Variables
-        args = Args({
-            'env': '',
-            f'NCCL_P2P_DISABLE={nccl_p2p_disable}': '', 
-            f'OMP_NUM_THREADS={omp_threads}': '',
-            f'MKL_NUM_THREADS={mkl_threads}': '',
-            f'CUDA_VISIBLE_DEVICES={visible_devices}': ''
-        })
-
-        if self.scratchDir:
-            args.update({
-                f'TMPDIR={self._get_tmpdir()}': '',
-            })
-
-        # Command variables
-        args.update({
-            'miss-alignment': '',
-            'infer': '',
-            '--config-file': config_file,
-        })
-
-        # Adds:
-        #   --prepare-stacks
-        #   --start-at-iteration
-        args.update(self._get_args('infer.missalign'))
-        args.update(self._get_args('missalign')) # common params (prepare-stack)
-
-        self.log('Miss-Alignment inference GPU allocation: '
-            f'CUDA_VISIBLE_DEVICES={visible_devices}')
-        self.log(f'Miss-Alignment inference args: {args}')
-
-        try:
-            self.batch_execute(
-                'miss_alignment_infer',
-                batch,
-                args,
-                launcher=self._get_launcher()
-            )
-        finally:
-            self._remove_tmpdir_link()
+        self._run_miss_alignment('infer', batch, config_file, extra_args)
 
     def _validate_inference_output(self, data_directory, n_iter):
         """Ensure an output directory exists for every configured iteration."""
@@ -915,7 +870,7 @@ class MissAlignment(WarpBasePipeline):
         config_file = self._update_config_yaml(training_directory)
 
         # Launch training.
-        self._run_miss_alignment(batch, config_file)
+        self._run_miss_alignment_train(batch, config_file)
 
         trainingBestModel = os.path.join(training_directory, 'model.ckpt')
         
