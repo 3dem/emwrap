@@ -16,7 +16,7 @@
                             "paramClass": "PathParam",
                             "pointerClass": "TiltSeriesAligned",
                             "help": "STAR file with input tilt-series"
-                        }, 
+                        },
                         {
                             "name": "mode",
                             "label": "Mode",
@@ -28,6 +28,41 @@
                             }, 
                             "default": "0",
                             "help": "Select the mode of operation for the denoising process. Train and inference by default. Train only will train a model without performing inference. Infer only will use an existing model to denoise tomograms."
+                        }, 
+                        {
+                            "name": "missalign.prepare-stacks",
+                            "label": "Prepare stacks (A):",
+                            "default": 10.0,
+                            "paramClass": "FloatParam",
+                            "help": "(--prepare-stacks) Pixel size (in Angstroms) for preprocessing tilt stacks. If provided, loads raw tilt images, rescales to this pixel size, and creates tilt stacks with thumbnails before training."
+                        }
+                    ]
+                },
+                {
+                    "label": "Data loading configuration",
+                    "paramClass": "Group",
+                    "collapsed": true,
+                    "params": [
+                        {
+                            "name": "yml.batch_size",
+                            "label": "Batch size:",
+                            "default": 32,
+                            "paramClass": "IntParam",
+                            "help": "data_loading and tilt_series_alignment (batch_size): Batch size for training and alignment."
+                        },
+                        {
+                            "name": "yml.patch_size",
+                            "label": "Patch size:",
+                            "default": 96,
+                            "paramClass": "IntParam",
+                            "help": "data_loading and tilt_series_alignment (patch_size): Size of patches for training and alignment."
+                        }, 
+                        {
+                            "name": "yml.patch_overlap",
+                            "label": "Patch overlap:",
+                            "default": 0.1,
+                            "paramClass": "FloatParam",
+                            "help": "tilt_series_alignment (patch_overlap): tolerated overlap between patches used for optimizing the alignment."
                         }
                     ]
                 }
@@ -46,6 +81,20 @@
                             "default": 10,
                             "paramClass": "IntParam",
                             "help": "Number of tilt series to use for training."
+                        }, 
+                        {
+                            "name": "train.missalign.dataloaders-per-trainer",
+                            "label": "Number of data loader per trainer:",
+                            "default": 5,
+                            "paramClass": "IntParam",
+                            "help": "(--dataloaders-per-trainer) Number of CPU DataLoader workers per training device. Total DataLoader workers = this value × number of training devices. [default: 2]"
+                        },
+                        {
+                            "name": "train.missalign.start-at-iteration",
+                            "label": "Start at iteration:",
+                            "default": 0,
+                            "paramClass": "IntParam",
+                            "help": "(--start-at-iteration) If the run is interrupted, it can be resumed at any iteration with --start-at-iteration N (counting from 0)."
                         }
                     ]
                 },
@@ -55,29 +104,22 @@
                     "collapsed": true,
                     "params": [
                         {
-                            "name": "train.yml.apply_ctf",
-                            "label": "Apply CTF correction:",
-                            "default": false,
-                            "paramClass": "BoolParam",
-                            "help": "(apply_ctf) Apply CTF correction during training. Leave False; enabling CTF doubles processing time with no benefit to alignment"
-                        },
-                        {
                             "name": "train.yml.iterations_anchoring",
-                            "label": "Number of anchoring iterations:",
+                            "label": "Anchoring iterations:",
                             "default": 2,
                             "paramClass": "IntParam",
                             "help": "iteration_setting: Determines the number of anchoring iterations (iterative)."
                         },   
                         {
                             "name": "train.yml.iterations_global",
-                            "label": "Number of global iterations:",
+                            "label": "Global iterations:",
                             "default": 2,
                             "paramClass": "IntParam",
                             "help": "iteration_setting: Determines the number of global iterations (single pass)."
                         },
                         {
                             "name": "train.yml.iterations_spline",
-                            "label": "Number of spline iterations:",
+                            "label": "Local iterations:",
                             "default": 4,
                             "paramClass": "IntParam",
                             "help": "iteration_setting: Determines the number of spline/local refinements iterations (coarse-to-fine)."
@@ -91,82 +133,19 @@
                         },
                         {
                             "name": "train.yml.max_epochs_per_iteration",
-                            "label": "Max epochs per iteration:",
+                            "label": "Epochs per iteration:",
                             "default": 30,
                             "paramClass": "IntParam",
                             "help": "model_training (max_epochs_per_iteration): Determines the maximum number of epochs per iteration."
                         },
                         {
-                            "name": "train.yml.dt_batch_size",
-                            "label": "Data Loading Batch size:",
-                            "default": 32,
-                            "paramClass": "IntParam",
-                            "help": "data_loading (batch_size): Batch size for training."
-                        },
-                        {
-                            "name": "train.yml.dt_patch_size",
-                            "label": "Data Loading Patch size:",
-                            "default": 96,
-                            "paramClass": "IntParam",
-                            "help": "data_loading (patch_size): Size of patches for training."
-                        },
-                        {
                             "name": "train.yml.dt_steps_per_epoch",
-                            "label": "Data Loading Steps per epoch:",
+                            "label": "Steps per epoch:",
                             "default": 1000,
                             "paramClass": "IntParam",
                             "help": "data_loading (steps_per_epoch): Number of steps per epoch."
-                        }, 
-                        {
-                            "name": "train.yml.al_patch_size",
-                            "label": "Alignment Patch size:",
-                            "default": 96,
-                            "paramClass": "IntParam",
-                            "help": "tilt_series_alignment (patch_size): Same as training."
-                        },
-                        {
-                            "name": "train.yml.al_batch_size",
-                            "label": "Alignment Batch size:",
-                            "default": 32,
-                            "paramClass": "IntParam",
-                            "help": "tilt_series_alignment (batch_size): Batch size for training."
-                        },
-                        {
-                            "name": "train.yml.al_patch_overlap",
-                            "label": "Patch overlap:",
-                            "default": 0.1,
-                            "paramClass": "FloatParam",
-                            "help": "tilt_series_alignment (patch_overlap): tolerated overlap between patches used for optimizing the alignment."
                         }
                    ]
-                },
-                {
-                    "label": "Training command",
-                    "paramClass": "Group",
-                    "collapsed": true,
-                    "params": [
-                        {
-                            "name": "train.missalign.dataloaders-per-trainer",
-                            "label": "Number of data loader per trainer:",
-                            "default": 5,
-                            "paramClass": "IntParam",
-                            "help": "(--dataloaders-per-trainer) Number of CPU DataLoader workers per training device. Total DataLoader workers = this value × number of training devices. [default: 2]"
-                        },
-                        {
-                            "name": "train.missalign.prepare-stacks",
-                            "label": "Prepare stacks (A):",
-                            "default": 10.0,
-                            "paramClass": "FloatParam",
-                            "help": "(--prepare-stacks) Pixel size (in Angstroms) for preprocessing tilt stacks. If provided, loads raw tilt images, rescales to this pixel size, and creates tilt stacks with thumbnails before training."
-                        },
-                        {
-                            "name": "train.missalign.start-at-iteration",
-                            "label": "Start at iteration:",
-                            "default": 0,
-                            "paramClass": "IntParam",
-                            "help": "(--start-at-iteration) If the run is interrupted, it can be resumed at any iteration with --start-at-iteration N (counting from 0)."
-                        }
-                    ]
                 }
             ]
         },
@@ -185,6 +164,13 @@
                             "paramClass": "PathParam",
                             "pointerClass": "MissAlignmentModelDir",
                             "help": "Finished Miss-Alignment training run containing iter1/model.ckpt ... iterN/model.ckpt. Required for Infer only mode. In Train & Infer mode, the training directory produced by the current job will be used automatically."
+                        }, 
+                        {
+                            "name": "infer.missalign.start-at-iteration",
+                            "label": "Start at iteration:",
+                            "default": 0,
+                            "paramClass": "IntParam",
+                            "help": "(--start-at-iteration) Resume inference from this iteration. Iterations are counted from 0."
                         }
                     ]
                 },
@@ -194,74 +180,22 @@
                     "collapsed": true,
                     "params": [
                         {
-                            "name": "infer.yml.apply_ctf",
-                            "label": "Apply CTF correction:",
-                            "default": false,
-                            "paramClass": "BoolParam",
-                            "help": "(apply_ctf) Apply CTF correction during alignment. Leave False; enabling CTF approximately doubles processing time."
-                        },
-                        {
                             "name": "infer.yml.iterations_anchoring",
-                            "label": "Number of anchoring iterations:",
-                            "default": 2,
+                            "label": "Anchoring iterations:",
                             "paramClass": "IntParam",
                             "help": "Number of anchoring iterations to apply. The number and order of inference iterations must not exceed the models available in the selected training run."
                         },
                         {
                             "name": "infer.yml.iterations_global",
-                            "label": "Number of global iterations:",
-                            "default": 2,
+                            "label": "Global iterations:",
                             "paramClass": "IntParam",
                             "help": "Number of global alignment iterations to apply."
                         },
                         {
                             "name": "infer.yml.iterations_spline",
-                            "label": "Number of local/spline iterations:",
-                            "default": 4,
+                            "label": "Local iterations:",
                             "paramClass": "IntParam",
                             "help": "Number of local refinement iterations using alignment: [3, 3]."
-                        },
-                        {
-                            "name": "infer.yml.al_patch_size",
-                            "label": "Alignment Patch size:",
-                            "default": 96,
-                            "paramClass": "IntParam",
-                            "help": "tilt_series_alignment (patch_size): Patch size used during alignment. Normally this should match the value used during training."
-                        },
-                        {
-                            "name": "infer.yml.al_batch_size",
-                            "label": "Alignment Batch size:",
-                            "default": 32,
-                            "paramClass": "IntParam",
-                            "help": "tilt_series_alignment (batch_size): Number of patches reconstructed simultaneously. Reduce for GPUs with less memory."
-                        },
-                        {
-                            "name": "infer.yml.al_patch_overlap",
-                            "label": "Patch overlap:",
-                            "default": 0.1,
-                            "paramClass": "FloatParam",
-                            "help": "tilt_series_alignment (patch_overlap): Tolerated overlap between patches used for alignment optimization."
-                        }
-                    ]
-                },
-                {
-                    "label": "Inference command",
-                    "paramClass": "Group",
-                    "collapsed": true,
-                    "params": [
-                        {
-                            "name": "infer.missalign.prepare-stacks",
-                            "label": "Prepare stacks (A):",
-                            "default": 10.0,
-                            "paramClass": "FloatParam",
-                            "help": "(--prepare-stacks) Pixel size in Angstroms used when preparing the tilt stacks before inference."
-                        },
-                        {
-                            "name": "infer.missalign.start-at-iteration",
-                            "label": "Start at iteration:",
-                            "default": 0,
-                            "paramClass": "IntParam",
-                            "help": "(--start-at-iteration) Resume inference from this iteration. Iterations are counted from 0."
                         }
                     ]
                 }

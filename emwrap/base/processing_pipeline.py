@@ -46,7 +46,7 @@ class ProcessingPipeline(Pipeline, FolderManager):
     def __init__(self, args, output):
         self._args = Args(args)
         workingDir = args.get('working_dir', os.getcwd())
-        scratchDir = args.get('scratch', None)
+        scratchDir = (args.get('scratch_dir') or ProcessingConfig.get_scratch_dir())
         Pipeline.__init__(self, debug=args.get('debug', False))
         self.workingDir = self.__validate(workingDir, 'working')
         self.outputDir = self.__validate(output, 'output')
@@ -113,7 +113,7 @@ class ProcessingPipeline(Pipeline, FolderManager):
         self.__clean_tmp()
 
         if self.scratchDir:
-            scratchTmp = tempfile.mkdtemp(prefix=self.scratchDir)
+            scratchTmp = tempfile.mkdtemp(dir=self.scratchDir)
             Process.system(f"ln -s {scratchTmp} {self.tmpDir}")
         else:
             Process.system(f"mkdir {self.tmpDir}")

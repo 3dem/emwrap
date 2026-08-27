@@ -165,6 +165,10 @@ class ProcessingConfig:
         return cls._get_config('programs')
 
     @classmethod
+    def get_scratch_dir(cls):
+        return cls._get_config().get('scratch')
+
+    @classmethod
     def get_testdata(cls, name):
         return cls._get_config('testdata', {}).get(name, {})
 
