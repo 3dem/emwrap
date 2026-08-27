@@ -344,10 +344,11 @@ class MissAlignment(WarpBasePipeline):
         new_settings = []
 
         # Anchoring iterations.
-        # First: { downsample: 3, alignment: anchoring }
+        # First: { downsample: 2 or 3, alignment: anchoring } 
         # Additional: { downsample: 2, alignment: anchoring }
+        downsample = 2
         for index in range(anchoring_iterations):
-            downsample = 3 if index == 0 else 2
+            # downsample = 3 if index == 0 else 2 
             new_settings.append(
                 f'    - {{ downsample: {downsample}, '
                 'alignment: anchoring }\n'
@@ -372,20 +373,17 @@ class MissAlignment(WarpBasePipeline):
         training_directory = os.path.abspath(training_directory)
         config_file = os.path.join(training_directory, self.CONFIG_NAME)
 
-        apply_ctf = self._as_bool(self._args.get('train.yml.apply_ctf', False))
         anchoring_iterations = int(self._args.get('train.yml.iterations_anchoring', 2))
         global_iterations = int(self._args.get('train.yml.iterations_global', 2))
         spline_iterations = int(self._args.get('train.yml.iterations_spline', 4))
 
         learning_rate = self._args.get('train.yml.learning_rate', 1.0e-3)
         max_epochs = self._args.get('train.yml.max_epochs_per_iteration', 30)
-        data_batch_size = self._args.get('train.yml.dt_batch_size', 32)
-        data_patch_size = self._args.get('train.yml.dt_patch_size', 96)
         steps_per_epoch = self._args.get('train.yml.dt_steps_per_epoch', 1000)
 
-        alignment_patch_size = self._args.get('train.yml.al_patch_size', 96)
-        alignment_batch_size = self._args.get('train.yml.al_batch_size', 32)
-        alignment_patch_overlap = self._args.get('train.yml.al_patch_overlap', 0.1)
+        batch_size = self._args.get('yml.batch_size', 32)
+        patch_size = self._args.get('yml.patch_size', 96)
+        alignment_patch_overlap = self._args.get('yml.patch_overlap', 0.1)
 
         shutil.copy2(config_template, config_file)
 
@@ -394,15 +392,14 @@ class MissAlignment(WarpBasePipeline):
 
         updates = [
             ('general', 'training_directory', json.dumps(training_directory)),
-            ('general', 'apply_ctf', 'True' if apply_ctf else 'False'),
             ('model_training', 'learning_rate', learning_rate),
             ('model_training', 'max_epochs_per_iteration', max_epochs),
-            ('data_loading', 'batch_size', data_batch_size),
-            ('data_loading', 'patch_size', data_patch_size),
+            ('data_loading', 'batch_size', batch_size),
+            ('data_loading', 'patch_size', patch_size),
             ('data_loading', 'steps_per_epoch', steps_per_epoch),
-            ('tilt_series_alignment', 'patch_size', alignment_patch_size),
+            ('tilt_series_alignment', 'patch_size', patch_size),
             ('tilt_series_alignment', 'patch_overlap', alignment_patch_overlap),
-            ('tilt_series_alignment', 'batch_size', alignment_batch_size),
+            ('tilt_series_alignment', 'batch_size', batch_size),
         ]
 
         missing = []
@@ -438,7 +435,7 @@ class MissAlignment(WarpBasePipeline):
             f'{anchoring_iterations} anchoring/'
             f'{global_iterations} global/'
             f'{spline_iterations} spline, '
-            f'alignment_batch_size={alignment_batch_size}'
+            f'alignment_batch_size={batch_size}'
         )
         return config_file
 
@@ -463,7 +460,6 @@ class MissAlignment(WarpBasePipeline):
 
     def _validate_model_run_directory(self, model_run_directory, n_iterations):
         """Validate that all per-iteration checkpoints required by inference exist."""
-        # TODO: check if you can have less iterations in the inference than the ones you used for training
         model_run_directory = os.path.abspath(model_run_directory)
 
         missing = []
@@ -487,14 +483,13 @@ class MissAlignment(WarpBasePipeline):
         config_template = self._inference_config_template_path()
         data_directory = os.path.abspath(data_directory)
 
-        apply_ctf = self._as_bool(self._args.get('infer.yml.apply_ctf', False))
         anchoring_iterations = int(self._args.get('infer.yml.iterations_anchoring', 2))
         global_iterations = int(self._args.get('infer.yml.iterations_global', 2))
         spline_iterations = int(self._args.get('infer.yml.iterations_spline', 4))
 
-        alignment_patch_size = self._args.get('infer.yml.al_patch_size', 96)
-        alignment_batch_size = self._args.get('infer.yml.al_batch_size', 32)
-        alignment_patch_overlap = self._args.get('infer.yml.al_patch_overlap', 0.1)
+        alignment_patch_size = self._args.get('yml.patch_size', 96)
+        alignment_batch_size = self._args.get('yml.batch_size', 32)
+        alignment_patch_overlap = self._args.get('yml.patch_overlap', 0.1)
 
         n_iterations = (
             anchoring_iterations
@@ -517,7 +512,6 @@ class MissAlignment(WarpBasePipeline):
         updates = [
             ('general', 'data_directory', json.dumps(data_directory)),
             ('general', 'model_run_directory', json.dumps(model_run_directory)),
-            ('general', 'apply_ctf', 'True' if apply_ctf else 'False'),
             ('tilt_series_alignment', 'patch_size', alignment_patch_size),
             ('tilt_series_alignment', 'patch_overlap', alignment_patch_overlap),
             ('tilt_series_alignment', 'batch_size', alignment_batch_size),
@@ -774,6 +768,7 @@ class MissAlignment(WarpBasePipeline):
         #   --prepare-stacks
         #   --start-at-iteration
         args.update(self._get_args('train.missalign'))
+        args.update(self._get_args('missalign')) # common params (prepare-stack)
 
         self.log(f'Miss-Alignment training args: {args}')
 
@@ -831,6 +826,7 @@ class MissAlignment(WarpBasePipeline):
         #   --prepare-stacks
         #   --start-at-iteration
         args.update(self._get_args('infer.missalign'))
+        args.update(self._get_args('missalign')) # common params (prepare-stack)
 
         self.log('Miss-Alignment inference GPU allocation: '
             f'CUDA_VISIBLE_DEVICES={visible_devices}')
