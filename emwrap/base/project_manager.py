@@ -234,7 +234,7 @@ class ProjectManager(FolderManager):
                 # if job['status'] != STATUS_SAVED:
                 #     raise Exception("Can only save un-run jobs.")
                 job_params = self._readJobParams(job, extraParams=params)
-                self._writeJobParams(job, job_params)
+                self._writeJobStarFile(job['jobtype'], job_params, self.join(job.id, 'job.star'))
             else:
                 if jobDef := ProcessingConfig.get_job_form(jobTypeOrId):
                     job = self._createJob(jobTypeOrId, params, update=False)
@@ -398,7 +398,7 @@ class ProjectManager(FolderManager):
 
                 jobDef = ProcessingConfig.get_job_conf(jobType)
                 self._updateJobInputs(job, job_params)
-                self._writeJobParams(job, job_params)
+                self._writeJobStarFile(job['jobtype'], job_params, self.join(job.id, 'job.star'))
                 self._validateJobInputs(jobType, job_params, job=job)
 
             else:
@@ -820,6 +820,21 @@ class ProjectManager(FolderManager):
             return output_folder
         return self.join(output_folder)
 
+    @staticmethod
+    def _count_gpus_from_relion_params(job_params):
+        """Return GPU count from Relion gpu_ids or the generic gpus param."""
+        gpu_ids = job_params.get('gpu_ids')
+        if gpu_ids is not None and str(gpu_ids).strip():
+            ids = set()
+            for mpi_part in str(gpu_ids).split(':'):
+                for token in mpi_part.split(','):
+                    if t := token.strip():
+                        ids.add(int(t))
+            if ids:
+                return len(ids)
+
+        return int(job_params.get('gpus', 0))
+
     def _writeJobStarFile(self, job_type, params, job_star):
         job_conf = ProcessingConfig.get_job_conf(job_type)
         job_form = ProcessingConfig.get_job_form(job_type)
@@ -827,7 +842,11 @@ class ProjectManager(FolderManager):
         values.update(params)
         is_continue = 1 if os.path.exists(job_star) else 0
         is_tomo = 1 if job_conf.get('tomo', False) else 0
+
+        # Queue submission is handled by ProjectManager, not relion_pipeliner.
+        values['do_queue'] = False
         self.log(f"Writing job params: {job_star}")
+
         RelionStar.write_jobstar(job_type, values, job_star,
                                  isTomo=is_tomo, isContinue=is_continue)
 
@@ -856,7 +875,7 @@ class ProjectManager(FolderManager):
 
         script_file = os.path.join(folder_path, 'job.script')
         script_log = os.path.join(folder_path, 'job.log')
-        gpus = int(job_params.get('gpus', 0))   # FIXME Get gpu list and take the length
+        gpus = self._count_gpus_from_relion_params(job_params)
 
         def _load_cpus(gpus):
             mpi, threads = 1, 1
@@ -1023,21 +1042,6 @@ class ProjectManager(FolderManager):
     def get_workflow(self):
         return self._wf
 
-    def _writeJobParams(self, job, params):
-        """ Write the job.star for the given job. """
-        # Write job params in the output folder
-        jobType = job['jobtype']
-        jobConf = ProcessingConfig.get_job_conf(jobType)
-        jobForm = ProcessingConfig.get_job_form(jobType)
-        values = JobForm.get_values(jobForm)
-        values.update(params)
-        paramsFile = self.join(job.id, 'job.star')
-        self.log(f"Saving job params: {paramsFile}")
-        isContinue = 1 if os.path.exists(paramsFile) else 0  # FIXME
-        isTomo = 1 if jobConf.get('tomo', False) else 0
-        RelionStar.write_jobstar(jobType, values, paramsFile,
-                                 isTomo=isTomo, isContinue=isContinue)
-
     def _readJobParams(self, job, extraParams=None):
         """ Read params from job.star and optionally update
         some of the params.
@@ -1070,7 +1074,7 @@ class ProjectManager(FolderManager):
                                    jobtype=jobType)
 
         # Write job.star file
-        self._writeJobParams(job, params)
+        self._writeJobStarFile(jobType, params, self.join(jobId, 'job.star'))
 
         if update:
             self._data.setJobStatus(job.id, ProjectData.STATUS_SAVED)

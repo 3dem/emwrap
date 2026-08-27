@@ -20,7 +20,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 
 DEFAULT_PIPELINE = 'default_pipeline.star'
-DEFAULT_STALE_SECONDS = 120
+DEFAULT_STALE_SECONDS = 30
 DEFAULT_POLL_INTERVAL = 0.5
 DEFAULT_TIMEOUT = 60
 
@@ -175,20 +175,21 @@ class RelionDirLockBackend(ProjectLockBackend):
         except (OSError, json.JSONDecodeError):
             return {}
 
-    def _lock_age_seconds(self, lock_file):
+    def _path_age_seconds(self, path):
         try:
-            return max(0, time.time() - os.stat(lock_file).st_mtime)
+            return max(0, time.time() - os.stat(path).st_mtime)
         except OSError:
             return None
 
-    def _is_stale(self, lock_file, payload):
+    def _is_stale(self, lock_dir, lock_file, payload):
         pid = payload.get('pid')
         hostname = payload.get('hostname')
         if hostname in (None, '', _hostname()) and pid is not None:
             if not _pid_alive(pid):
                 return True
 
-        age = self._lock_age_seconds(lock_file)
+        age_path = lock_file if os.path.exists(lock_file) else lock_dir
+        age = self._path_age_seconds(age_path)
         if age is not None and age >= self._stale_seconds:
             return True
         return False
@@ -196,11 +197,9 @@ class RelionDirLockBackend(ProjectLockBackend):
     def _try_break_stale_lock(self, lock_dir, lock_file):
         if not os.path.isdir(lock_dir):
             return False
-        if not os.path.exists(lock_file):
-            return False
 
-        payload = self._read_lock_payload(lock_file)
-        if not self._is_stale(lock_file, payload):
+        payload = self._read_lock_payload(lock_file) if os.path.exists(lock_file) else {}
+        if not self._is_stale(lock_dir, lock_file, payload):
             return False
 
         try:

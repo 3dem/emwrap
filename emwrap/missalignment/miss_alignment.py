@@ -9,10 +9,12 @@
 # *
 # **************************************************************************
 
+from cProfile import label
 import json
 import os
 import shutil
 import time
+import uuid
 from glob import glob
 
 from emtools.image import Image
@@ -56,6 +58,25 @@ class MissAlignment(WarpBasePipeline):
 
     def _get_mode(self):
         return int(self._args.get('mode', self.MODE_TRAIN_INFER))
+
+    def _get_tmpdir(self):
+        """Return a TMPDIR path short enough for multiprocessing Unix sockets."""
+        tmpdir = os.path.abspath(self.tmpDir)
+      
+        if len(tmpdir.strip()) < 94:  # 107 the limit - 14 exclusive from multiprocessing lib
+            return tmpdir
+
+        link = os.path.join('/tmp', f'emw-tmp-{os.getpid()}-{uuid.uuid4().hex[:8]}')
+        os.symlink(tmpdir, link)
+        self._tmpdir_link = link
+
+        return link
+
+    def _remove_tmpdir_link(self):
+        if link := getattr(self, '_tmpdir_link', None):
+            if os.path.islink(link):
+                os.unlink(link)
+            self._tmpdir_link = None
 
     @staticmethod
     def _as_bool(value):
@@ -324,10 +345,11 @@ class MissAlignment(WarpBasePipeline):
         new_settings = []
 
         # Anchoring iterations.
-        # First: { downsample: 3, alignment: anchoring }
+        # First: { downsample: 2 or 3, alignment: anchoring } 
         # Additional: { downsample: 2, alignment: anchoring }
+        downsample = 2
         for index in range(anchoring_iterations):
-            downsample = 3 if index == 0 else 2
+            # downsample = 3 if index == 0 else 2 
             new_settings.append(
                 f'    - {{ downsample: {downsample}, '
                 'alignment: anchoring }\n'
@@ -352,20 +374,17 @@ class MissAlignment(WarpBasePipeline):
         training_directory = os.path.abspath(training_directory)
         config_file = os.path.join(training_directory, self.CONFIG_NAME)
 
-        apply_ctf = self._as_bool(self._args.get('train.yml.apply_ctf', False))
         anchoring_iterations = int(self._args.get('train.yml.iterations_anchoring', 2))
         global_iterations = int(self._args.get('train.yml.iterations_global', 2))
         spline_iterations = int(self._args.get('train.yml.iterations_spline', 4))
 
         learning_rate = self._args.get('train.yml.learning_rate', 1.0e-3)
         max_epochs = self._args.get('train.yml.max_epochs_per_iteration', 30)
-        data_batch_size = self._args.get('train.yml.dt_batch_size', 32)
-        data_patch_size = self._args.get('train.yml.dt_patch_size', 96)
         steps_per_epoch = self._args.get('train.yml.dt_steps_per_epoch', 1000)
 
-        alignment_patch_size = self._args.get('train.yml.al_patch_size', 96)
-        alignment_batch_size = self._args.get('train.yml.al_batch_size', 32)
-        alignment_patch_overlap = self._args.get('train.yml.al_patch_overlap', 0.1)
+        batch_size = self._args.get('yml.batch_size', 32)
+        patch_size = self._args.get('yml.patch_size', 96)
+        alignment_patch_overlap = self._args.get('yml.patch_overlap', 0.1)
 
         shutil.copy2(config_template, config_file)
 
@@ -374,15 +393,14 @@ class MissAlignment(WarpBasePipeline):
 
         updates = [
             ('general', 'training_directory', json.dumps(training_directory)),
-            ('general', 'apply_ctf', 'True' if apply_ctf else 'False'),
             ('model_training', 'learning_rate', learning_rate),
             ('model_training', 'max_epochs_per_iteration', max_epochs),
-            ('data_loading', 'batch_size', data_batch_size),
-            ('data_loading', 'patch_size', data_patch_size),
+            ('data_loading', 'batch_size', batch_size),
+            ('data_loading', 'patch_size', patch_size),
             ('data_loading', 'steps_per_epoch', steps_per_epoch),
-            ('tilt_series_alignment', 'patch_size', alignment_patch_size),
+            ('tilt_series_alignment', 'patch_size', patch_size),
             ('tilt_series_alignment', 'patch_overlap', alignment_patch_overlap),
-            ('tilt_series_alignment', 'batch_size', alignment_batch_size),
+            ('tilt_series_alignment', 'batch_size', batch_size),
         ]
 
         missing = []
@@ -418,7 +436,7 @@ class MissAlignment(WarpBasePipeline):
             f'{anchoring_iterations} anchoring/'
             f'{global_iterations} global/'
             f'{spline_iterations} spline, '
-            f'alignment_batch_size={alignment_batch_size}'
+            f'alignment_batch_size={batch_size}'
         )
         return config_file
 
@@ -443,7 +461,6 @@ class MissAlignment(WarpBasePipeline):
 
     def _validate_model_run_directory(self, model_run_directory, n_iterations):
         """Validate that all per-iteration checkpoints required by inference exist."""
-        # TODO: check if you can have less iterations in the inference than the ones you used for training
         model_run_directory = os.path.abspath(model_run_directory)
 
         missing = []
@@ -467,14 +484,13 @@ class MissAlignment(WarpBasePipeline):
         config_template = self._inference_config_template_path()
         data_directory = os.path.abspath(data_directory)
 
-        apply_ctf = self._as_bool(self._args.get('infer.yml.apply_ctf', False))
         anchoring_iterations = int(self._args.get('infer.yml.iterations_anchoring', 2))
         global_iterations = int(self._args.get('infer.yml.iterations_global', 2))
         spline_iterations = int(self._args.get('infer.yml.iterations_spline', 4))
 
-        alignment_patch_size = self._args.get('infer.yml.al_patch_size', 96)
-        alignment_batch_size = self._args.get('infer.yml.al_batch_size', 32)
-        alignment_patch_overlap = self._args.get('infer.yml.al_patch_overlap', 0.1)
+        alignment_patch_size = self._args.get('yml.patch_size', 96)
+        alignment_batch_size = self._args.get('yml.batch_size', 32)
+        alignment_patch_overlap = self._args.get('yml.patch_overlap', 0.1)
 
         n_iterations = (
             anchoring_iterations
@@ -497,7 +513,6 @@ class MissAlignment(WarpBasePipeline):
         updates = [
             ('general', 'data_directory', json.dumps(data_directory)),
             ('general', 'model_run_directory', json.dumps(model_run_directory)),
-            ('general', 'apply_ctf', 'True' if apply_ctf else 'False'),
             ('tilt_series_alignment', 'patch_size', alignment_patch_size),
             ('tilt_series_alignment', 'patch_overlap', alignment_patch_overlap),
             ('tilt_series_alignment', 'batch_size', alignment_batch_size),
@@ -533,7 +548,7 @@ class MissAlignment(WarpBasePipeline):
             f'alignment_batch_size={alignment_batch_size}'
         )
 
-        return config_file
+        return config_file, n_iterations
 
     # ------------------------------------------------------------------
     # Miss-Alignment training
@@ -704,12 +719,15 @@ class MissAlignment(WarpBasePipeline):
 
         return training_devices, reconstruction_devices
 
-    def _run_miss_alignment(self, batch, config_file):
-        """Launch Miss-Alignment training through the configured launcher."""
+    def _run_miss_alignment(self, mode, batch, config_file, extra_args):
         omp_threads = 1
         mkl_threads = 1
+        nccl_p2p_disable = 1 # force NCCL to use the shared-memory transport
+        # The shared-memory path is slightly lower bandwidth than direct P2P, 
+        # but is stable across all PCIe topologies and typically has negligible impact on overall training time. 
 
-        training_devices, reconstruction_devices = self._training_gpu_devices()
+        if not self.gpuList:
+            raise ValueError('Miss-Alignment requires at least one GPU.')
 
         if isinstance(self.gpuList, str):
             visible_devices = self.gpuList.strip().replace(' ', ',')
@@ -717,80 +735,80 @@ class MissAlignment(WarpBasePipeline):
             visible_devices = ','.join(str(device) for device in self.gpuList)
 
         self.log(
-            'Miss-Alignment GPU allocation: '
-            f'CUDA_VISIBLE_DEVICES={visible_devices}; '
-            f'training={training_devices}; '
-            f'reconstruction={reconstruction_devices}'
+            f'Miss-Alignment {mode}, GPU allocation: '
+            f'CUDA_VISIBLE_DEVICES={visible_devices};'
         )
 
+        # ENV Variables
         args = Args({
             'env': '',
+            f'NCCL_P2P_DISABLE={nccl_p2p_disable}': '', 
             f'OMP_NUM_THREADS={omp_threads}': '',
             f'MKL_NUM_THREADS={mkl_threads}': '',
-            f'CUDA_VISIBLE_DEVICES={visible_devices}': '',
-            'miss-alignment': '',
-            'train': '',
-            '--config-file': config_file,
-            '--training-devices': training_devices,
-            '--reconstruction-devices': reconstruction_devices
+            f'CUDA_VISIBLE_DEVICES={visible_devices}': ''
         })
 
-        # Adds:
-        #   --dataloaders-per-trainer
-        #   --prepare-stacks
-        #   --start-at-iteration
-        args.update(self._get_args('train.missalign'))
+        if self.scratchDir:
+            args.update({
+                f'TMPDIR={self._get_tmpdir()}': '',
+            })
 
-        self.log(f'Miss-Alignment training args: {args}')
+        args.update({
+            'miss-alignment': '',
+            mode: '',
+            '--config-file': config_file,
+            })
 
-        self.batch_execute(
-            'miss_alignment_train',
-            batch,
-            args,
-            launcher=self._get_launcher(),
-        )
+        args.update(extra_args)
+        try:
+            label = f'miss_alignment_{mode}'
+            self.log(f'Running {label}, args: {args}')
+            self.batch_execute(
+                label,
+                batch,
+                args,
+                launcher=self._get_launcher(),
+            )
+        finally:
+            self._remove_tmpdir_link()
+
+    def _run_miss_alignment_train(self, batch, config_file):
+        """Launch Miss-Alignment training through the configured launcher."""
+        training_devices, reconstruction_devices = self._training_gpu_devices()
+
+        extra_args = {
+            '--training-devices': training_devices,
+            '--reconstruction-devices': reconstruction_devices
+        }
+
+        extra_args.update(self._get_args('train.missalign'))
+        extra_args.update(self._get_args('missalign')) # common params (prepare-stack)
+
+        
+        self._run_miss_alignment('train', batch, config_file, extra_args)
 
     # ------------------------------------------------------------------
     # Miss-Alignment inference
     # ------------------------------------------------------------------
     def _run_miss_alignment_infer(self, batch, config_file):
         """Launch Miss-Alignment inference on all GPUs visible to the job."""
-        if not self.gpuList:
-            raise ValueError('Miss-Alignment inference requires at least one GPU.')
+        extra_args = self._get_args('infer.missalign')
+        extra_args.update(self._get_args('missalign')) # common params (prepare-stack)
 
-        omp_threads = 1
-        mkl_threads = 1
+        self._run_miss_alignment('infer', batch, config_file, extra_args)
 
-        if isinstance(self.gpuList, str):
-            visible_devices = self.gpuList.strip().replace(' ', ',')
-        else:
-            visible_devices = ','.join(str(device) for device in self.gpuList)
-
-        args = Args({
-            'env': '',
-            f'OMP_NUM_THREADS={omp_threads}': '',
-            f'MKL_NUM_THREADS={mkl_threads}': '',
-            f'CUDA_VISIBLE_DEVICES={visible_devices}': '',
-            'miss-alignment': '',
-            'infer': '',
-            '--config-file': config_file,
-        })
-
-        # Adds:
-        #   --prepare-stacks
-        #   --start-at-iteration
-        args.update(self._get_args('infer.missalign'))
-
-        self.log('Miss-Alignment inference GPU allocation: '
-            f'CUDA_VISIBLE_DEVICES={visible_devices}')
-        self.log(f'Miss-Alignment inference args: {args}')
-
-        self.batch_execute(
-            'miss_alignment_infer',
-            batch,
-            args,
-            launcher=self._get_launcher()
-        )
+    def _validate_inference_output(self, data_directory, n_iter):
+        """Ensure an output directory exists for every configured iteration."""
+        missing = [
+            os.path.join(data_directory, f'iter{iteration}')
+            for iteration in range(n_iter)
+            if not os.path.isdir(os.path.join(data_directory, f'iter{iteration}'))
+        ]
+        if missing:
+            raise RuntimeError(
+                'Miss-Alignment inference did not produce complete output; '
+                'missing iteration directories: ' + ', '.join(missing)
+            )
 
     # ------------------------------------------------------------------
     # Input monitoring
@@ -852,9 +870,7 @@ class MissAlignment(WarpBasePipeline):
         config_file = self._update_config_yaml(training_directory)
 
         # Launch training.
-        self._run_miss_alignment(batch, config_file)
-
-        self.updateBatchInfo(batch)
+        self._run_miss_alignment_train(batch, config_file)
 
         trainingBestModel = os.path.join(training_directory, 'model.ckpt')
         
@@ -889,13 +905,14 @@ class MissAlignment(WarpBasePipeline):
             self._update_warp_xmls(batch, geometry)
 
         data_directory = os.path.abspath(self.join(self.TS))
-        config_file = self._update_inference_config_yaml(
+        config_file, n_iter = self._update_inference_config_yaml(
             data_directory,
             model_run_directory)
 
         self._run_miss_alignment_infer(batch, config_file)
-        self.updateBatchInfo(batch)
 
+        self._validate_inference_output(data_directory, n_iter)
+        
         self._write_imod_xfs(data_directory, geometry['pixel_size'])
 
         self.log(
