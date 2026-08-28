@@ -623,15 +623,16 @@ class WarpBasePopulationPipeline(WarpBasePipeline):
     def _output(self, batch):
         """Register output population."""
         self.log("Registering output population.")
-        population_file = self.join(self.M, self.population)
+        population_file = batch.join(self.M, self.population)
         population_name = self.population.replace('.population', '')
-        if os.path.exists(population_file):
+        if os.path.isfile(population_file):
             self.outputs['Population'] = {
                 'label': 'Population',
                 'type': 'WarpPopulation',
                 'info': f"Name: {population_name}",
                 'files': [[population_file, 'WarpPopulation']]
             }
+            self.writeRelionOutputNodes([[population_file, 'WarpPopulation']])
         else:
             self.log(f"Population file not found: {population_file}")
         self.updateBatchInfo(batch)

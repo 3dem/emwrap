@@ -158,7 +158,7 @@ class WarpMtoolsCreate(WarpBasePipeline):
             new_cols.insert(insert_at + offset, pixel_col)
         return new_cols
 
-    def _convertParticlesTableToWarp(self, particles_table, tomo_lookup):
+    def _convertParticlesTableToWarp(self, particles_table, tomo_lookup, scale_factor):
         """Return a Warp-compatible particles table (voxels and tomostar names)."""
         out_cols = self._particlesOutputColumns(particles_table)
         out_table = Table(out_cols)
@@ -173,9 +173,9 @@ class WarpMtoolsCreate(WarpBasePipeline):
                 if c not in RelionStar.TOMO_PARTICLES_CENTERED_COORD_COLUMNS
             }
             row_values.update({
-                'rlnCoordinateX': x,
-                'rlnCoordinateY': y,
-                'rlnCoordinateZ': z,
+                'rlnCoordinateX': x * scale_factor,
+                'rlnCoordinateY': y * scale_factor,
+                'rlnCoordinateZ': z * scale_factor,
                 'rlnTomoName': self._warpTomoName(tomo_row),
             })
             out_table.addRowValues(**row_values)
@@ -187,20 +187,26 @@ class WarpMtoolsCreate(WarpBasePipeline):
             return prepared
 
         abs_path = self.project.join(particles_relion)
-        if not RelionStar.isTomoParticles(abs_path):
-            raise Exception(
-                f"Particles STAR file {particles_relion} is not a compliant "
-                "tomography particles STAR file."
-            )
-
         particles_table = RelionStar.readTomoParticles(abs_path)
+        
+
         self.log(
             "Preparing particles STAR for Warp: converting coordinates and "
             "mapping rlnTomoName to warp_tomostar file names."
         )
         tomo_lookup = self._collectTomoLookup(particles_table)
+
+        # There might be a scale missmatch between the tomogram binning and the particles binning
+        # because in WarpExportParticles, one can select a different output pixel size
+        optics_table = StarFile.getTableFromFile('optics', abs_path)
+        first_tomo_row = next(iter(tomo_lookup.values()))
+        tomogram_binning = RelionStar.getTomoBinning(first_tomo_row)
+        particles_binning = optics_table[0].rlnTomoSubtomogramBinning
+        scale_factor = tomogram_binning / particles_binning
+
+
         converted_table = self._convertParticlesTableToWarp(
-            particles_table, tomo_lookup)
+            particles_table, tomo_lookup, scale_factor)
 
         out_star = self.join(self.M, self.WARP_PARTICLES_STAR)
         all_tables = StarFile.getTablesDict(abs_path)

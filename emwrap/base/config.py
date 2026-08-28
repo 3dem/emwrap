@@ -91,9 +91,21 @@ class ProcessingConfig:
             "label": "Warp M Create Population",
             "output": "WarpMCreatePopulation"
         },
-        "emw-warp-mcore": {"launcher": "emwrap.warp.warp_mcore"},
-        "emw-warp-estimate_weights": {"launcher": "emwrap.warp.warp_estimate_weights"},
-        "emw-warp-mtools_resample": {"launcher": "emwrap.warp.warp_mtools_resample"},
+        "emw-warp-mcore": {
+            "launcher": "emwrap.warp.warp_mcore",
+            "label": "Warp MCore Refine",
+            "output": "WarpMCore"
+        },
+        "emw-warp-estimate_weights": {
+            "launcher": "emwrap.warp.warp_estimate_weights",
+            "label": "Warp Estimate Weights",
+            "output": "WarpEstimateWeights"
+        },
+        "emw-warp-mtools_resample": {
+            "launcher": "emwrap.warp.warp_mtools_resample",
+            "label": "Warp M Resample",
+            "output": "WarpMResample"
+        },
         "relion.reconstructtomograms": {
             "launcher": "emwrap.relion.native",
             "label": "Relion Reconstruct Tomograms",
