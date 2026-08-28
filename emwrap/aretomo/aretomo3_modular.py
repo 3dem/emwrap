@@ -52,23 +52,32 @@ class Aretomo3ModularBase(AreTomo3Pipeline):
         path = row.rlnTomoTiltSeriesStarFile
         if not os.path.exists(path):
             raise ValueError(f'{ts_name}: per-tilt STAR file not found: {path}')
-        return StarFile.getTableFromFile(ts_name, path)
+        return StarFile.getTableFromFile(ts_name, path, guessType=False, types={'rlnTomoNominalStageTiltAngle': float})
 
+    # TODO: use_algined_angles should be revised carefully before using them 
     def _write_tlt(self, path, table, use_aligned_angles=False):
+        table.sort(key='rlnTomoNominalStageTiltAngle')
         with open(path, 'w') as handle:
-            for index, row in enumerate(table, start=1):
+            for row in table:
                 angle = getattr(row, 'rlnTomoYTilt', '') if use_aligned_angles else ''
                 if angle in ('', None):
                     angle = getattr(row, 'rlnTomoNominalStageTiltAngle', '')
                 if angle in ('', None):
                     raise ValueError(f'Missing tilt angle at row {index}')
+
+                index = getattr(row, 'rlnTomoTiltMovieIndex', '')
+                if index in ('', None):
+                    raise ValueError(f'Missing order of acquisition at angle {angle}')
+                
                 handle.write(f'{float(angle):.6f} {index}\n')
 
     def _write_stack_from_images(self, path, table, image_column='rlnMicrographName'):
         """Compose an MRC stack from one per-tilt RELION image column."""
         frames = []
-        for index, row in enumerate(table, start=1):
+        table.sort(key='rlnTomoNominalStageTiltAngle')
+        for row in table:
             image = getattr(row, image_column, '')
+            index = getattr(row, 'rlnTomoTiltMovieIndex', '')
             if not image:
                 raise ValueError(f'Missing {image_column} at row {index}')
             source = _stack_path(image)

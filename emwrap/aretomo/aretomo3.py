@@ -89,8 +89,8 @@ class AreTomo3:
         if not os.path.exists(fileName):
             raise Exception(f"Missing expected output: {fileName}")
     
-    def process_batch(self, batch, cmd=0, input_prefix=None, input_suffix=None,
-                      ts_name=None, expect_tilt_series=True,
+    def process_batch(self, batch, cmd=0, input_prefix=None, input_suffix=None, 
+                      input_skips=None, ts_name=None, expect_tilt_series=True,
                       expect_split_tilt_series=True, expect_ctf_output=True,
                       **kwargs):
         """Run AreTomo3 on assets staged in *batch*.
@@ -114,6 +114,7 @@ class AreTomo3:
         kwargs = {
             '-InPrefix': input_prefix,
             '-InSuffix': input_suffix,
+            '-InSkips': input_skips, 
             '-OutDir': './output',
             '-LogDir': './log/',
             '-TmpDir': './tmp/',

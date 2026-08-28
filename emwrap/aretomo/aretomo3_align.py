@@ -16,7 +16,7 @@ class AreTomo3AlignPipeline(Aretomo3ModularBase):
             ts_name = batch['tsName']
             batch.create()
             row = next(row for row in self.inputTsTable if row.rlnTomoName == ts_name)
-            table, full_stack, _ = self._stage_stack_and_tlt(batch, ts_name, row)
+            table, full_stack, _ = self._stage_stack_and_tlt(batch, ts_name, row) # Not using aligned angles 
             # Cmd 1 writes alignment metadata but not the output MRC stacks.
             # Populate its output directory with the stacks we composed from
             # the RELION input so the normal result collector can register them.
@@ -54,7 +54,8 @@ class AreTomo3AlignPipeline(Aretomo3ModularBase):
             # serialization so ExtraArgs cannot accidentally request a volume.
             at3.args['-VolZ'] = 0
             at3.process_batch(batch, gpu=gpu, cmd=1, input_prefix=f'./{ts_name}',
-                              input_suffix='.mrc', ts_name=ts_name)
+                              input_suffix='.mrc', input_skips='_ODD,_EVN,_Vol,_CTF',
+                              ts_name=ts_name)
             return batch
         return process
 
