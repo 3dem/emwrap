@@ -198,7 +198,7 @@ class AreTomo3Pipeline(ProcessingPipeline):
         """ Read input star file and return the 'global' table. """
         inputStar = self._args['input_tiltseries']
         with StarFile(inputStar) as sf:
-            t = sf.getTable('global')
+            t = sf.getTable('global', guessType=False)
             self.inputLen = len(t)  # Let's update the inputLen property
             return t
         return None
@@ -596,7 +596,7 @@ class AreTomo3Pipeline(ProcessingPipeline):
     
     def _write_individual_tilt_series_star(self, tsName, tsRow, result, newTsPs):
         inputStarFile = tsRow.rlnTomoTiltSeriesStarFile
-        idvTsTable = StarFile.getTableFromFile(tsName, inputStarFile)
+        idvTsTable = StarFile.getTableFromFile(tsName, inputStarFile, guessType=False)
 
         extraCols = self._individual_tilt_series_extra_cols()
         outputCols = idvTsTable.getColumnNames() + [
@@ -877,7 +877,7 @@ class AreTomo3Pipeline(ProcessingPipeline):
                 continue
 
             if newTsPs is None:
-                inputPs = tsRow.rlnMicrographOriginalPixelSize
+                inputPs = float(tsRow.rlnMicrographOriginalPixelSize)
                 newTsPs = self.newTargetTsPs(inputPs)
                 self.log(f"New target tilt series pixel size: {newTsPs:0.3f} Å/px")
 

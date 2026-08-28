@@ -119,6 +119,11 @@ class ProcessingConfig:
             "output": "Refine3D",
             "tomo": True
         },
+        "emw-aretomo3": { 
+            "launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.aretomo.aretomo3_pipeline",
+            "label": "Aretomo3",
+            "output": "Aretomo3"
+        },
         "emw-denoiset": {
             "launcher": "emwrap.aretomo.denoiset",
             "label": "DenoisET",
@@ -132,7 +137,7 @@ class ProcessingConfig:
         { "name": "warp", "prefixes": ["emw-warp"] },
         { "name": "relion", "prefixes": ["emw-relion", "relion."] },
         { "name": "pytom", "prefixes": ["emw-pytom"] },
-        { "name": "aretomo", "prefixes": ["emw-aretomo", "emw-denoiset"] }
+        { "name": "aretomo", "prefixes": ["emw-aretomo", "emw-aretomo3", "emw-denoiset"] }
     ]
 
     @classmethod
