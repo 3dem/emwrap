@@ -124,6 +124,7 @@ class AreTomo3Pipeline(ProcessingPipeline):
             'rlnTomoTiltSeriesPixelSize',
             'rlnTomoTiltSeriesStarFile',
             'rlnEtomoDirectiveFile',
+            'rlnTiltSeriesAligned',
             # Tomo specific columns
             'rlnTomoReconstructedTomogram',
             'rlnTomoTomogramBinning',
@@ -677,6 +678,7 @@ class AreTomo3Pipeline(ProcessingPipeline):
             # but the tomograms.star columns you chose are Half1/Half2.
             'rlnTomoReconstructedTomogramHalf1': result.get('rlnTomoNameEvn', ''),
             'rlnTomoReconstructedTomogramHalf2': result.get('rlnTomoNameOdd', ''),
+            'rlnTiltSeriesAligned': result.get('rlnTiltSeriesAligned', ''),
         })
 
         return tomDict
