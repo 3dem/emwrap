@@ -376,9 +376,17 @@ class ProjectData(FolderManager):
 
         elif filepath.endswith('.population'):
             try:
+                wp = WarpPopulation(filepath)
+                parts = []
+                if wp.Sources:
+                    parts.append('sources: ' + ', '.join(s['name'] for s in wp.Sources))
+                if wp.Species:
+                    parts.append('species: ' + ', '.join(s['name'] for s in wp.Species))
+                summary = '; '.join(parts) if parts else wp.Name
+
                 return {
                     'type': 'WarpPopulation',
-                    'info': WarpPopulation(filepath).summary(),
+                    'info': summary,
                 }
             except Exception as e:
                 self._debug(
