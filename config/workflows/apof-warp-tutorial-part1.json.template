@@ -211,7 +211,7 @@
                 "create_species.particles_relion": "External/job010/output/run_data.star",
                 "create_species.sym": "O",
                 "extra_create_species": "",
-                "gpus": "1",
+                "gpus": "1"
             }
         }
     ]
