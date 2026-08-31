@@ -137,7 +137,7 @@
                     "label": "Processes per device",
                     "default": 1,
                     "paramClass": "IntParam",
-                    "help": "--perdevice_refine: Number of worker processes per GPU; set to >1 to improve utilization if your GPUs have enough memory."
+                    "help": "--perdevice: Number of worker processes per GPU; set to >1 to improve utilization if your GPUs have enough memory."
                 }
             ]
         }

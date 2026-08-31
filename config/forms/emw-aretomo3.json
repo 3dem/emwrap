@@ -35,6 +35,7 @@
                             "name": "aretomo3.FmInt",
                             "label": "Frames per MC interval",
                             "paramClass": "IntParam",
+                            "allowsEmpty": true,
                             "help": "(--FmInt) E.g. 12 means groups of 12 EER frames are summed before alignment. Required for EER data \u2014 do not use for TIFF."
                         },
                         {
