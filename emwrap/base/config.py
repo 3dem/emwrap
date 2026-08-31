@@ -158,7 +158,7 @@ class ProcessingConfig:
         { "name": "warp", "prefixes": ["emw-warp"] },
         { "name": "relion", "prefixes": ["emw-relion", "relion."] },
         { "name": "pytom", "prefixes": ["emw-pytom"] },
-        { "name": "aretomo", "prefixes": ["emw-aretomo", "emw-denoiset"] }
+        { "name": "aretomo", "prefixes": ["emw-aretomo", "emw-aretomo3", "emw-denoiset"] }
     ]
 
     @classmethod
