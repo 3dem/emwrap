@@ -583,11 +583,11 @@ class ProcessingConfig:
 
         g = p.add_mutually_exclusive_group()
 
-        g.add_argument('--print', '-p', action='store_True',
+        g.add_argument('--print', '-p', action='store_true',
                        help="Print the existing configuration.")
         g.add_argument('--form', '-f', metavar='JOB_TYPE',
                        help="Print the corresponding form for this job type.")
-        g.add_argument('--check', '-c', action='store_True',
+        g.add_argument('--check', '-c', action='store_true',
                        help="Check the current configuration is valid.")
 
         args = p.parse_args()
