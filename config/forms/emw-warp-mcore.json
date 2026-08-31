@@ -133,11 +133,11 @@
                     "help": "If it is a single number (N), total number of GPUs (0..N-1). If multiple values, specific GPU IDs."
                 },
                 {
-                    "name": "mcore.perdevice_refine",
-                    "label": "Processes per device (refine)",
+                    "name": "mcore.perdevice",
+                    "label": "Processes per device",
                     "default": 1,
                     "paramClass": "IntParam",
-                    "help": "Number of processes per GPU for refinement (--perdevice_refine). Set >1 if GPUs have enough memory. Default: 1."
+                    "help": "--perdevice: Number of worker processes per GPU; set to >1 to improve utilization if your GPUs have enough memory."
                 }
             ]
         }

@@ -55,9 +55,9 @@
                 {
                     "name": "fs_motion_and_ctf.m_grid",
                     "label": "Grid (XxYxN):",
-                    "default": "5x5",
+                    "default": "1x1",
                     "paramClass": "StringParam",
-                    "help": "(--m_grid) Default: 5x5xN. Resolution of the motion model grid in X, Y, and temporal dimensions, separated by 'x': e.g. 5x5x40; empty = auto"
+                    "help": "(--m_grid) Default: 1x1xN. Resolution of the motion model grid in X, Y, and temporal dimensions, separated by 'x': e.g. 5x5x40; empty = auto"
                 },
                 {
                     "name": "extra_create_settings",
@@ -128,7 +128,7 @@
                 {
                     "name": "fs_motion_and_ctf.c_grid",
                     "label": "Grid (XxYxN):",
-                    "default": "1x1",
+                    "default": "2x2",
                     "paramClass": "StringParam",
                     "help": "(--c_grid) Resolution of the defocus model grid in X, Y, and temporal dimensions, separated by 'x': e.g. 5x5x40; empty = auto; Z > 1 is purely experimental"
                 },

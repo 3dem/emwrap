@@ -19,7 +19,7 @@ import json
 from datetime import datetime
 
 from emtools.utils import FolderManager, Color, Pretty, Path
-from emtools.metadata import StarFile, RelionStar
+from emtools.metadata import StarFile, RelionStar, WarpPopulation
 from emtools.image import Image
 
 from .config import ProcessingConfig
@@ -273,8 +273,24 @@ class ProjectData(FolderManager):
         target = self._outputTarget(output_id, filepath)
         return {'type': 'File', 'info': f'{reason}: {target}'}
 
+    def _isPlaceholderOutputInfo(self, info):
+        """Return True for generic cached output info that should be recomputed."""
+        if not info or info.get('type') != 'File':
+            return False
+        text = str(info.get('info', ''))
+        return text.startswith(('No-info:', 'Missing:', 'Error:'))
+
+    def _outputInfoFilesForId(self, output_id):
+        """Return output path and any job metadata files that invalidate its cache."""
+        files = [self.join(output_id)]
+        if job := self._outputParentJob(output_id):
+            nodes_star = self.join(job.id, 'RELION_OUTPUT_NODES.star')
+            if os.path.exists(nodes_star):
+                files.append(nodes_star)
+        return self._outputInfoFiles(*files)
+
     def _computeOutputTypeInfo(self, output_id, outputFiles):
-        filepath = outputFiles[0]
+        filepath = self.join(output_id)
         self._debug(f"{Color.warn('OUTPUT')}: {Color.red('Computing')} info for {Color.bold(filepath)}")
 
         if not os.path.exists(filepath):
@@ -350,6 +366,28 @@ class ProjectData(FolderManager):
                         'type': datatype,
                         'info': f'{ptsInfo["size"]} items, Tomograms: {info["rlnTomoTomogramsFile"]["size"]}'
                     }
+            except Exception as e:
+                self._debug(
+                    f"Error computing {Color.warn('OUTPUT')} info for "
+                    f"{Color.bold(filepath)}: {e}")
+                if self._isPendingOutput(output_id):
+                    return self._pendingOutputInfo(output_id)
+                info = f'Error: {str(e)}'
+
+        elif filepath.endswith('.population'):
+            try:
+                wp = WarpPopulation(filepath)
+                parts = []
+                if wp.Sources:
+                    parts.append('sources: ' + ', '.join(s['name'] for s in wp.Sources))
+                if wp.Species:
+                    parts.append('species: ' + ', '.join(s['name'] for s in wp.Species))
+                summary = '; '.join(parts) if parts else wp.Name
+
+                return {
+                    'type': 'WarpPopulation',
+                    'info': summary,
+                }
             except Exception as e:
                 self._debug(
                     f"Error computing {Color.warn('OUTPUT')} info for "
@@ -456,7 +494,7 @@ class ProjectData(FolderManager):
         cached_ts = cached.get('ts', 0) if cached else 0
 
         output_path = self.join(output_id)
-        for info_file in self._outputInfoFiles(output_path):
+        for info_file in self._outputInfoFilesForId(output_id):
             if os.path.exists(info_file):
                 if os.stat(info_file).st_mtime > cached_ts:
                     return True
@@ -521,14 +559,21 @@ class ProjectData(FolderManager):
         info_files = self._outputInfoFiles(*info_files)
 
         if info and not force:
-            # Check if the info is up to date by checking the timestamp of the info files
-            for info_file in info_files:
-                if os.path.exists(info_file):
-                    s = os.stat(info_file)
-                    ts = s.st_mtime
-                    if ts > info['ts']:
-                        info = None
-                        break
+            output_path = info_files[0] if info_files else None
+            if (info_dict is self._outputs
+                    and self._isPlaceholderOutputInfo(info)
+                    and output_path
+                    and os.path.exists(output_path)):
+                info = None
+            else:
+                # Check if the info is up to date by checking the timestamp of the info files
+                for info_file in info_files:
+                    if os.path.exists(info_file):
+                        s = os.stat(info_file)
+                        ts = s.st_mtime
+                        if ts > info['ts']:
+                            info = None
+                            break
             if info:
                 return info, computed
 
@@ -598,10 +643,8 @@ class ProjectData(FolderManager):
             or cached.get('inputs') != jobInfo.get('inputs')
         )
         if cached.get('status') != status or info_changed:
-            info = dict(cached) if cached else dict(jobInfo)
+            info = dict(jobInfo)
             info['status'] = status
-            info['inputs'] = jobInfo.get('inputs', info.get('inputs', []))
-            info['outputs'] = jobInfo.get('outputs', info.get('outputs', []))
             self._set_info(self._jobs, job.id, info)
             return True
         return False
@@ -611,7 +654,7 @@ class ProjectData(FolderManager):
         for job in self._wf.jobs():
             info, computed = self._getJobInfo(job.id)
             active = self.isActiveJob(job)
-            if active:
+            if active or not info.get('outputs'):
                 extended = self._extendJobInfoOutputs(job.id, info, job=job)
                 if extended['outputs'] != info.get('outputs'):
                     info = extended
@@ -631,7 +674,7 @@ class ProjectData(FolderManager):
         # is updated, which would otherwise recompute and prune inactive jobs while
         # another job is running and the GUI auto-refreshes.
         jobFiles = [self.join(job_id, fn) for fn in [
-            'job.star', 'RELION_OUTPUT_NODES.star',
+            'job.star', 'RELION_OUTPUT_NODES.star', 'info.json',
             *self.JOB_STATUS_FILES.keys(),
         ]]
         return self._get_info(self._jobs, job_id, jobFiles, self._computeJobInfo)
@@ -700,16 +743,17 @@ class ProjectData(FolderManager):
                 return pending
 
         if force or self._shouldRefreshOutputInfo(output_id, job):
-            info = self._computeOutputTypeInfo(output_id, [self.join(output_id)])
+            info = self._computeOutputTypeInfo(
+                output_id, self._outputInfoFilesForId(output_id))
             self._set_info(self._outputs, output_id, info)
             if (self._isPendingOutput(output_id)
                     and str(info.get('info', '')).startswith('Error:')):
                 return self._pendingOutputInfo(output_id)
             return info
 
-        outputFiles = [self.join(output_id)]
-        info, computed = self._get_info(self._outputs, output_id, outputFiles,
-                                        self._computeOutputTypeInfo)
+        info_files = self._outputInfoFilesForId(output_id)
+        info, computed = self._get_info(
+            self._outputs, output_id, info_files, self._computeOutputTypeInfo)
         if (self._isPendingOutput(output_id)
                 and str(info.get('info', '')).startswith('Error:')):
             return self._pendingOutputInfo(output_id)
