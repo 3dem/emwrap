@@ -38,6 +38,11 @@ class ProcessingConfig:
             "label": "EMwrap Subset TS",
             "output": "EMwrap"
         },
+        "emw-merge-sets": {
+            "launcher": "emwrap.base.merge_sets",
+            "label": "EMwrap Merge Sets",
+            "output": "EMwrap"
+        },
         "emw-warp-mctf": {
             "launcher": "emwrap.warp.warp_mctf",
             "label": "Warp Motion and CTF",
@@ -81,10 +86,26 @@ class ProcessingConfig:
         "emw-pytme": {"launcher": "emwrap.pytme", "visible": False},        
         "emw-relion-symmetrize_volume": {"launcher": "emwrap.relion.symmetrize_volume"},
         "emw-relion-mask_create": {"launcher": "emwrap.relion.mask_create"},
-        "emw-warp-mtools_create": {"launcher": "emwrap.warp.warp_mtools_create"},
-        "emw-warp-mcore": {"launcher": "emwrap.warp.warp_mcore"},
-        "emw-warp-estimate_weights": {"launcher": "emwrap.warp.warp_estimate_weights"},
-        "emw-warp-mtools_resample": {"launcher": "emwrap.warp.warp_mtools_resample"},
+        "emw-warp-mtools_create": {
+            "launcher": "emwrap.warp.warp_mtools_create",
+            "label": "Warp M Create Population",
+            "output": "WarpMCreatePopulation"
+        },
+        "emw-warp-mcore": {
+            "launcher": "emwrap.warp.warp_mcore",
+            "label": "Warp MCore Refine",
+            "output": "WarpMCore"
+        },
+        "emw-warp-estimate_weights": {
+            "launcher": "emwrap.warp.warp_estimate_weights",
+            "label": "Warp Estimate Weights",
+            "output": "WarpEstimateWeights"
+        },
+        "emw-warp-mtools_resample": {
+            "launcher": "emwrap.warp.warp_mtools_resample",
+            "label": "Warp M Resample",
+            "output": "WarpMResample"
+        },
         "relion.reconstructtomograms": {
             "launcher": "emwrap.relion.native",
             "label": "Relion Reconstruct Tomograms",
@@ -119,14 +140,14 @@ class ProcessingConfig:
             "output": "Refine3D",
             "tomo": True
         },
-        "emw-aretomo3": { 
-            "launcher": "$SCRIPTS/emwrap_launcher.sh emwrap.aretomo.aretomo3_pipeline",
+        "emw-aretomo3": {
+            "launcher": "emwrap.aretomo.aretomo3_pipeline",
             "label": "Aretomo3",
             "output": "Aretomo3"
         },
         "emw-denoiset": {
-            "launcher": "emwrap.aretomo.denoiset",
-            "label": "DenoisET",
+            "launcher": "emwrap.aretomo.denoiset_pipeline",
+            "label": "DenoisET Pipeline",
             "output": "DenoisET"
         }
     }

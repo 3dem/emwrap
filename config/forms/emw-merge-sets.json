@@ -1,0 +1,20 @@
+{
+    "name": "emw-merge-sets",
+    "label": "EMwrap Merge Sets",
+    "help": "Merge multiple tilt-series, tomogram, or particle/coordinate sets of the same type into one output set.",
+    "sections": [
+        {
+            "label": "Input",
+            "params": [
+                {
+                    "name": "input_sets",
+                    "label": "Input sets:",
+                    "paramClass": "MultiPointerParam",
+                    "pointerClass": "TiltSeriesMovies, TiltSeries, Tomograms, TomoParticles, TomoCoordinates",
+                    "min": 2,
+                    "help": "Two or more STAR files of the same type: tilt_series.star, tomograms.star, or optimisation_set.star (TomoParticles / TomoCoordinates)."
+                }
+            ]
+        }
+    ]
+}

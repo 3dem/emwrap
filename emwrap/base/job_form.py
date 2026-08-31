@@ -17,6 +17,7 @@
 import glob
 import os
 import re
+import ast
 
 
 class JobValidationError(Exception):
@@ -160,6 +161,143 @@ def _param_class(param_def):
     return param_def.get('paramClass') or 'StringParam'
 
 
+def _normalize_scalar_param_class(param_class):
+    if param_class == 'BoolParam':
+        return 'BooleanParam'
+    return param_class
+
+
+def _table_columns(param_def):
+    columns = []
+    for col in param_def.get('params') or []:
+        name = col.get('name')
+        if not name:
+            continue
+        columns.append({
+            'name': name,
+            'label': col.get('label') or name,
+            'paramClass': _normalize_scalar_param_class(_param_class(col)),
+            'default': col.get('default', ''),
+        })
+    return columns
+
+
+def _is_table_row_empty(row, columns):
+    if not isinstance(row, dict):
+        return True
+    for col in columns:
+        value = row.get(col['name'], '')
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text == '':
+            continue
+        default = col.get('default', '')
+        if default is not None and str(value) == str(default):
+            continue
+        return False
+    return True
+
+
+def _quote_star_json_string(value):
+    """Serialize a string using single quotes, without raw double quotes."""
+    text = str(value)
+    text = (text.replace('\\', '\\\\')
+                .replace("'", "\\'")
+                .replace('"', '\\u0022'))
+    return f"'{text}'"
+
+
+def _serialize_star_json(value):
+    """Serialize list/dict params using single quotes (STAR-safe, no \")."""
+    if isinstance(value, list):
+        return '[' + ','.join(_serialize_star_json(v) for v in value) + ']'
+    if isinstance(value, dict):
+        return '{' + ','.join(
+            f"{_quote_star_json_string(k)}:{_serialize_star_json(v)}"
+            for k, v in value.items()) + '}'
+    if isinstance(value, bool):
+        return repr(value)
+    if value is None:
+        return 'None'
+    if isinstance(value, int) and not isinstance(value, bool):
+        return str(value)
+    if isinstance(value, float):
+        return repr(value)
+    return _quote_star_json_string(value)
+
+
+def _encode_json_param_value(value):
+    if value is None:
+        return '[]'
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return '[]'
+        try:
+            parsed = _parse_star_json_literal(text)
+        except (SyntaxError, ValueError):
+            return text
+        return _serialize_star_json(parsed)
+    return _serialize_star_json(value)
+
+
+def _parse_star_json_literal(text):
+    """Parse single-quote encoded params stored in job.star."""
+    return ast.literal_eval(text)
+
+
+def _parse_json_param_value(raw_value, label='JSON value', expect_list=True):
+    if raw_value is None:
+        return [] if expect_list else None
+    if isinstance(raw_value, list):
+        return raw_value
+    if not isinstance(raw_value, str):
+        raise ValueError(f'{label} must be an encoded string or list.')
+
+    text = raw_value.strip()
+    if not text:
+        return [] if expect_list else None
+
+    try:
+        parsed = _parse_star_json_literal(text)
+    except (SyntaxError, ValueError) as exc:
+        raise ValueError(f'{label} is not valid encoded data ({exc}).') from exc
+
+    if expect_list and not isinstance(parsed, list):
+        raise ValueError(f'{label} must be an encoded array.')
+    return parsed
+
+
+def _parse_table_param_value(raw_value):
+    return _parse_json_param_value(raw_value, 'Table value', expect_list=True)
+
+
+def _parse_multi_pointer_param_value(raw_value):
+    parsed = _parse_json_param_value(
+        raw_value, 'Multi-pointer value', expect_list=True)
+    return [str(v).strip() for v in parsed if str(v).strip()]
+
+
+def _validate_table_cell(value, column):
+    param_class = column['paramClass']
+    text = '' if value is None else str(value).strip()
+    if not text:
+        return None
+
+    if param_class == 'IntParam':
+        if not _is_valid_int(value):
+            return f"invalid integer value '{value}'"
+        return None
+
+    if param_class == 'FloatParam':
+        if not _is_valid_float(value):
+            return f"invalid float value '{value}'"
+        return None
+
+    return None
+
+
 def _allows_empty(param_def, param_class):
     if 'allowsEmpty' in param_def:
         return bool(param_def['allowsEmpty'])
@@ -211,6 +349,10 @@ class JobForm:
     def iter_params(job_form):
         """Iterate over all params in sections, groups, and lines."""
         def _iter_params(container_def):
+            if _param_class(container_def) == 'TableParam':
+                yield container_def
+                return
+
             if params := container_def.get('params', None):
                 for p in params:
                     yield from _iter_params(p)
@@ -219,6 +361,109 @@ class JobForm:
 
         for section_def in job_form['sections']:
             yield from _iter_params(section_def)
+
+    @staticmethod
+    def decode_multi_pointer_params(job_form, params):
+        """Decode MultiPointerParam JSON strings into lists of paths."""
+        if not job_form or not params:
+            return params
+
+        decoded = dict(params)
+        for param_def in JobForm.iter_params(job_form):
+            if _param_class(param_def) != 'MultiPointerParam':
+                continue
+            name = param_def.get('name')
+            if not name or name not in decoded:
+                continue
+            value = decoded[name]
+            if isinstance(value, list):
+                continue
+            if isinstance(value, str):
+                text = value.strip()
+                if not text:
+                    decoded[name] = []
+                    continue
+                try:
+                    decoded[name] = _parse_multi_pointer_param_value(value)
+                except ValueError:
+                    decoded[name] = []
+            elif value is None:
+                decoded[name] = []
+        return decoded
+
+    @staticmethod
+    def encode_multi_pointer_params(job_form, params):
+        """Encode MultiPointerParam lists as JSON strings for job.star storage."""
+        if not job_form or not params:
+            return params
+
+        encoded = dict(params)
+        for param_def in JobForm.iter_params(job_form):
+            if _param_class(param_def) != 'MultiPointerParam':
+                continue
+            name = param_def.get('name')
+            if not name or name not in encoded:
+                continue
+            value = encoded[name]
+            if isinstance(value, (list, str)) or value is None:
+                encoded[name] = _encode_json_param_value(value)
+        return encoded
+
+    @staticmethod
+    def decode_json_params(job_form, params):
+        """Decode TableParam and MultiPointerParam values from job.star."""
+        if not job_form or not params:
+            return params
+        params = JobForm.decode_table_params(job_form, params)
+        params = JobForm.decode_multi_pointer_params(job_form, params)
+        return params
+
+    @staticmethod
+    def decode_table_params(job_form, params):
+        """Decode TableParam JSON strings into lists of row dicts."""
+        if not job_form or not params:
+            return params
+
+        decoded = dict(params)
+        for param_def in JobForm.iter_params(job_form):
+            if _param_class(param_def) != 'TableParam':
+                continue
+            name = param_def.get('name')
+            if not name or name not in decoded:
+                continue
+            value = decoded[name]
+            if isinstance(value, list):
+                continue
+            if isinstance(value, str):
+                text = value.strip()
+                if not text:
+                    decoded[name] = []
+                    continue
+                try:
+                    decoded[name] = _parse_table_param_value(value)
+                except ValueError:
+                    continue
+            elif value is None:
+                decoded[name] = []
+        return decoded
+
+    @staticmethod
+    def encode_table_params(job_form, params):
+        """Encode TableParam lists as JSON strings for job.star storage."""
+        if not job_form or not params:
+            return params
+
+        encoded = dict(params)
+        for param_def in JobForm.iter_params(job_form):
+            if _param_class(param_def) != 'TableParam':
+                continue
+            name = param_def.get('name')
+            if not name or name not in encoded:
+                continue
+            value = encoded[name]
+            if isinstance(value, (list, str)) or value is None:
+                encoded[name] = _encode_json_param_value(value)
+        return encoded
 
     @staticmethod
     def get_values(job_form, all=False):
@@ -255,6 +500,69 @@ class JobForm:
 
         def _validate_def(container_def, parent_visible=True):
             visible = _container_visible(container_def, merged, parent_visible)
+            param_class = _param_class(container_def)
+
+            if param_class == 'TableParam':
+                if not JobForm._should_validate_param(container_def, merged, visible):
+                    return
+
+                name = container_def['name']
+                label = container_def.get('label') or name
+                columns = _table_columns(container_def)
+                raw_value = merged.get(name, '[]')
+
+                try:
+                    rows = _parse_table_param_value(raw_value)
+                except ValueError as exc:
+                    errors.append(f"{label}: invalid table value ({exc}).")
+                    return
+
+                for row_index, row in enumerate(rows):
+                    if _is_table_row_empty(row, columns):
+                        continue
+                    if not isinstance(row, dict):
+                        errors.append(
+                            f"{label}: row {row_index + 1} must be an object.")
+                        continue
+                    for column in columns:
+                        cell_error = _validate_table_cell(
+                            row.get(column['name'], ''), column)
+                        if cell_error:
+                            col_label = column.get('label') or column['name']
+                            errors.append(
+                                f"{label}, row {row_index + 1}, {col_label}: {cell_error}.")
+                return
+
+            if param_class == 'MultiPointerParam':
+                if not JobForm._should_validate_param(container_def, merged, visible):
+                    return
+
+                name = container_def['name']
+                label = container_def.get('label') or name
+                min_items = container_def.get('min')
+                try:
+                    items = _parse_multi_pointer_param_value(merged.get(name, '[]'))
+                except ValueError as exc:
+                    errors.append(f"{label}: invalid multi-pointer value ({exc}).")
+                    return
+
+                if min_items is not None and len(items) < int(min_items):
+                    errors.append(
+                        f"{label}: at least {int(min_items)} input(s) are required.")
+                    return
+
+                for index, item in enumerate(items):
+                    if _is_empty(item):
+                        errors.append(f"{label}: input {index + 1} is empty.")
+                        continue
+                    if skip_path_exists and skip_path_exists(item):
+                        continue
+                    path = _resolve_path(str(item), project_path)
+                    if not os.path.exists(path):
+                        errors.append(
+                            f"{label}: file or directory '{item}' does not exist.")
+                return
+
             if container_def.get('params'):
                 for child in container_def['params']:
                     _validate_def(child, visible)

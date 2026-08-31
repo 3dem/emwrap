@@ -10,45 +10,36 @@
                     "paramClass": "Group",
                     "params": [
                         {
-                            "label": "Create new population",
-                            "name": "new_population",
-                            "paramClass": "BooleanParam",
-                            "default": true,
-                            "help": "Create a new population or input an existing population file."
-                        },
-                        {
                             "name": "create_population.name",
                             "label": "Population name:",
                             "paramClass": "StringParam",
-                            "condition": "new_population",
                             "help": "Required (-n, --name). Name of the new population. The .population file will be <directory>/<name>.population"
-                        },
-                        {
-                            "name": "warp_folder",
-                            "label": "Previous WARP run:",
-                            "paramClass": "PathParam",
-                            "condition": "new_population",
-                            "help": "Select the folder of the previous WARP run to use the settings and frame/tilt series from that run. Required only if creating a new population."
-                        },
-                        {
-                            "name": "input_population",
-                            "label": "Input population:",
-                            "paramClass": "PathParam",
-                            "pointerClass": "WarpPopulation",
-                            "condition": "!new_population",
-                            "help": "Path to an existing population file."
                         }
                     ]
                 },
                 {
-                    "label": "Source",
+                    "label": "Sources",
                     "paramClass": "Group",
                     "params": [
                         {
-                            "name": "create_source.name",
-                            "label": "Source name:",
-                            "paramClass": "StringParam",
-                            "help": "Name of the new data source, if empty will be the same as the population name."
+                            "name": "sources",
+                            "label": "Sources:",
+                            "paramClass": "TableParam",
+                            "help": "Define one or more data sources. Each source name must not contain spaces.",
+                            "params": [
+                                {
+                                    "name": "name",
+                                    "label": "Source name",
+                                    "paramClass": "StringParam",
+                                    "help": "Name of the data source (no spaces)."
+                                },
+                                {
+                                    "name": "warp_folder",
+                                    "label": "Previous WARP run",
+                                    "paramClass": "PathParam",
+                                    "help": "Folder of the previous WARP run to import frame/tilt series settings from."
+                                }
+                            ]
                         },
                         {
                             "name": "create_source.nframes",

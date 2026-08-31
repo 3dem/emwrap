@@ -539,6 +539,8 @@ class WarpExportParticles(WarpBasePipeline):
                     sfOut.writeTable(
                         tn, newTable, computeFormat='right', singleRow=singleRow
                     )
+        # Let's make a backup of the original particles.star file
+        shutil.copy(ptsFn, ptsFn.replace('.star', '_original.star'))
         shutil.move(starFnOut, ptsFn)
 
     def _removeUnusedWarpOutputs(self):
