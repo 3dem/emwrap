@@ -72,7 +72,7 @@ setup(
            'emw-import-movies = emwrap.base.import_movies:main',
            'emw-mc-tomo = emwrap.motioncor.mcpipeline_tomo:main',
            'emw = emwrap.base:ProjectManager.main',
-           'emw-config = emwrap.base:ProcessingConfig.main'
+           'emh-tomo = emwrap.base:EMhubTomo.main'
        ],
 
     }

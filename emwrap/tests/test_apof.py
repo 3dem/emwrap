@@ -28,11 +28,10 @@ from emwrap.base.config import ProcessingConfig
 
 
 class TestApoF(unittest.TestCase):
-    workflow_template = None   # subclasses must set: path to json.template
+    workflow_template = None   # subclasses must set: path to the workflow json file
     job_types = None           # subclasses must set: ordered list of job types
     expected_outputs = None    # subclasses must set: {job_type: output_star(s)}
-    
-    EMWRAP_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
     project_path = None
     project_temporary = False
 
@@ -40,10 +39,12 @@ class TestApoF(unittest.TestCase):
     data_root = None
     ngpus = 1
     dry = False
-    
+
     @classmethod
     def get_workflow_template(cls, workflow_name):
-        return os.path.join(cls.EMWRAP_ROOT, 'config', 'workflows', f'{workflow_name}.json.template')
+        # Workflows ship with the code; resolve them through ProcessingConfig
+        # so tests always load the same files the running code would.
+        return ProcessingConfig.get_workflow_file(workflow_name)
 
     @classmethod
     def configure(cls, args):

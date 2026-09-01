@@ -17,4 +17,5 @@
 from .processing_pipeline import ProcessingPipeline
 from .project_manager import ProjectManager
 from .config import ProcessingConfig
+from .__main__ import EMhubTomo
 from .job_form import JobForm, JobValidationError

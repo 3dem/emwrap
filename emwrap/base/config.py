@@ -14,13 +14,21 @@
 # *
 # **************************************************************************
 
-import sys
 import os
 import json
-import argparse
 from pprint import pprint
 
 from emtools.utils import Pretty, Color
+
+# Location of this file: <code_root>/emwrap/base/config.py
+# Forms and workflows now ship with the code itself (no longer configurable
+# via EMWRAP_CONFIG), so their default directories are resolved relative to
+# it: <code_root>/config/forms and <code_root>/config/workflows.
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+_CODE_DIR = os.path.dirname(os.path.dirname(_BASE_DIR))
+_DEFAULT_FORMS_DIR = os.path.join(_CODE_DIR, 'config', 'forms')
+_DEFAULT_WORKFLOWS_DIR = os.path.join(_CODE_DIR, 'config', 'workflows')
+_DEFAULT_SCRIPTS_TEMPLATES_DIR = os.path.join(_CODE_DIR, 'config', 'scripts')
 
 
 class ProcessingConfig:
@@ -221,8 +229,13 @@ class ProcessingConfig:
         return job_conf.get('visible', True)
 
     @classmethod
+    def get_forms_dir(cls):
+        """Return the forms directory, shipped alongside the code."""
+        return _DEFAULT_FORMS_DIR
+
+    @classmethod
     def get_job_form_file(cls, jobtype):
-        return os.path.join(cls._get_config('forms'), f'{jobtype}.json')
+        return os.path.join(cls.get_forms_dir(), f'{jobtype}.json')
 
     @classmethod
     def get_job_form(cls, jobtype):
@@ -240,7 +253,7 @@ class ProcessingConfig:
 
     @classmethod
     def get_workflow_file(cls, workflowId):
-        return os.path.join(cls._get_config('workflows'), f'{workflowId}.json')
+        return os.path.join(cls.get_workflows_dir(), f'{workflowId}.json')
 
     @classmethod
     def get_workflow(cls, workflowId):
@@ -253,11 +266,21 @@ class ProcessingConfig:
 
     @classmethod
     def get_workflows_dir(cls):
-        return cls._get_config('workflows', '')
+        """Return the workflows directory, shipped alongside the code."""
+        return _DEFAULT_WORKFLOWS_DIR
 
     @classmethod
-    def list_workflows(cls):
-        """Return title and description metadata for each configured workflow."""
+    def get_scripts_templates_dir(cls):
+        """Return the directory with the .template scripts shipped with the
+        code (used by 'emh-tomo --config update' to populate the local
+        'scripts' folder). Not to be confused with get_scripts_dir(), which
+        is the installed/target scripts directory (from the SCRIPTS env var).
+        """
+        return _DEFAULT_SCRIPTS_TEMPLATES_DIR
+
+    @classmethod
+    def get_workflows(cls):
+        """Return title and description metadata for each available workflow."""
         workflows_dir = cls.get_workflows_dir()
         if not workflows_dir or not os.path.exists(workflows_dir):
             return []
@@ -396,8 +419,11 @@ class ProcessingConfig:
             raise Exception("Configuration is not valid.")
 
         scripts_dir = cls.get_scripts_dir()
-        workflows_dir = conf.get('workflows', '')
-        workflows_exists = bool(workflows_dir) and os.path.exists(workflows_dir)
+        # 'forms' and 'workflows' are no longer part of EMWRAP_CONFIG; both
+        # ship with the code, at fixed locations (see get_forms_dir() and
+        # get_workflows_dir()).
+        workflows_dir = cls.get_workflows_dir()
+        workflows_exists = os.path.exists(workflows_dir)
         workflow_files = []
         workflow_rows = []
 
@@ -412,13 +438,16 @@ class ProcessingConfig:
                 for workflow_file in workflow_files
             ]
 
-        required_keys = ['jobs', 'programs', 'forms']
+        # NOTE: 'jobs' is no longer part of EMWRAP_CONFIG either; the
+        # available job types are defined in ProcessingConfig._jobs
+        # (see get_jobs()).
+        required_keys = ['programs']
         for key in required_keys:
             if not conf.get(key, None):
                 raise Exception(f"Configuration is not valid: '{key}' is required.")
 
-        forms_dir = conf.get('forms', '')
-        forms_exists = bool(forms_dir) and os.path.exists(forms_dir)
+        forms_dir = cls.get_forms_dir()
+        forms_exists = os.path.exists(forms_dir)
 
         def _count_value(value):
             if isinstance(value, (dict, list, tuple, set)):
@@ -436,25 +465,24 @@ class ProcessingConfig:
             },
             {
                 'label': 'WORKFLOWS',
-                'value': workflows_dir or 'NO WORKFLOWS DIR SET',
-                'status': 'ok' if workflows_exists else 'error' if workflows_dir else 'warning',
-                'status_label': 'OK' if workflows_exists else 'Missing dir' if workflows_dir else 'Unset',
-                'validation': 'Directory must exist when configured',
+                'value': workflows_dir,
+                'status': 'ok' if workflows_exists else 'error',
+                'status_label': 'OK' if workflows_exists else 'Missing dir',
+                'validation': 'Directory shipped with the code, must exist.',
                 'details': f'{len(workflow_files)} workflow files found' if workflows_exists
-                           else 'No workflows directory configured' if not workflows_dir
                            else 'WORKFLOWS DIR DOES NOT EXIST'
             },
             {
                 'label': 'FORMS',
-                'value': forms_dir or 'MISSING',
-                'status': 'ok' if forms_exists else 'warning' if forms_dir else 'error',
-                'status_label': 'OK' if forms_exists else 'Path missing' if forms_dir else 'Missing',
-                'validation': 'Required by check_config',
+                'value': forms_dir,
+                'status': 'ok' if forms_exists else 'error',
+                'status_label': 'OK' if forms_exists else 'Missing dir',
+                'validation': 'Directory shipped with the code, must exist.',
                 'details': 'Directory existence is shown for convenience.'
             },
             {
                 'label': 'JOBS',
-                'value': f"{_count_value(conf.get('jobs', {}))} configured",
+                'value': f"{_count_value(cls.get_jobs())} configured",
                 'status': 'ok',
                 'status_label': 'OK',
                 'validation': 'Required by check_config',
@@ -471,7 +499,7 @@ class ProcessingConfig:
         ]
 
         job_rows = []
-        for job_name, job_conf in sorted(conf.get('jobs', {}).items()):
+        for job_name, job_conf in sorted(cls.get_jobs().items()):
             launcher_info = cls.get_launcher_info(job_conf)
             form_file = cls.get_job_form_file(job_name)
             job_rows.append({
@@ -519,16 +547,13 @@ class ProcessingConfig:
         else:
             print(f"\n{Color.cyan('SCRIPTS')}={Color.red(summary['SCRIPTS']['value'])}")
 
-        workflows_dir = conf.get('workflows', 'NO WORKFLOWS DIR SET')   
-        if workflows_dir:
-            if os.path.exists(workflows_dir):
-                print(f"\n{Color.cyan('WORKFLOWS')}={Color.bold(workflows_dir)}")
-                for workflow in report['workflow_files']:
-                    print(f"  {Color.blue(workflow)}")
-            else:
-                print(f"\n{Color.cyan('WORKFLOWS')}={Color.red('WORKFLOWS DIR DOES NOT EXIST')}")
+        workflows_dir = cls.get_workflows_dir()
+        if os.path.exists(workflows_dir):
+            print(f"\n{Color.cyan('WORKFLOWS')}={Color.bold(workflows_dir)}")
+            for workflow in report['workflow_files']:
+                print(f"  {Color.blue(workflow)}")
         else:
-            print(f"\n{Color.cyan('WORKFLOWS')}={Color.red('NO WORKFLOWS DIR SET')}")
+            print(f"\n{Color.cyan('WORKFLOWS')}={Color.red('WORKFLOWS DIR DOES NOT EXIST')}: {workflows_dir}")
 
         cls.check_job_launchers(conf)
         cls.check_programs(conf)
@@ -559,7 +584,8 @@ class ProcessingConfig:
         format_str = u'{:<30}{:<70}{:<40}'
         print('\n' + format_str.format(*headers))
 
-        for jobName, jobConf in conf.get('jobs', {}).items():
+        # 'jobs' are defined in ProcessingConfig._jobs, not in EMWRAP_CONFIG
+        for jobName, jobConf in cls.get_jobs().items():
             launcher_line = cls._check_launcher(jobConf)
             print(format_str.format(jobName, launcher_line, ''))
 
@@ -573,38 +599,3 @@ class ProcessingConfig:
         for programName, programConf in conf.get('programs', {}).items():
             launcher_line = cls._check_launcher(programConf)    
             print(format_str.format(programName, launcher_line))
-
-
-    @classmethod
-    def main(cls):
-        p = argparse.ArgumentParser(
-            prog='emw',
-            description='emwrap config manager')
-
-        g = p.add_mutually_exclusive_group()
-
-        g.add_argument('--print', '-p', action='store_true',
-                       help="Print the existing configuration.")
-        g.add_argument('--form', '-f', metavar='JOB_TYPE',
-                       help="Print the corresponding form for this job type.")
-        g.add_argument('--check', '-c', action='store_true',
-                       help="Check the current configuration is valid.")
-
-        args = p.parse_args()
-        n = len(sys.argv)
-
-        if n == 1 or args.print:
-            cls.print_config()
-
-        elif jobtype := args.form:
-            if not jobtype in ProcessingConfig.get_jobs():
-                raise Exception(f"Job type: {jobtype} not found in EMWRAP_CONFIG['jobs']")
-            formFile = ProcessingConfig.get_job_form_file(jobtype)
-            if not os.path.exists(formFile):
-                raise Exception(f"Form file: {Color.red(formFile)} does not exists.")
-            form = ProcessingConfig.get_job_form(jobtype)
-            print(json.dumps(form, indent=4))
-
-        elif args.check:
-            cls.check_config()
-            print(Color.green("Configuration is valid."))
