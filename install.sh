@@ -238,7 +238,16 @@ set -e
 # Get the directory of the current script
 DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
-. "${DIR}/bashrc"
+# Prefer 'emwrap.bashrc': it activates the Python environment (by sourcing
+# 'bashrc' itself) AND exports EMWRAP_CONFIG, which the config/check/run
+# actions need. Fall back to the plain 'bashrc' the very first time this
+# script runs, before 'emwrap.bashrc' has been created yet by
+# './emh-tomo --update'.
+if [ -f "${DIR}/emwrap.bashrc" ]; then
+  . "${DIR}/emwrap.bashrc"
+else
+  . "${DIR}/bashrc"
+fi
 
 python -m emwrap.tomo "$@"
 EOF

@@ -18,6 +18,8 @@ import sys
 import os
 import json
 import shutil
+import socket
+import getpass
 import argparse
 import subprocess
 
@@ -194,12 +196,54 @@ class EMhubTomo:
         shutil.copytree(extras_src, extras_dst, dirs_exist_ok=True)
 
     @classmethod
+    def _find_free_port(cls):
+        """ Return a free TCP port in the user/ephemeral range.
+
+        Binds a throwaway socket to port 0 and reads back the port the OS
+        assigned to it -- the standard, portable way to get an unused port
+        without hardcoding or scanning a range. There is a small race
+        between closing this socket and Flask binding the same port, but
+        that is an accepted limitation of this approach.
+        """
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(('', 0))
+            return s.getsockname()[1]
+
+    @classmethod
+    def _print_port_banner(cls, port):
+        """ Print a very visible banner announcing the port the server is
+        about to use, including a ready-to-use ssh tunnel command for
+        connecting from a client machine when this is run on a remote or
+        HPC host.
+        """
+        host = socket.gethostname()
+        user = getpass.getuser()
+        sep = '=' * 70
+        lines = [
+            '',
+            sep,
+            f"  emh-tomo server starting on port: {port}",
+            '',
+            "  Running on a remote/HPC host? Tunnel from your client with:",
+            f"      ssh -L {port}:localhost:{port} {user}@{host}",
+            '',
+            f"  Then open: http://localhost:{port}",
+            sep,
+            '',
+        ]
+        print(Color.green(Color.bold('\n'.join(lines))))
+
+    @classmethod
     def _run_run(cls):
         """ Run the emh-tomo instance at INSTANCE_DIR
         (~/.emhub/instances/tomo). If the instance does not exist yet, it
         is first created as a minimal emhub instance (via
         'emh-data --create_minimal') and the processing 'extra' files
         shipped with emhub are copied into it.
+
+        The server is started on a free port chosen automatically (see
+        _find_free_port()), announced with a visible banner so the port
+        can be used to set up an ssh tunnel if needed.
         """
         if not os.path.exists(INSTANCE_DIR):
             print(f">>> Instance not found, creating a minimal instance at: "
@@ -214,8 +258,15 @@ class EMhubTomo:
         if not os.path.exists(run_script):
             raise Exception(f"Instance run script not found: {run_script}")
 
+        port = cls._find_free_port()
+        cls._print_port_banner(port)
+
         print(f">>> Running instance: {Color.bold(INSTANCE_DIR)}")
-        sys.exit(subprocess.call(['bash', run_script]))
+        env = os.environ.copy()
+        # 'flask run' (invoked with no explicit --port in run.sh) reads its
+        # default port from FLASK_RUN_PORT when set.
+        env['FLASK_RUN_PORT'] = str(port)
+        sys.exit(subprocess.call(['bash', run_script], env=env))
 
     @classmethod
     def main(cls):
@@ -230,14 +281,14 @@ class EMhubTomo:
                             "'check' (validate the current configuration), or "
                             "'form:JOB_TYPE' (print the form for the given job "
                             "type).")
-        g.add_argument('--update', action='store_true',
+        g.add_argument('--update', '-u', action='store_true',
                        help="Copy any missing configuration file "
                             "(emwrap.bashrc) into the current directory, "
                             "create ./scripts if missing and copy any "
                             "missing script template into it, and pull the "
                             "latest changes (git pull --prune) for the "
                             "emtools/emhub/emwrap source checkouts.")
-        g.add_argument('--run', action='store_true',
+        g.add_argument('--run', '-r', action='store_true',
                        help=f"Run the emh-tomo instance at {INSTANCE_DIR}. "
                             "If it does not exist yet, it is created as a "
                             "minimal emhub instance and the processing extra "
