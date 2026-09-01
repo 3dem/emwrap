@@ -13,23 +13,51 @@ Installation
 
 *emwrap* is currently under development, and installation instructions might change. Current instructions are intended for a development environment. 
 
-Installation should work with any Python 3.8+ environment, but we have tested it with conda environments. If you need to install conda, you can follow the instructions:
+Installation should work with any Python 3.8+ environment. We have mostly tested it with conda environments, but a plain Python ``venv`` works just as well -- pick whichever you prefer. The install script checks upfront that a conda or venv environment is active, with Python 3.8+ and a working pip, and stops with an error if not.
+
+First, create a folder for the installation:
+
+.. code-block:: bash
+
+   mkdir emstack && cd emstack
+
+Then create and activate a Python environment inside it, using **either** conda **or** a venv:
+
+**Option A: conda**
+
+If you need to install conda, you can follow the instructions:
 
 .. code-block:: bash
 
    # Download and run the install script
    mkdir miniconda3 && wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh && bash ./miniconda.sh -b -u -p ./miniconda3
 
-
-Once you have conda activated, you can install emwrap with the following commands:
+Once conda is available, create and activate the environment:
 
 .. code-block:: bash
 
-   # Create a folder for the installation
-   mkdir emstack && cd emstack
-
-   # Create a conda environment and activate it
    conda create -y --name=emstack python=3.8 && conda activate emstack
+
+**Option B: Python venv**
+
+If you'd rather not use conda and already have Python 3.8+ available, you can create a virtual environment instead:
+
+.. code-block:: bash
+
+   # Create a venv using Python 3.8 and activate it
+   python3.8 -m venv ./venv && source ./venv/bin/activate
+
+If ``python3.8`` is not available on your system, install it first, e.g. on Ubuntu/Debian:
+
+.. code-block:: bash
+
+   sudo apt install python3.8 python3.8-venv
+
+Any Python 3.8 or newer interpreter works, so ``python3 -m venv ./venv`` is also fine as long as ``python3 --version`` reports 3.8 or later.
+
+Once you have your environment (conda or venv) activated, install emwrap with the following commands:
+
+.. code-block:: bash
 
    # Download and run the install script
    wget -qO- https://raw.githubusercontent.com/3dem/emwrap/refs/heads/main/install.sh | bash
