@@ -26,9 +26,10 @@ from emtools.utils import Pretty, Color
 # it: <code_root>/config/forms and <code_root>/config/workflows.
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _CODE_DIR = os.path.dirname(os.path.dirname(_BASE_DIR))
-_DEFAULT_FORMS_DIR = os.path.join(_CODE_DIR, 'config', 'forms')
-_DEFAULT_WORKFLOWS_DIR = os.path.join(_CODE_DIR, 'config', 'workflows')
-_DEFAULT_SCRIPTS_TEMPLATES_DIR = os.path.join(_CODE_DIR, 'config', 'scripts')
+_DEFAULT_CONFIG_DIR = os.path.join(_CODE_DIR, 'config')
+_DEFAULT_FORMS_DIR = os.path.join(_DEFAULT_CONFIG_DIR, 'forms')
+_DEFAULT_WORKFLOWS_DIR = os.path.join(_DEFAULT_CONFIG_DIR, 'workflows')
+_DEFAULT_SCRIPTS_TEMPLATES_DIR = os.path.join(_DEFAULT_CONFIG_DIR, 'scripts')
 
 
 class ProcessingConfig:
@@ -270,11 +271,20 @@ class ProcessingConfig:
         return _DEFAULT_WORKFLOWS_DIR
 
     @classmethod
+    def get_config_dir(cls):
+        """Return the top-level config directory shipped with the code.
+        It contains the 'emwrap.bashrc' template, plus the 'forms',
+        'workflows' and 'scripts' sub-directories, and is used by
+        'emh-tomo --update' to populate/refresh a local installation.
+        """
+        return _DEFAULT_CONFIG_DIR
+
+    @classmethod
     def get_scripts_templates_dir(cls):
         """Return the directory with the .template scripts shipped with the
-        code (used by 'emh-tomo --config update' to populate the local
-        'scripts' folder). Not to be confused with get_scripts_dir(), which
-        is the installed/target scripts directory (from the SCRIPTS env var).
+        code (used by 'emh-tomo --update' to populate the local 'scripts'
+        folder). Not to be confused with get_scripts_dir(), which is the
+        installed/target scripts directory (from the SCRIPTS env var).
         """
         return _DEFAULT_SCRIPTS_TEMPLATES_DIR
 

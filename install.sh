@@ -218,24 +218,6 @@ EOF
   echo -e "    To reload environment later, run: ${BOLD}source ${SOURCE_FILE}${NORMAL}"
 }
 
-copy_templates() {
-  local source_dir=$1
-  local target_dir=$2
-  echo -e ">>> Copying templates from ${source_dir} to ${target_dir}..."
-  for script in ${source_dir}/*.template; do
-    run_cmd cp ${script} ${target_dir}/$(basename ${script} .template)
-  done
-}
-
-link_scripts() {
-  CURRENT_STEP="linking scripts"
-  run_cmd cp ${SOURCE}/emwrap/config/scripts/update.sh.template update.sh
-  run_cmd cp ${SOURCE}/emwrap/config/scripts/run.sh.template run.sh
-
-  echo -e "    To update the environment later, run: ${BOLD}./update.sh${NORMAL}"
-  echo -e "    To run the server, run: ${BOLD}./run.sh${NORMAL}"
-}
-
 # ============================================================================
 # Pre-flight checks: an active conda or venv environment with a suitable
 # Python and pip is required before doing anything else.
@@ -254,26 +236,19 @@ clone emtools devel
 clone emhub devel
 clone emwrap main
 
-CURRENT_STEP="copying templates scripts"
-copy_templates ${SOURCE}/emwrap/config/ ./
-run_cmd chmod +x update.sh run.sh
-# NOTE: forms, workflows and scripts are no longer copied per-installation;
-# forms/workflows are loaded directly from
-# ${SOURCE}/emwrap/config/{forms,workflows} by ProcessingConfig (see
-# get_forms_dir() / get_workflows_dir()), and the local 'scripts' folder is
-# now set up by 'emh-tomo --config update' (see get_scripts_templates_dir()).
-
 # Generate the activation script matching the environment detected above
 generate_activate_script
 
-CURRENT_STEP="creating minimal instance"
-emh-data --create_minimal instance
+# NOTE: forms and workflows are loaded directly from
+# ${SOURCE}/emwrap/config/{forms,workflows} by ProcessingConfig (see
+# get_forms_dir() / get_workflows_dir()). The local configuration file
+# (emwrap.bashrc) and the 'scripts' folder are set up below by
+# 'emh-tomo --update' (which also pulls the latest changes for the
+# source checkouts on later runs). The emhub instance (and its processing
+# extras) is created on demand the first time 'emh-tomo --run' is used.
 
-CURRENT_STEP="copying processing extras"
-run_cmd cp -r ${SOURCE}/emhub/extras/processing instance/extra
-
-CURRENT_STEP="setting up scripts folder"
-run_cmd emh-tomo --config update
+CURRENT_STEP="setting up configuration files and scripts folder"
+run_cmd emh-tomo --update
 
 echo -e "\n${GREEN}${BOLD}Installation complete!${NORMAL}"
 

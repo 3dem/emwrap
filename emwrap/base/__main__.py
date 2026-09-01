@@ -19,10 +19,18 @@ import os
 import json
 import shutil
 import argparse
+import subprocess
 
 from emtools.utils import Color
 
 from .config import ProcessingConfig
+
+
+# Fixed location of the emhub instance used by 'emh-tomo --run'.
+INSTANCE_DIR = os.path.expanduser('~/.emhub/instances/tomo')
+
+# Source checkouts updated by 'emh-tomo --update', found under EMSTACK_HOME.
+SOURCE_REPOS = ('emtools', 'emhub', 'emwrap')
 
 
 class EMhubTomo:
@@ -34,8 +42,6 @@ class EMhubTomo:
             'list'          -> print the current configuration
             'check'         -> validate the current configuration
             'form:JOB_TYPE' -> print the form for the given job type
-            'update'        -> create ./scripts (if missing) and copy any
-                                missing script templates into it
         """
         if action == 'list':
             ProcessingConfig.print_config()
@@ -43,9 +49,6 @@ class EMhubTomo:
         elif action == 'check':
             ProcessingConfig.check_config()
             print(Color.green("Configuration is valid."))
-
-        elif action == 'update':
-            cls._run_config_update()
 
         elif action.startswith('form:'):
             jobtype = action.split(':', 1)[1]
@@ -64,17 +67,56 @@ class EMhubTomo:
         else:
             raise Exception(
                 f"Invalid --config value: '{action}'. "
-                "Expected one of: 'list', 'check', 'update', 'form:JOB_TYPE'.")
+                "Expected one of: 'list', 'check', 'form:JOB_TYPE'.")
 
     @classmethod
-    def _run_config_update(cls):
-        """ Create the local 'scripts' folder (if it does not exist yet)
-        and copy into it any script template, shipped with the code, that
-        is not already present -- existing scripts are never overwritten.
+    def _copy_missing_templates(cls, templates_dir, target_dir):
+        """ Copy every '*.template' file found directly under 'templates_dir'
+        into 'target_dir', stripping the '.template' suffix. Existing files
+        in 'target_dir' are never overwritten.
+
+        Prints one line per template: copied ones in green, skipped
+        (already existing) ones in red. Returns the list of template file
+        names found.
+        """
+        template_files = sorted(
+            f for f in os.listdir(templates_dir) if f.endswith('.template'))
+
+        for template_file in template_files:
+            name = template_file[:-len('.template')]
+            src_file = os.path.join(templates_dir, template_file)
+            dst_file = os.path.join(target_dir, name)
+
+            if os.path.exists(dst_file):
+                print(f"    {Color.red('EXISTS, skipped')}  {name}")
+            else:
+                shutil.copy2(src_file, dst_file)
+                print(f"    {Color.green('COPIED')}           {name}")
+
+        return template_files
+
+    @classmethod
+    def _update_config(cls):
+        """ Set up the local configuration files and 'scripts' folder from
+        the templates shipped with the code -- existing files are never
+        overwritten:
+          - copy 'emwrap.bashrc' into the current directory
+          - create the local 'scripts' folder (if missing) and copy into it
+            any missing script template
 
         Prints one line per template: copied ones in green, skipped
         (already existing) ones in red.
         """
+        config_dir = ProcessingConfig.get_config_dir()
+        if not os.path.isdir(config_dir):
+            raise Exception(f"Config directory not found: {config_dir}")
+
+        cwd = os.path.abspath('.')
+        print(f">>> Updating configuration files in: {Color.bold(cwd)}")
+        config_templates = cls._copy_missing_templates(config_dir, cwd)
+        if not config_templates:
+            print(Color.red(f"    No config templates found in {config_dir}"))
+
         templates_dir = ProcessingConfig.get_scripts_templates_dir()
         if not os.path.isdir(templates_dir):
             raise Exception(
@@ -89,23 +131,91 @@ class EMhubTomo:
         print(f"    {Color.green('CREATED')} scripts folder" if created_dir
               else "    scripts folder already exists")
 
-        template_files = sorted(
-            f for f in os.listdir(templates_dir) if f.endswith('.template'))
-
-        if not template_files:
+        script_templates = cls._copy_missing_templates(templates_dir, target_dir)
+        if not script_templates:
             print(Color.red(f"    No script templates found in {templates_dir}"))
-            return
 
-        for template_file in template_files:
-            script_name = template_file[:-len('.template')]
-            src_file = os.path.join(templates_dir, template_file)
-            dst_file = os.path.join(target_dir, script_name)
+    @classmethod
+    def _update_source(cls):
+        """ Update (git pull --prune) each of the emtools/emhub/emwrap
+        source checkouts found under EMSTACK_HOME (exported by the
+        generated 'bashrc' activation script). This replaces the old
+        standalone 'update.sh' script.
+        """
+        emstack_home = os.environ.get('EMSTACK_HOME')
+        if not emstack_home:
+            raise Exception(
+                "EMSTACK_HOME is not set. Make sure the installation "
+                "environment has been activated (e.g. 'source bashrc') "
+                "before running 'emh-tomo --update'.")
 
-            if os.path.exists(dst_file):
-                print(f"    {Color.red('EXISTS, skipped')}  {script_name}")
-            else:
-                shutil.copy2(src_file, dst_file)
-                print(f"    {Color.green('COPIED')}           {script_name}")
+        for repo in SOURCE_REPOS:
+            repo_dir = os.path.join(emstack_home, repo)
+            print(f">>> Updating {Color.green(repo)}...")
+            if not os.path.isdir(repo_dir):
+                print(f"    {Color.red('NOT FOUND, skipped')}  {repo_dir}")
+                continue
+            subprocess.run(['git', 'pull', '--prune'], cwd=repo_dir, check=True)
+
+        print(Color.green("\nAll updates completed successfully!"))
+
+    @classmethod
+    def _run_update(cls):
+        """ Run the '--update' action: set up/refresh the local
+        configuration files and 'scripts' folder (previously done via
+        '--config update'), and pull the latest changes for the
+        emtools/emhub/emwrap source checkouts (previously done by the
+        standalone 'update.sh' script).
+        """
+        cls._update_config()
+        cls._update_source()
+
+    @classmethod
+    def _copy_processing_extras(cls, instance_dir):
+        """ Copy the processing 'extra' files shipped with emhub (templates
+        and blueprint code used by the tomography UI) into a freshly
+        created instance. Requires EMSTACK_HOME to be set, which points to
+        the folder containing the emtools/emhub/emwrap checkouts (exported
+        by the generated 'bashrc' activation script).
+        """
+        emstack_home = os.environ.get('EMSTACK_HOME')
+        if not emstack_home:
+            raise Exception(
+                "EMSTACK_HOME is not set. Make sure the installation "
+                "environment has been activated (e.g. 'source bashrc') "
+                "before running 'emh-tomo --run'.")
+
+        extras_src = os.path.join(emstack_home, 'emhub', 'extras', 'processing')
+        if not os.path.isdir(extras_src):
+            raise Exception(f"Processing extras not found: {extras_src}")
+
+        extras_dst = os.path.join(instance_dir, 'extra')
+        print(f">>> Copying processing extras into: {Color.bold(extras_dst)}")
+        shutil.copytree(extras_src, extras_dst, dirs_exist_ok=True)
+
+    @classmethod
+    def _run_run(cls):
+        """ Run the emh-tomo instance at INSTANCE_DIR
+        (~/.emhub/instances/tomo). If the instance does not exist yet, it
+        is first created as a minimal emhub instance (via
+        'emh-data --create_minimal') and the processing 'extra' files
+        shipped with emhub are copied into it.
+        """
+        if not os.path.exists(INSTANCE_DIR):
+            print(f">>> Instance not found, creating a minimal instance at: "
+                  f"{Color.bold(INSTANCE_DIR)}")
+            subprocess.run(['emh-data', '--create_minimal', INSTANCE_DIR],
+                           check=True)
+            cls._copy_processing_extras(INSTANCE_DIR)
+        else:
+            print(f">>> Using existing instance at: {Color.bold(INSTANCE_DIR)}")
+
+        run_script = os.path.join(INSTANCE_DIR, 'run.sh')
+        if not os.path.exists(run_script):
+            raise Exception(f"Instance run script not found: {run_script}")
+
+        print(f">>> Running instance: {Color.bold(INSTANCE_DIR)}")
+        sys.exit(subprocess.call(['bash', run_script]))
 
     @classmethod
     def main(cls):
@@ -113,18 +223,33 @@ class EMhubTomo:
             prog='emh-tomo',
             description='emwrap tomography installer and configuration manager')
 
-        p.add_argument('--config', '-c', metavar='ACTION',
+        g = p.add_mutually_exclusive_group()
+        g.add_argument('--config', '-c', metavar='ACTION',
                        help="Manage the emwrap configuration. ACTION is one of: "
                             "'list' (print the current configuration), "
-                            "'check' (validate the current configuration), "
-                            "'update' (create ./scripts if missing and copy "
-                            "any missing script templates into it), or "
+                            "'check' (validate the current configuration), or "
                             "'form:JOB_TYPE' (print the form for the given job "
                             "type).")
+        g.add_argument('--update', action='store_true',
+                       help="Copy any missing configuration file "
+                            "(emwrap.bashrc) into the current directory, "
+                            "create ./scripts if missing and copy any "
+                            "missing script template into it, and pull the "
+                            "latest changes (git pull --prune) for the "
+                            "emtools/emhub/emwrap source checkouts.")
+        g.add_argument('--run', action='store_true',
+                       help=f"Run the emh-tomo instance at {INSTANCE_DIR}. "
+                            "If it does not exist yet, it is created as a "
+                            "minimal emhub instance and the processing extra "
+                            "files shipped with emhub are copied into it.")
 
         args = p.parse_args()
 
-        if args.config is not None:
+        if args.run:
+            cls._run_run()
+        elif args.update:
+            cls._run_update()
+        elif args.config is not None:
             cls._run_config(args.config)
         else:
             p.print_help(sys.stderr)
