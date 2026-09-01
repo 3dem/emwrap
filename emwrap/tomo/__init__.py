@@ -15,7 +15,8 @@
 # **************************************************************************
 
 # This package is meant to be run as 'python -m emwrap.tomo' (see the
-# generated './emh-tomo' entry-point script in install.sh). It intentionally
-# does not import from '__main__' here, to avoid the module being imported
+# generated './emh-tomo' entry-point script, produced by the install script
+# at https://3dem.github.io/emhub-tomo/install.sh). It intentionally does
+# not import from '__main__' here, to avoid the module being imported
 # twice (once as 'emwrap.tomo.__main__', once as '__main__') when run with
 # 'python -m'.
