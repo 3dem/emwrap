@@ -23,7 +23,7 @@ import subprocess
 
 from emtools.utils import Color
 
-from .config import ProcessingConfig
+from emwrap.base import ProcessingConfig
 
 
 # Fixed location of the emhub instance used by 'emh-tomo --run'.

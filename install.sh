@@ -218,6 +218,35 @@ EOF
   echo -e "    To reload environment later, run: ${BOLD}source ${SOURCE_FILE}${NORMAL}"
 }
 
+# Generate the local 'emh-tomo' entry-point script. It sources the
+# activation script generated above (so it always runs with the right
+# Python environment and EMSTACK_HOME) and then delegates to the
+# 'emwrap.tomo' module -- no console-script entry point is installed for
+# it anymore.
+generate_emh_tomo_script() {
+  CURRENT_STEP="generating emh-tomo script"
+  local SCRIPT_FILE="emh-tomo"
+
+  echo -e ">>> Generating emh-tomo script: ${GREEN}${SCRIPT_FILE}${NORMAL}"
+
+  cat > "$SCRIPT_FILE" << 'EOF'
+#!/bin/bash
+
+# Auto-generated entry-point script for the 'emh-tomo' command.
+set -e
+
+# Get the directory of the current script
+DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+
+. "${DIR}/bashrc"
+
+python -m emwrap.tomo "$@"
+EOF
+
+  chmod 755 "$SCRIPT_FILE"
+  echo -e "    To use it later, run: ${BOLD}./${SCRIPT_FILE} --update|--run|--config ACTION${NORMAL}"
+}
+
 # ============================================================================
 # Pre-flight checks: an active conda or venv environment with a suitable
 # Python and pip is required before doing anything else.
@@ -234,21 +263,25 @@ CURRENT_STEP="creating source directory"
 run_cmd mkdir ${SOURCE}
 clone emtools devel
 clone emhub devel
-clone emwrap main
+clone emwrap jm_simplify_install
 
 # Generate the activation script matching the environment detected above
 generate_activate_script
+
+# Generate the local 'emh-tomo' entry-point script (sources the
+# activation script above, then runs 'python -m emwrap.tomo')
+generate_emh_tomo_script
 
 # NOTE: forms and workflows are loaded directly from
 # ${SOURCE}/emwrap/config/{forms,workflows} by ProcessingConfig (see
 # get_forms_dir() / get_workflows_dir()). The local configuration file
 # (emwrap.bashrc) and the 'scripts' folder are set up below by
-# 'emh-tomo --update' (which also pulls the latest changes for the
+# './emh-tomo --update' (which also pulls the latest changes for the
 # source checkouts on later runs). The emhub instance (and its processing
-# extras) is created on demand the first time 'emh-tomo --run' is used.
+# extras) is created on demand the first time './emh-tomo --run' is used.
 
 CURRENT_STEP="setting up configuration files and scripts folder"
-run_cmd emh-tomo --update
+run_cmd ./emh-tomo --update
 
 echo -e "\n${GREEN}${BOLD}Installation complete!${NORMAL}"
 
