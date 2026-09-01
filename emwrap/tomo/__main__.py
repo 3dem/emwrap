@@ -224,22 +224,23 @@ class EMhubTomo:
         """
         host = socket.gethostname()
         user = getpass.getuser()
-        sep = '=' * 70
-        ssh_tunnel_cmd = f"ssh -L {port}:localhost:{port} {user}@{host}"
+        sep = Color.bold('=' * 70)
+        ssh_tunnel_cmd = f"ssh -NL {port}:localhost:{port} {user}@{host}"
+        http_url = f"http://localhost:{port}"
         lines = [
             '',
             sep,
-            f"  emh-tomo server starting on port: {Color.green(port)}",
+            f"  {Color.bold('emh-tomo')} server starting on port: {Color.green(port)}",
             f"  Auto-logged in as user: {RUN_LOGGED_USER}",
             '',
             "  Running on a remote/HPC host? Tunnel from your client with:",
             f"      {Color.green(ssh_tunnel_cmd)}",
             '',
-            f"  Then open: http://localhost:{port}",
+            f"  Then open: {Color.cyan(http_url)}",
             sep,
             '',
         ]
-        print(Color.bold('\n'.join(lines)))
+        print('\n'.join(lines))
 
     @classmethod
     def _run_run(cls):
