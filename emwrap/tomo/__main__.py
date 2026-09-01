@@ -34,6 +34,12 @@ INSTANCE_DIR = os.path.expanduser('~/.emhub/instances/tomo')
 # Source checkouts updated by 'emh-tomo --update', found under EMSTACK_HOME.
 SOURCE_REPOS = ('emtools', 'emhub', 'emwrap')
 
+# User automatically logged in when running 'emh-tomo --run', via emhub's
+# EMHUB_LOGGED_USER environment variable (see emhub/emhub/__init__.py,
+# '_login_user_from_env'). This is the special admin user created by
+# emhub's DataManager.create_admin().
+RUN_LOGGED_USER = 'admin'
+
 
 class EMhubTomo:
     """ Entry point for the 'emh-tomo' command. """
@@ -219,19 +225,21 @@ class EMhubTomo:
         host = socket.gethostname()
         user = getpass.getuser()
         sep = '=' * 70
+        ssh_tunnel_cmd = f"ssh -L {port}:localhost:{port} {user}@{host}"
         lines = [
             '',
             sep,
-            f"  emh-tomo server starting on port: {port}",
+            f"  emh-tomo server starting on port: {Color.green(port)}",
+            f"  Auto-logged in as user: {RUN_LOGGED_USER}",
             '',
             "  Running on a remote/HPC host? Tunnel from your client with:",
-            f"      ssh -L {port}:localhost:{port} {user}@{host}",
+            f"      {Color.green(ssh_tunnel_cmd)}",
             '',
             f"  Then open: http://localhost:{port}",
             sep,
             '',
         ]
-        print(Color.green(Color.bold('\n'.join(lines))))
+        print(Color.bold('\n'.join(lines)))
 
     @classmethod
     def _run_run(cls):
@@ -243,7 +251,10 @@ class EMhubTomo:
 
         The server is started on a free port chosen automatically (see
         _find_free_port()), announced with a visible banner so the port
-        can be used to set up an ssh tunnel if needed.
+        can be used to set up an ssh tunnel if needed. The RUN_LOGGED_USER
+        (admin) is automatically logged in for every request, via emhub's
+        EMHUB_LOGGED_USER environment variable, so no login step is needed
+        for this local/HPC use case.
         """
         if not os.path.exists(INSTANCE_DIR):
             print(f">>> Instance not found, creating a minimal instance at: "
@@ -266,6 +277,11 @@ class EMhubTomo:
         # 'flask run' (invoked with no explicit --port in run.sh) reads its
         # default port from FLASK_RUN_PORT when set.
         env['FLASK_RUN_PORT'] = str(port)
+        # emhub's '_login_user_from_env' before_request hook (see
+        # emhub/emhub/__init__.py) logs this user in automatically on every
+        # request when EMHUB_LOGGED_USER is set, so no login page is shown
+        # for this local/HPC use case.
+        env['EMHUB_LOGGED_USER'] = RUN_LOGGED_USER
         sys.exit(subprocess.call(['bash', run_script], env=env))
 
     @classmethod
