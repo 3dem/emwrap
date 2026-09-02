@@ -310,6 +310,16 @@ class EMhubTomo:
                             "If it does not exist yet, it is created as a "
                             "minimal emhub instance and the processing extra "
                             "files shipped with emhub are copied into it.")
+        g.add_argument('--test', '-t', metavar='TEST_NAME',
+                       help=f"Proxy to execute emwrap.test module for running tests.")
+
+        a = sys.argv[1] if len(sys.argv) > 1 else ''
+
+        # Bypass args parsing and run tests directly via emwrap.tests.main
+        if a in ['--test', '-t']:
+            from emwrap.tests.main import main
+            main(sys.argv[2:])
+            sys.exit(0)
 
         args = p.parse_args()
 

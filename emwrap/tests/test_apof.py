@@ -168,6 +168,11 @@ class TestApoF(unittest.TestCase):
     def get_parser(cls):
         parser = argparse.ArgumentParser(
         description='Run Warp ApoF integration tests.')
+        cls.set_args(parser)
+        return parser
+
+    @classmethod
+    def set_args(cls, parser):
         parser.add_argument(
             '--project', '-p', metavar='PATH',
             help='Project folder for the test run. Outputs are kept for inspection.')
@@ -183,8 +188,6 @@ class TestApoF(unittest.TestCase):
         parser.add_argument(
             '--dry', action='store_true',
             help='Dry run: do not actually run the jobs, just print what would be done.')
-
-        return parser
 
     @classmethod
     def get_args(cls):

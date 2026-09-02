@@ -28,24 +28,23 @@ class TestApoFWarp(TestApoF):
     job_types = [
         'emw-import-ts',
         'emw-warp-mctf',
-        'emw-warp-aretomo',
+        'emw-warp-tsalign',
         'emw-warp-ctfrec',
     ]
 
     expected_outputs = {
         'emw-import-ts': 'tilt_series.star',
         'emw-warp-mctf': 'tilt_series.star',
-        'emw-warp-aretomo': 'aligned_tilt_series.star',
+        'emw-warp-tsalign': 'aligned_tilt_series.star',
         'emw-warp-ctfrec': 'tomograms.star',
     }
 
     @classmethod
-    def get_parser(cls):
-        parser = super().get_parser()
+    def set_args(cls, parser):
+        super().set_args(parser)
         parser.add_argument(
             '--workflow', '-w', choices=['small', 'medium', 'full', 'otf'], default='small',
             help='Workflow size: small (preprocessing), medium (part1), full (part1+part2), or otf (preprocessing in OTF mode).')
-        return parser
 
     def _run_workflow(self):
         """Modify job_types and expected_outputs based on the workflow size."""
@@ -54,12 +53,12 @@ class TestApoFWarp(TestApoF):
             self.job_types.extend([
                 'emw-pytom',
                 'emw-warp-export_particles',
-                'emw-relion-tomoinitial'
+                'relion.initialmodel.tomo'
             ])
             self.expected_outputs.update({
                 'emw-pytom': 'optimisation_set.star',
                 'emw-warp-export_particles': 'optimisation_set.star',
-                'emw-relion-tomoinitial': 'output/initial_model.mrc',
+                'relion.initialmodel.tomo': 'output/initial_model.mrc',
             })
         elif self.args.workflow == 'full':
             self.workflow_template = self.get_workflow_template('apof-warp-tutorial-full')
