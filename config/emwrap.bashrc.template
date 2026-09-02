@@ -17,7 +17,7 @@ export EMWRAP_CONFIG=$(cat <<EOF
         {
             "name": "cryo",
             "template": "$SCRIPTS/lsf_template.sh",
-            "submit": "$SCRIPTS_LOCAL/lsf_submit.sh {job_script}",
+            "submit": "$SCRIPTS/lsf_submit.sh {job_script}",
             "params": [
                 {
                     "name": "queue_name",
@@ -37,7 +37,7 @@ export EMWRAP_CONFIG=$(cat <<EOF
         {
             "name": "cryo_core",
             "template": "$SCRIPTS/lsf_template.sh",
-            "submit": "$SCRIPTS_LOCAL/lsf_submit.sh {job_script}",
+            "submit": "$SCRIPTS/lsf_submit.sh {job_script}",
             "params": [
                 {
                     "name": "queue_name",
