@@ -21,6 +21,7 @@ import shutil
 import socket
 import getpass
 import argparse
+import runpy
 import subprocess
 
 from emtools.utils import Color
@@ -243,7 +244,36 @@ class EMhubTomo:
         print('\n'.join(lines))
 
     @classmethod
-    def _run_run(cls):
+    def _launch(cls, launch_args):
+        """Launch an emwrap job module (replaces scripts/emwrap_launcher.sh).
+
+        Usage: emh-tomo --launch MODULE [-i JOB.STAR] [-o OUTPUT_DIR] ...
+        """
+        if not launch_args:
+            raise Exception(
+                "Missing module name after '--launch'. "
+                "Usage: emh-tomo --launch MODULE [-i JOB.STAR] [-o OUTPUT_DIR]")
+
+        module = launch_args[0]
+        if not module.startswith('emwrap.'):
+            raise Exception(
+                f"Invalid emwrap module: {module}. "
+                "Expected a Python module path such as 'emwrap.warp.warp_mctf'.")
+
+        old_argv = sys.argv
+        try:
+            sys.argv = [module, *launch_args[1:]]
+            runpy.run_module(module, run_name='__main__', alter_sys=True)
+        except SystemExit as exc:
+            code = exc.code if exc.code is not None else 0
+            sys.exit(code)
+        finally:
+            sys.argv = old_argv
+
+        sys.exit(0)
+
+    @classmethod
+    def _run_server(cls):
         """ Run the emh-tomo instance at INSTANCE_DIR
         (~/.emhub/instances/tomo). If the instance does not exist yet, it
         is first created as a minimal emhub instance (via
@@ -289,7 +319,8 @@ class EMhubTomo:
     def main(cls):
         p = argparse.ArgumentParser(
             prog='emh-tomo',
-            description='emwrap tomography installer and configuration manager')
+            description='emwrap tomography installer and configuration manager',
+            epilog="Job launcher: emh-tomo --launch MODULE [-i JOB.STAR] [-o OUT/]")
 
         g = p.add_mutually_exclusive_group()
         g.add_argument('--config', '-c', metavar='ACTION',
@@ -311,7 +342,7 @@ class EMhubTomo:
                             "minimal emhub instance and the processing extra "
                             "files shipped with emhub are copied into it.")
         g.add_argument('--test', '-t', metavar='TEST_NAME',
-                       help=f"Proxy to execute emwrap.test module for running tests.")
+                       help="Proxy to execute emwrap.tests module for running tests.")
 
         a = sys.argv[1] if len(sys.argv) > 1 else ''
 
@@ -321,10 +352,15 @@ class EMhubTomo:
             main(sys.argv[2:])
             sys.exit(0)
 
+        # Bypass args parsing and launch an emwrap job module directly
+        if a in ['--launch', '-l']:
+            cls._launch(sys.argv[2:])
+            sys.exit(0) 
+
         args = p.parse_args()
 
         if args.run:
-            cls._run_run()
+            cls._run_server()
         elif args.update:
             cls._run_update()
         elif args.config is not None:

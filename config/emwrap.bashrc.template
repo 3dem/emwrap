@@ -48,7 +48,7 @@ export EMWRAP_CONFIG=$(cat <<EOF
         }
     ],
     "programs": {
-        "EMWRAP": {"launcher": "$SCRIPTS/emwrap_launcher.sh"},
+        "EMWRAP": {"launcher": "$ROOT/emh-tomo --launch"},
         "WARP": {"launcher": "$SCRIPTS/mock_warp_apof_launcher.sh"},
         "PYTOM": {"launcher": "$SCRIPTS/mock_warp_apof_launcher.sh"},
         "RELION": {"launcher": "$SCRIPTS/mock_warp_apof_launcher.sh"},

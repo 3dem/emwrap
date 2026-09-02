@@ -16,6 +16,8 @@
 
 import os
 import json
+import shutil
+import sys
 from pprint import pprint
 
 from emtools.utils import Pretty, Color
@@ -33,6 +35,9 @@ _DEFAULT_SCRIPTS_TEMPLATES_DIR = os.path.join(_DEFAULT_CONFIG_DIR, 'scripts')
 
 
 class ProcessingConfig:
+    # Default prefix for running emwrap job modules (see emh-tomo --launch).
+    DEFAULT_EMWRAP_LAUNCHER = 'emh-tomo --launch'
+
     _config = None
     _forms_dict = {}
     # AVAILABLE JOBS in EMWRAP
@@ -330,22 +335,35 @@ class ProcessingConfig:
         return workflowFile
 
     @classmethod
+    def get_emwrap_launcher(cls):
+        """Return the launcher prefix for emwrap job modules.
+
+        Uses EMWRAP_CONFIG['programs']['EMWRAP']['launcher'] when set,
+        otherwise falls back to DEFAULT_EMWRAP_LAUNCHER ('emh-tomo --launch').
+        """
+        return (cls.get_programs().get('EMWRAP', {}).get('launcher', '')
+                or cls.DEFAULT_EMWRAP_LAUNCHER)
+
+    @classmethod
+    def _launcher_program_exists(cls, program):
+        if os.path.exists(program):
+            return True
+        if program == sys.executable:
+            return True
+        return bool(shutil.which(program))
+
+    @classmethod
     def resolve_launcher(cls, launcher):
         """Expand job launcher specs that reference emwrap modules.
 
         If the launcher value starts with 'emwrap.' it is treated as a Python
-        module path and prefixed with the EMWRAP program launcher from config.
+        module path and prefixed with the EMWRAP program launcher from config
+        (by default 'emh-tomo --launch').
         """
         if not launcher or not launcher.startswith('emwrap.'):
             return launcher
 
-        emwrap_launcher = cls.get_programs().get('EMWRAP', {}).get('launcher', '')
-        if not emwrap_launcher:
-            raise Exception(
-                "EMWRAP launcher not found in EMWRAP_CONFIG['programs'] "
-                f"but required for job launcher: {launcher}")
-
-        return f"{emwrap_launcher} {launcher}"
+        return f"{cls.get_emwrap_launcher()} {launcher}"
 
     @classmethod
     def get_job_launcher(cls, jobtype):
@@ -408,7 +426,7 @@ class ProcessingConfig:
         if scripts_dir and program.startswith(scripts_dir):
             display_program = program.replace(scripts_dir, '$SCRIPTS')
 
-        exists = os.path.exists(program)
+        exists = cls._launcher_program_exists(program)
 
         return {
             'launcher': launcher,
