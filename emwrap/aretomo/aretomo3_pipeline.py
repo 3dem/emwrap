@@ -18,10 +18,6 @@ import os
 import shutil
 import csv
 
-#Plots and reading mrc
-# import mrcfile
-# import numpy as np
-
 from emtools.utils import Color, FolderManager
 from emtools.image import Image
 from emtools.jobs import TsStarBatchManager
@@ -184,6 +180,10 @@ class AreTomo3Pipeline(ProcessingPipeline):
         binning = int(binning) if binning not in ('', None) else 1
         newPx = inputPs * float(binning) if binning > 0 else inputPs
         return newPx
+
+    def _registeredTsPs(self, tsRow):
+        inputPs = float(tsRow.rlnMicrographOriginalPixelSize)
+        return self.newTargetTsPs(inputPs)
 
     def newTargetTomPs(self, inputPs):
         tsPs = self.newTargetTsPs(inputPs)
@@ -879,8 +879,7 @@ class AreTomo3Pipeline(ProcessingPipeline):
                 continue
 
             if newTsPs is None:
-                inputPs = float(tsRow.rlnMicrographOriginalPixelSize)
-                newTsPs = self.newTargetTsPs(inputPs)
+                newTsPs = self._registeredTsPs(tsRow)
                 self.log(f"New target tilt series pixel size: {newTsPs:0.3f} Å/px")
 
             if 'error' in result:

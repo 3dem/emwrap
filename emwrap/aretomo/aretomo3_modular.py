@@ -41,6 +41,9 @@ class Aretomo3ModularBase(AreTomo3Pipeline):
         # These jobs start after motion correction, so McBin is irrelevant.
         return float(input_ps)
 
+    def _registeredTsPs(self, ts_row):
+        return self._pixel_size(ts_row)
+
     @staticmethod
     def _pixel_size(row):
         value = getattr(row, 'rlnTomoTiltSeriesPixelSize', None)

@@ -48,6 +48,27 @@ class TestAreTomo3ModularStaging(unittest.TestCase):
         self.assertFalse(pipeline._has_complete_image_column(table, 'rlnMicrographNameOdd'))
         self.assertTrue(pipeline._has_complete_image_column(table, 'rlnMicrographNameEven'))
 
+    def test_registered_pixel_size_uses_previous_tilt_series_value(self):
+        pipeline = self._pipeline(AreTomo3AlignPipeline)
+        table = Table([
+            'rlnMicrographOriginalPixelSize',
+            'rlnTomoTiltSeriesPixelSize',
+        ])
+        table.addRowValues(
+            rlnMicrographOriginalPixelSize='1.5',
+            rlnTomoTiltSeriesPixelSize='3.0',
+        )
+        self.assertEqual(pipeline._registeredTsPs(table[0]), 3.0)
+
+    def test_registered_pixel_size_falls_back_to_original_value(self):
+        pipeline = self._pipeline(AreTomo3AlignPipeline)
+        table = Table(['rlnMicrographOriginalPixelSize', 'rlnTomoTiltSeriesPixelSize'])
+        table.addRowValues(
+            rlnMicrographOriginalPixelSize='1.5',
+            rlnTomoTiltSeriesPixelSize='',
+        )
+        self.assertEqual(pipeline._registeredTsPs(table[0]), 1.5)
+
     def test_synthetic_aln_and_ctf(self):
         pipeline = self._pipeline(AreTomo3ReconstructPipeline)
         with tempfile.TemporaryDirectory() as directory:
