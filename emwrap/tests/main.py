@@ -42,7 +42,7 @@ def main(raw_args):
         test_class.set_args(test_parser)
 
     args = p.parse_args(raw_args)
-    if args.test_name == 'list':
+    if not args.test_name or args.test_name == 'list':
         print(Color.bold(">>> Available tests:"))
         for test_name in tests_map.keys():
             print(Color.green(f"  {test_name}"))

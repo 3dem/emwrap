@@ -156,13 +156,17 @@ class TestApoF(unittest.TestCase):
         self._run_workflow()
 
     @classmethod
-    def run_tests(cls):
-        args = cls.get_args()
+    def run(cls, args):
+        """Run this test case with pre-parsed CLI arguments."""
         cls.configure(args)
-        cls.verbosity = min(2, args.verbose) if args.verbose else 1
-        suite = unittest.TestLoader().loadTestsFromTestCase(cls) #any test_* method on the subclass gets picked up
-        result = unittest.TextTestRunner(verbosity=cls.verbosity).run(suite)
-        sys.exit(0 if result.wasSuccessful() else 1) 
+        verbosity = min(2, args.verbose) if args.verbose else 1
+        suite = unittest.TestLoader().loadTestsFromTestCase(cls)
+        result = unittest.TextTestRunner(verbosity=verbosity).run(suite)
+        sys.exit(0 if result.wasSuccessful() else 1)
+
+    @classmethod
+    def run_tests(cls):
+        cls.run(cls.get_args())
 
     @classmethod
     def get_parser(cls):
