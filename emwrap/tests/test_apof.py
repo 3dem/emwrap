@@ -156,7 +156,7 @@ class TestApoF(unittest.TestCase):
         self._run_workflow()
 
     @classmethod
-    def run(cls, args):
+    def run_from_args(cls, args):
         """Run this test case with pre-parsed CLI arguments."""
         cls.configure(args)
         verbosity = min(2, args.verbose) if args.verbose else 1
@@ -166,7 +166,7 @@ class TestApoF(unittest.TestCase):
 
     @classmethod
     def run_tests(cls):
-        cls.run(cls.get_args())
+        cls.run_from_args(cls.get_args())
 
     @classmethod
     def get_parser(cls):

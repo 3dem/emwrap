@@ -49,4 +49,4 @@ def main(raw_args):
         return
 
     test_class = tests_map[args.test_name]
-    test_class.run(args)
+    test_class.run_from_args(args)
