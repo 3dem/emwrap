@@ -21,6 +21,49 @@ from emtools.metadata import StarFile
 
 from .warp import WarpBaseTsAlign
 
+# Helper to parse flexible patches input used by both Aretomo2 and Aretomo3
+def parse_patches(val):
+    """Parse a user-provided patches string into a (x, y) tuple.
+
+    Accepts: "4x4", "4 x 4", "4 4", "4,4", "4, 4", or single-number "4".
+    Empty or zero-like values map to (1,1).
+    Returns (int, int) or None if parsing fails.
+    """
+    import re
+    if val is None:
+        return None
+    s = str(val).strip()
+    if s == '' or s in ['0x0', '0', '0,0', '0 0']:
+        return (1, 1)
+    parts = re.split(r'[xX,\s]+', s)
+    parts = [p for p in parts if p != '']
+    try:
+        if len(parts) == 1:
+            v = int(parts[0])
+            return (v, v)
+        elif len(parts) >= 2:
+            return (int(parts[0]), int(parts[1]))
+    except Exception:
+        return None
+    return None
+
+
+def format_patches_for_launcher(launcher, x, y):
+    """Format patches for a given launcher name.
+
+    If launcher name contains 'aretomo3' (case-insensitive) returns "X Y".
+    Otherwise returns "XxY".
+    """
+    try:
+        from os.path import basename
+        launcher_name = basename(launcher).lower() if launcher else ''
+    except Exception:
+        launcher_name = str(launcher).lower() if launcher else ''
+
+    if 'aretomo3' in launcher_name:
+        return f"{x} {y}"
+    return f"{x}x{y}"
+
 
 class WarpTsAlign(WarpBaseTsAlign):
     """ Warp wrapper for tilt-series alignment.
@@ -92,10 +135,15 @@ class WarpTsAlign(WarpBaseTsAlign):
         
         if perdevice := self._alignmentPerdevice():
             subargs['--perdevice'] = perdevice
-        if patches := subargs.pop('--patches', None):
-            patches = patches.lower().strip()
-            if patches not in ['0x0', '1x1']:
-                args['--patches'] = patches
+
+        # Parse flexible patches input and format for Aretomo2 (expects 'XxY')
+        if patches_raw := subargs.pop('--patches', None):
+            parsed = parse_patches(patches_raw)
+            if parsed and parsed != (1, 1):
+                x, y = parsed
+                # Use formatter that adapts per launcher (aretomo3 => 'X Y', else 'XxY')
+                subargs['--patches'] = format_patches_for_launcher(aretomo_launcher, x, y)
+
         args.update(subargs)
         self.batch_execute('ts_aretomo', batch, args)
 
@@ -118,10 +166,14 @@ class WarpTsAlign(WarpBaseTsAlign):
         
         if perdevice := self._alignmentPerdevice():
             subargs['--perdevice'] = perdevice
-        if patches := subargs.pop('--patches', None):
-            patches = patches.lower().strip()
-            if patches not in ['0x0', '1x1']:
-                args['--patches'] = patches
+
+        # Parse flexible patches input and format for Aretomo3 (expects 'X Y')
+        if patches_raw := subargs.pop('--patches', None):
+            parsed = parse_patches(patches_raw)
+            if parsed and parsed != (1, 1):
+                x, y = parsed
+                subargs['--patches'] = format_patches_for_launcher(aretomo3_launcher, x, y)
+
         args.update(subargs)
         self.batch_execute('ts_aretomo3', batch, args)
 
