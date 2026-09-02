@@ -2,7 +2,6 @@ import os
 import shutil
 
 from .aretomo3_modular import Aretomo3ModularBase
-from emtools.jobs import TsStarBatchManager
 from .aretomo3 import AreTomo3
 from emtools.image import Image
 
@@ -12,6 +11,12 @@ from .utils import create_dummy_edf_file
 
 class AreTomo3ReconstructPipeline(Aretomo3ModularBase):
     name = 'emw-aretomo3-reconstruct'
+
+    def _output_directories(self):
+        return (self.outputTomDir,)
+
+    def _include_tilt_outputs(self):
+        return False
 
     def __init__(self, args, output):
         super().__init__(args, output)
@@ -78,7 +83,7 @@ class AreTomo3ReconstructPipeline(Aretomo3ModularBase):
         def process(batch):
             ts_name = batch['tsName']
             batch.create()
-            row = next(row for row in self.inputTsTable if row.rlnTomoName == ts_name)
+            row = self._input_row(ts_name)
             if self._use_previous_alignment():
                 self.log(f'{ts_name}: Using previous AreTomo3 alignment from tilt_series/{ts_name}/')
                 self._install_previous_alignment(batch, ts_name)
@@ -146,36 +151,6 @@ class AreTomo3ReconstructPipeline(Aretomo3ModularBase):
             self._allResults[ts_name] = result
         self._registerOutputs()
         self.info['register_only'] = True
-
-    def _output(self, batch):
-        ts_name = batch['tsName']
-        if batch.error:
-            self._allResults[ts_name] = {'error': batch.error}
-        else:
-            result = batch['results'][0] if batch['results'] else {}
-            self._allResults[ts_name] = self._copy_result(result, ts_name, include_tilt=False)
-        batch.info['tsName'] = ts_name
-        self._registerOutputs()
-        self.updateBatchInfo(batch)
-        return batch
-
-    # -------- Pipeline lifecycle ---------- 
-    def prerun(self):
-        self.inputTsTable = self._getInputTsTable()
-        self.inputTs =  self._args['input_tiltseries']
-        print(f"Input tilt-series: {len(self.inputTsTable)}")  
-
-        if self.registerOnly:
-            self._register_existing_final_outputs()
-            return
-        
-        self.mkdir(self.outputTomDir)
-
-        batchMgr = TsStarBatchManager(self.inputTsTable, self.tmpDir)
-        g = self.addGenerator(batchMgr.generate)
-        
-        self.addGpuProcessors(g, self.get_aretomo3_proc, self._output)
-
 
 if __name__ == '__main__':
     AreTomo3ReconstructPipeline.main()

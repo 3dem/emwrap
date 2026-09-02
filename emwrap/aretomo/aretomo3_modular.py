@@ -11,6 +11,7 @@ import mrcfile
 import numpy as np
 
 from emtools.image import Image
+from emtools.jobs import TsStarBatchManager
 from emtools.metadata import StarFile, Table
 from emtools.utils import FolderManager
 
@@ -43,6 +44,15 @@ class Aretomo3ModularBase(AreTomo3Pipeline):
 
     def _registeredTsPs(self, ts_row):
         return self._pixel_size(ts_row)
+
+    def _output_directories(self):
+        return (self.outputTsDir,)
+
+    def _include_tilt_outputs(self):
+        return True
+
+    def _input_row(self, ts_name):
+        return next(row for row in self.inputTsTable if row.rlnTomoName == ts_name)
 
     @staticmethod
     def _pixel_size(row):
@@ -201,4 +211,34 @@ class Aretomo3ModularBase(AreTomo3Pipeline):
                         'rlnTomoNameEvn', 'at3ThicknessMrc', 'at3ThicknessCsv'):
                 copy_file(key, tom_folder)
         return result
+
+    def _output(self, batch):
+        ts_name = batch['tsName']
+        if batch.error:
+            self._allResults[ts_name] = {'error': batch.error}
+        else:
+            result = batch['results'][0] if batch['results'] else {}
+            self._allResults[ts_name] = self._copy_result(
+                result, ts_name, include_tilt=self._include_tilt_outputs())
+
+        batch.info['tsName'] = ts_name
+        self._registerOutputs()
+        self.updateBatchInfo(batch)
+        return batch
+
+    def prerun(self):
+        self.inputTsTable = self._getInputTsTable()
+        self.inputTs = self._args['input_tiltseries']
+        print(f"Input tilt-series: {len(self.inputTsTable)}")
+
+        if self.registerOnly:
+            self._register_existing_final_outputs()
+            return
+
+        for directory in self._output_directories():
+            self.mkdir(directory)
+
+        batchMgr = TsStarBatchManager(self.inputTsTable, self.tmpDir)
+        generator = self.addGenerator(batchMgr.generate)
+        self.addGpuProcessors(generator, self.get_aretomo3_proc, self._output)
 

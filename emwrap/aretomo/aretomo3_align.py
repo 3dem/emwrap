@@ -2,7 +2,6 @@ import os
 import shutil
 
 from .aretomo3_modular import Aretomo3ModularBase
-from emtools.jobs import TsStarBatchManager
 from .aretomo3 import AreTomo3
 
 class AreTomo3AlignPipeline(Aretomo3ModularBase):
@@ -16,7 +15,7 @@ class AreTomo3AlignPipeline(Aretomo3ModularBase):
         def process(batch):
             ts_name = batch['tsName']
             batch.create()
-            row = next(row for row in self.inputTsTable if row.rlnTomoName == ts_name)
+            row = self._input_row(ts_name)
             table, full_stack, _ = self._stage_stack_and_tlt(batch, ts_name, row) # Not using aligned angles 
             # Cmd 1 writes alignment metadata but not the output MRC stacks.
             # Populate its output directory with the stacks we composed from
@@ -78,36 +77,6 @@ class AreTomo3AlignPipeline(Aretomo3ModularBase):
         result_dict = super()._setAretomo3Params(tilt_dict, result, **kwargs)
         result_dict.update(ctf_columns)
         return result_dict
-
-    def _output(self, batch):
-        ts_name = batch['tsName']
-        if batch.error:
-            self._allResults[ts_name] = {'error': batch.error}
-        else:
-            result = batch['results'][0] if batch['results'] else {}
-            self._allResults[ts_name] = self._copy_result(result, ts_name)
-        batch.info['tsName'] = ts_name
-        self._registerOutputs()
-        self.updateBatchInfo(batch)
-        return batch
-
-    # -------- Pipeline lifecycle ---------- 
-    def prerun(self):
-        self.inputTsTable = self._getInputTsTable()
-        self.inputTs =  self._args['input_tiltseries']
-        print(f"Input tilt-series: {len(self.inputTsTable)}")  
-
-        if self.registerOnly:
-            self._register_existing_final_outputs()
-            return
-        
-        self.mkdir(self.outputTsDir)
-        
-        batchMgr = TsStarBatchManager(self.inputTsTable, self.tmpDir)
-        g = self.addGenerator(batchMgr.generate)
-        
-        self.addGpuProcessors(g, self.get_aretomo3_proc, self._output)
-
 
 if __name__ == '__main__':
     AreTomo3AlignPipeline.main()
