@@ -5,9 +5,9 @@
 #BSUB -q cryo_core
 #BSUB -n {cpus}
 #BSUB -R "span[ptile={cpus}]"
-#BSUB -e {workingDir}/{jobId}/run.err -o {workingDir}/{jobId}/run.out
+#BSUB -e {working_dir}/{jobId}/run.err -o {working_dir}/{jobId}/run.out
 
-cd {workingDir}
+cd {working_dir}
 
 hostname -f
 
