@@ -111,15 +111,45 @@ class ProjectManager(FolderManager):
         """ Create a new project. Existing files will be cleaned. """
         self.clean()
 
-    def clean(self):
-        """ Remove all project files. """
-        for name in ['.gui_projectdir', '.TMP_runfiles', '.relion_lock',
-                     'default_pipeline.star',
-                     'Import', 'External']:
-            if self.exists(name):
-                Process.system(f"rm -rf '{self.join(name)}'", print=self.log)
+    def _collect_clean_paths(self):
+        """Return job folders and category dirs to remove when cleaning."""
+        job_ids = []
+        category_dirs = set()
 
-        self._create()
+        if self.exists(self.pipeline_star):
+            wf = RelionStar.pipeline_to_workflow(self.pipeline_star)
+            for job in wf.jobs():
+                job_ids.append(job.id)
+                if '/' in job.id:
+                    category_dirs.add(job.id.split('/', 1)[0])
+
+        static_paths = ['.gui_projectdir', '.TMP_runfiles', '.relion_lock',
+                        '.Trash', 'default_pipeline.star', 'project.json',
+                        'Import', 'External']
+        return job_ids, category_dirs, static_paths
+
+    def clean(self):
+        """Remove all project files and recreate an empty project."""
+        with ProjectLock(self.path, message='clean project'):
+            job_ids, category_dirs, static_paths = self._collect_clean_paths()
+
+            for job_id in job_ids:
+                if self.exists(job_id):
+                    self.log(f"Removing job folder {job_id}")
+                    Process.system(f"rm -rf '{self.join(job_id)}'", print=self.log)
+
+            for name in sorted(category_dirs):
+                if self.exists(name):
+                    self.log(f"Removing category folder {name}")
+                    Process.system(f"rm -rf '{self.join(name)}'", print=self.log)
+
+            for name in static_paths:
+                if self.exists(name):
+                    Process.system(f"rm -rf '{self.join(name)}'", print=self.log)
+
+            self._wf = Workflow()
+            self._data = ProjectData(self)
+            self._create()
 
     def run(self, cmd, jobType, wait=False):
         job = self._createJob(jobType)
@@ -1225,8 +1255,8 @@ class ProjectManager(FolderManager):
             sys.exit(1)
         else:
             pipeline_star = os.path.join(args.path, 'default_pipeline.star')
-            create = ((n == 2 and args.clean)
-                      or (args.workflow and not os.path.exists(pipeline_star)))
+            create = (not os.path.exists(pipeline_star)
+                      and (args.clean or args.workflow))
             pm = ProjectManager(args.path, create=create, verbose=args.verbose,
                                 force=args.force)
 
@@ -1292,6 +1322,9 @@ class ProjectManager(FolderManager):
 
         elif args.delete:
             pm.deleteJobs(args.delete)
+
+        elif args.clean and not args.run and not args.workflow:
+            pm.clean()
 
         elif args.check > 0:
             kill = args.check > 1
