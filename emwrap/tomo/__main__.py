@@ -203,6 +203,16 @@ class EMhubTomo:
         shutil.copytree(extras_src, extras_dst, dirs_exist_ok=True)
 
     @classmethod
+    def _resolve_port(cls, port=None):
+        """Return PORT when given, otherwise pick a free TCP port."""
+        if port is None:
+            return cls._find_free_port()
+        if not 1 <= port <= 65535:
+            raise Exception(
+                f"Invalid port: {port}. Expected a value between 1 and 65535.")
+        return port
+
+    @classmethod
     def _find_free_port(cls):
         """ Return a free TCP port in the user/ephemeral range.
 
@@ -273,19 +283,19 @@ class EMhubTomo:
         sys.exit(0)
 
     @classmethod
-    def _run_server(cls):
+    def _run_server(cls, port=None):
         """ Run the emh-tomo instance at INSTANCE_DIR
         (~/.emhub/instances/tomo). If the instance does not exist yet, it
         is first created as a minimal emhub instance (via
         'emh-data --create_minimal') and the processing 'extra' files
         shipped with emhub are copied into it.
 
-        The server is started on a free port chosen automatically (see
-        _find_free_port()), announced with a visible banner so the port
-        can be used to set up an ssh tunnel if needed. The RUN_LOGGED_USER
-        (admin) is automatically logged in for every request, via emhub's
-        EMHUB_LOGGED_USER environment variable, so no login step is needed
-        for this local/HPC use case.
+        The server is started on PORT when given, otherwise on a free port
+        chosen automatically (see _find_free_port()), announced with a
+        visible banner so the port can be used to set up an ssh tunnel if
+        needed. The RUN_LOGGED_USER (admin) is automatically logged in for
+        every request, via emhub's EMHUB_LOGGED_USER environment variable,
+        so no login step is needed for this local/HPC use case.
         """
         if not os.path.exists(INSTANCE_DIR):
             print(f">>> Instance not found, creating a minimal instance at: "
@@ -300,7 +310,7 @@ class EMhubTomo:
         if not os.path.exists(run_script):
             raise Exception(f"Instance run script not found: {run_script}")
 
-        port = cls._find_free_port()
+        port = cls._resolve_port(port)
         cls._print_port_banner(port)
 
         print(f">>> Running instance: {Color.bold(INSTANCE_DIR)}")
@@ -336,11 +346,14 @@ class EMhubTomo:
                             "missing script template into it, and pull the "
                             "latest changes (git pull --prune) for the "
                             "emtools/emhub/emwrap source checkouts.")
-        g.add_argument('--run', '-r', action='store_true',
+        g.add_argument('--run', '-r', nargs='?', const=0, default=None,
+                       type=int, metavar='PORT',
                        help=f"Run the emh-tomo instance at {INSTANCE_DIR}. "
                             "If it does not exist yet, it is created as a "
                             "minimal emhub instance and the processing extra "
-                            "files shipped with emhub are copied into it.")
+                            "files shipped with emhub are copied into it. "
+                            "Optional PORT; if omitted, an unused port is "
+                            "chosen automatically.")
         g.add_argument('--test', '-t', metavar='TEST_NAME',
                        help="Proxy to execute emwrap.tests module for running tests.")
 
@@ -359,8 +372,8 @@ class EMhubTomo:
 
         args = p.parse_args()
 
-        if args.run:
-            cls._run_server()
+        if args.run is not None:
+            cls._run_server(port=args.run or None)
         elif args.update:
             cls._run_update()
         elif args.config is not None:
