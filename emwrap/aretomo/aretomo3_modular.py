@@ -121,6 +121,47 @@ class Aretomo3ModularBase(AreTomo3Pipeline):
         self._write_tlt(tlt, table, use_aligned_angles=aligned_angles)
         return table, stack, tlt
 
+    def _resolve_previous_alignment(self, ts_name):
+        """Resolve the previous AreTomo3 Cmd 1 outputs for a given tilt series.
+
+        The exact outputs live in the prior job output tree under the series
+        folder, typically .../tilt_series/<TS_NAME>/ or .../<TS_NAME>/.
+        """
+        star_file = self._args.get('input_tiltseries', '')
+        roots = []
+        if star_file:
+            star_path = os.path.abspath(str(star_file))
+            input_dir = os.path.dirname(star_path)
+            roots.extend([input_dir, os.path.dirname(input_dir)])
+        roots.extend([self.outputDir, self.workingDir, os.getcwd()])
+
+        seen = set()
+        for root in roots:
+            if not root or root in seen:
+                continue
+            seen.add(root)
+            for candidate in (
+                os.path.join(root, 'tilt_series', ts_name),
+                os.path.join(root, 'TS', ts_name),
+                os.path.join(root, ts_name),
+            ):
+                if not os.path.isdir(candidate):
+                    continue
+                files = {
+                    'stack': os.path.join(candidate, f'{ts_name}.mrc'),
+                    'tlt': os.path.join(candidate, f'{ts_name}_TLT.txt'),
+                    'aln': os.path.join(candidate, f'{ts_name}.aln'),
+                }
+                missing = [name for name, path in files.items() if not os.path.exists(path)]
+                if not missing:
+                    return files
+                if len(missing) != len(files):
+                    return files
+        raise FileNotFoundError(
+            f'{ts_name}: Could not find prior AreTomo3 alignment files in the expected '
+            f' tilt_series/<TS_NAME>/ folder. Expected: {ts_name}.mrc, {ts_name}_TLT.txt, {ts_name}.aln.'
+        )
+
     def _copy_result(self, result, ts_name, include_tilt=True):
         ts_folder = self._getOutputTsFolder(ts_name)
         ts_folder.create()

@@ -1,3 +1,4 @@
+import os
 import shutil
 
 from .aretomo3_modular import Aretomo3ModularBase
@@ -56,6 +57,15 @@ class AreTomo3AlignPipeline(Aretomo3ModularBase):
             at3.process_batch(batch, gpu=gpu, cmd=1, input_prefix=f'./{ts_name}',
                               input_suffix='.mrc', input_skips='_ODD,_EVN,_Vol,_CTF',
                               ts_name=ts_name)
+
+            tlt_src = batch.join(f'{ts_name}_TLT.txt')
+            if os.path.exists(tlt_src):
+                tlt_dst = batch.join('output', f'{ts_name}_TLT.txt')
+                if os.path.abspath(tlt_src) != os.path.abspath(tlt_dst):
+                    shutil.copy2(tlt_src, tlt_dst)
+            
+                batch['results'][0]['at3MappingFile'] = tlt_dst
+
             return batch
         return process
 

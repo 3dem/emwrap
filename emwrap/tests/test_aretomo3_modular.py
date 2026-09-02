@@ -69,6 +69,24 @@ class TestAreTomo3ModularStaging(unittest.TestCase):
             with open(ctf) as handle:
                 self.assertEqual(handle.read().split()[0:4], ['1', '10000.000000', '11000.000000', '5.000000'])
 
+    def test_previous_alignment_files_are_resolved_from_input_dir(self):
+        pipeline = self._pipeline(AreTomo3ReconstructPipeline)
+        with tempfile.TemporaryDirectory() as directory:
+            ts_name = 'TS'
+            star = os.path.join(directory, 'tilt_series', 'aligned_tilt_series.star')
+            os.makedirs(os.path.dirname(star), exist_ok=True)
+            prev_dir = os.path.join(os.path.dirname(star), ts_name)
+            os.makedirs(prev_dir, exist_ok=True)
+            for name in ('TS.mrc', 'TS_TLT.txt', 'TS.aln'):
+                open(os.path.join(prev_dir, name), 'w').close()
+            pipeline._args = {'input_tiltseries': star}
+            resolved = pipeline._resolve_previous_alignment(ts_name)
+            self.assertEqual(resolved, {
+                'stack': os.path.join(prev_dir, 'TS.mrc'),
+                'tlt': os.path.join(prev_dir, 'TS_TLT.txt'),
+                'aln': os.path.join(prev_dir, 'TS.aln'),
+            })
+
     def test_synthetic_ctf_rejects_missing_required_values(self):
         pipeline = self._pipeline(AreTomo3ReconstructPipeline)
         table = Table(['rlnDefocusU', 'rlnDefocusV', 'rlnDefocusAngle'])

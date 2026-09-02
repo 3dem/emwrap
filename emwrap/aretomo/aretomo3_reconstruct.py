@@ -1,6 +1,13 @@
+import os
+import shutil
+
 from .aretomo3_modular import Aretomo3ModularBase
 from emtools.jobs import TsStarBatchManager
 from .aretomo3 import AreTomo3
+from emtools.image import Image
+
+from emtools.metadata import Table
+from .utils import create_dummy_edf_file
 
 
 class AreTomo3ReconstructPipeline(Aretomo3ModularBase):
@@ -8,10 +15,36 @@ class AreTomo3ReconstructPipeline(Aretomo3ModularBase):
 
     def __init__(self, args, output):
         super().__init__(args, output)
+        # TODO: is this really necessary?
         self._args.setdefault('aretomo3.CorrCTF', False)
+        self._args.setdefault('UsePreviousAlignment', False)
 
     def _ctf_requested(self):
-        return str(self._args.get('aretomo3.CorrCTF', False)).lower() in ('1', 'true', 'yes')
+        return self._args.get('aretomo3.CorrCTF', False)
+    
+    def _use_previous_alignment(self):
+        return self._args.get('UsePreviousAlignment', False)
+
+    def _install_previous_alignment(self, batch, ts_name):
+        resolved = self._resolve_previous_alignment(ts_name)
+        if self._ctf_requested():
+            raise ValueError(
+                f'{ts_name}: UsePreviousAlignment does not yet support CTF correction. '
+                'Disable aretomo3.CorrCTF or generate the needed CTF file before reconstruction.'
+            )
+        for key, dst_name in (('stack', f'{ts_name}.mrc'), ('tlt', f'{ts_name}_TLT.txt'), ('aln', f'{ts_name}.aln')):
+            src = resolved[key]
+            dst = batch.join(dst_name)
+            if os.path.abspath(src) != os.path.abspath(dst):
+                shutil.copy2(src, dst)
+
+        for suffix in ('_ODD', '_EVN'):
+            src = os.path.join(os.path.dirname(resolved['stack']), f'{ts_name}{suffix}.mrc')
+            if os.path.exists(src):
+                dst = batch.join(f'{ts_name}{suffix}.mrc')
+                if os.path.abspath(src) != os.path.abspath(dst):
+                    shutil.copy2(src, dst)
+        return resolved
 
     def _write_synthetic_aln(self, path, table, row, pixel_size):
         rot = float(getattr(row, 'rlnTomoNominalTiltAxisAngle', 0) or 0)
@@ -46,13 +79,18 @@ class AreTomo3ReconstructPipeline(Aretomo3ModularBase):
             ts_name = batch['tsName']
             batch.create()
             row = next(row for row in self.inputTsTable if row.rlnTomoName == ts_name)
-            table, _, _ = self._stage_stack_and_tlt(batch, ts_name, row, aligned_angles=True)
-            self._write_synthetic_aln(batch.join(f'{ts_name}.aln'), table, row, self._pixel_size(row))
-            if self._ctf_requested():
-                self._write_synthetic_ctf(batch.join(f'{ts_name}_CTF.txt'), table)
+            if self._use_previous_alignment():
+                self.log(f'{ts_name}: Using previous AreTomo3 alignment from tilt_series/{ts_name}/')
+                self._install_previous_alignment(batch, ts_name)
+            else:
+                self.log(f'{ts_name}: Synthesizing ALN file from RELION5 aligned_tilt_series.star')
+                table, _, _ = self._stage_stack_and_tlt(batch, ts_name, row, aligned_angles=True)
+                self._write_synthetic_aln(batch.join(f'{ts_name}.aln'), table, row, self._pixel_size(row))
+                if self._ctf_requested():
+                    self._write_synthetic_ctf(batch.join(f'{ts_name}_CTF.txt'), table)
             at3 = AreTomo3(self.acq, **self._args)
             at3.process_batch(batch, gpu=gpu, cmd=2, input_prefix=f'./{ts_name}',
-                              input_suffix='.mrc', ts_name=ts_name, expect_tilt_series=False,
+                              input_suffix='.mrc', input_skips='_ODD,_EVN', ts_name=ts_name, expect_tilt_series=False,
                               expect_split_tilt_series=False, expect_ctf_output=False)
             return batch
         return process

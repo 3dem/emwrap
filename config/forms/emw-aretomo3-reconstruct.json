@@ -12,6 +12,13 @@
                     "paramClass": "PathParam",
                     "pointerClass": "TiltSeriesAligned",
                     "help": "RELION5 aligned_tilt_series.star."
+                },
+                {
+                    "name": "UsePreviousAlignment",
+                    "label": "Use previous AreTomo3 alignment",
+                    "paramClass": "BooleanParam",
+                    "default": false,
+                    "help": "Reuse the exact prior AreTomo3 Cmd 1 results from tilt_series/<TS_NAME>/ (TS_NAME.mrc, TS_NAME_TLT.txt, TS_NAME.aln) instead of synthesizing an ALN file from the RELION aligned_tilt_series.star. This option is intended for jobs that already ran an Aretomo3 alignment step."
                 }
             ]
         },
@@ -57,6 +64,7 @@
                     "name": "aretomo3.Sart",
                     "label": "SART",
                     "paramClass": "StringParam",
+                    "condition": "aretomo3.Wbp == False",
                     "default": "15 5",
                     "help": "(--Sart) 1st value number of SART iterations. 2nd value number of projections per update."
                 },
