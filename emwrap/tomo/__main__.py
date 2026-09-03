@@ -283,6 +283,22 @@ class EMhubTomo:
         sys.exit(0)
 
     @classmethod
+    def _submit(cls, submit_args):
+        """Submit a job by delegating to emw --submit.
+
+        Usage: emh-tomo --submit JOB_TYPE PARAMS_OR_FILE OUTPUT_FOLDER
+               [--path PROJECT] [--dry]
+        """
+        from emwrap.base.project_manager import ProjectManager
+
+        old_argv = sys.argv
+        try:
+            sys.argv = ['emw', '--submit', *submit_args]
+            ProjectManager.main()
+        finally:
+            sys.argv = old_argv
+
+    @classmethod
     def _run_server(cls, port=None):
         """ Run the emh-tomo instance at INSTANCE_DIR
         (~/.emhub/instances/tomo). If the instance does not exist yet, it
@@ -330,7 +346,8 @@ class EMhubTomo:
         p = argparse.ArgumentParser(
             prog='emh-tomo',
             description='emwrap tomography installer and configuration manager',
-            epilog="Job launcher: emh-tomo --launch MODULE [-i JOB.STAR] [-o OUT/]")
+            epilog=("Job launcher: emh-tomo --launch MODULE [-i JOB.STAR] [-o OUT/]\n"
+                    "Job submit:    emh-tomo --submit JOB_TYPE PARAMS OUTPUT_FOLDER"))
 
         g = p.add_mutually_exclusive_group()
         g.add_argument('--config', '-c', metavar='ACTION',
@@ -368,7 +385,12 @@ class EMhubTomo:
         # Bypass args parsing and launch an emwrap job module directly
         if a in ['--launch', '-l']:
             cls._launch(sys.argv[2:])
-            sys.exit(0) 
+            sys.exit(0)
+
+        # Bypass args parsing and submit a job (Relion external jobs / emhub UI)
+        if a == '--submit':
+            cls._submit(sys.argv[2:])
+            sys.exit(0)
 
         args = p.parse_args()
 

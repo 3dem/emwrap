@@ -12,7 +12,7 @@ export SCRIPTS=$ROOT/scripts
 
 export EMWRAP_CONFIG=$(cat <<EOF
 {
-    "dispatcher": "$SCRIPTS/emwrap_dispatcher.sh",      
+    "relion_dispatcher": "$ROOT/emh-tomo --submit",
     "queues": [
         {   
             "name": "None" 
