@@ -12,12 +12,15 @@ export SCRIPTS=$ROOT/scripts
 
 export EMWRAP_CONFIG=$(cat <<EOF
 {
-    "dispatcher": "$SCRIPTS/emwrap_dispatcher.sh",      
+    "relion_dispatcher": "$ROOT/emh-tomo --submit",
     "queues": [
+        {   
+            "name": "None" 
+        },
         {
             "name": "cryo",
             "template": "$SCRIPTS/lsf_template.sh",
-            "submit": "$SCRIPTS_LOCAL/lsf_submit.sh {job_script}",
+            "submit": "$SCRIPTS/lsf_submit.sh {job_script}",
             "params": [
                 {
                     "name": "queue_name",
@@ -37,7 +40,7 @@ export EMWRAP_CONFIG=$(cat <<EOF
         {
             "name": "cryo_core",
             "template": "$SCRIPTS/lsf_template.sh",
-            "submit": "$SCRIPTS_LOCAL/lsf_submit.sh {job_script}",
+            "submit": "$SCRIPTS/lsf_submit.sh {job_script}",
             "params": [
                 {
                     "name": "queue_name",
@@ -47,13 +50,11 @@ export EMWRAP_CONFIG=$(cat <<EOF
             ]
         }
     ],
-    "forms": "$ROOT/emwrap/config/forms",  
-    "workflows": "$ROOT/workflows",
     "programs": {
-        "EMWRAP": {"launcher": "$SCRIPTS/emwrap_launcher.sh"},
-        "WARP": {"launcher": "$SCRIPTS/mock_warp_apof_launcher.sh"},
-        "PYTOM": {"launcher": "$SCRIPTS/mock_warp_apof_launcher.sh"},
-        "RELION": {"launcher": "$SCRIPTS/mock_warp_apof_launcher.sh"},
+        "EMWRAP": {"launcher": "$ROOT/emh-tomo --launch"},
+        "WARP": {"launcher": "$SCRIPTS/warp_launcher.sh"},
+        "PYTOM": {"launcher": "$SCRIPTS/pytom_launcher.sh"},
+        "RELION": {"launcher": "$SCRIPTS/relion_launcher.sh"},
         "MOTIONCOR2": {"launcher": "$SCRIPTS/motioncor2.sh"},
         "MOTIONCOR3": {"launcher": "$SCRIPTS/motioncor3.sh"},
         "ARETOMO2": {"launcher": "$SCRIPTS/aretomo2.sh"},

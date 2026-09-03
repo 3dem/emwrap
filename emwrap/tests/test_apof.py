@@ -28,11 +28,10 @@ from emwrap.base.config import ProcessingConfig
 
 
 class TestApoF(unittest.TestCase):
-    workflow_template = None   # subclasses must set: path to json.template
+    workflow_template = None   # subclasses must set: path to the workflow json file
     job_types = None           # subclasses must set: ordered list of job types
     expected_outputs = None    # subclasses must set: {job_type: output_star(s)}
-    
-    EMWRAP_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
     project_path = None
     project_temporary = False
 
@@ -40,10 +39,12 @@ class TestApoF(unittest.TestCase):
     data_root = None
     ngpus = 1
     dry = False
-    
+
     @classmethod
     def get_workflow_template(cls, workflow_name):
-        return os.path.join(cls.EMWRAP_ROOT, 'config', 'workflows', f'{workflow_name}.json.template')
+        # Workflows ship with the code; resolve them through ProcessingConfig
+        # so tests always load the same files the running code would.
+        return ProcessingConfig.get_workflow_file(workflow_name)
 
     @classmethod
     def configure(cls, args):
@@ -155,18 +156,27 @@ class TestApoF(unittest.TestCase):
         self._run_workflow()
 
     @classmethod
-    def run_tests(cls):
-        args = cls.get_args()
+    def run_from_args(cls, args):
+        """Run this test case with pre-parsed CLI arguments."""
         cls.configure(args)
-        cls.verbosity = min(2, args.verbose) if args.verbose else 1
-        suite = unittest.TestLoader().loadTestsFromTestCase(cls) #any test_* method on the subclass gets picked up
-        result = unittest.TextTestRunner(verbosity=cls.verbosity).run(suite)
-        sys.exit(0 if result.wasSuccessful() else 1) 
+        verbosity = min(2, args.verbose) if args.verbose else 1
+        suite = unittest.TestLoader().loadTestsFromTestCase(cls)
+        result = unittest.TextTestRunner(verbosity=verbosity).run(suite)
+        sys.exit(0 if result.wasSuccessful() else 1)
+
+    @classmethod
+    def run_tests(cls):
+        cls.run_from_args(cls.get_args())
 
     @classmethod
     def get_parser(cls):
         parser = argparse.ArgumentParser(
         description='Run Warp ApoF integration tests.')
+        cls.set_args(parser)
+        return parser
+
+    @classmethod
+    def set_args(cls, parser):
         parser.add_argument(
             '--project', '-p', metavar='PATH',
             help='Project folder for the test run. Outputs are kept for inspection.')
@@ -182,8 +192,6 @@ class TestApoF(unittest.TestCase):
         parser.add_argument(
             '--dry', action='store_true',
             help='Dry run: do not actually run the jobs, just print what would be done.')
-
-        return parser
 
     @classmethod
     def get_args(cls):
