@@ -14,6 +14,9 @@ export EMWRAP_CONFIG=$(cat <<EOF
 {
     "dispatcher": "$SCRIPTS/emwrap_dispatcher.sh",      
     "queues": [
+        {   
+            "name": "None" 
+        },
         {
             "name": "cryo",
             "template": "$SCRIPTS/lsf_template.sh",
