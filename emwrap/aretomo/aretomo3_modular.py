@@ -134,7 +134,7 @@ class Aretomo3ModularBase(AreTomo3Pipeline):
         self._write_tlt(tlt, table, use_aligned_angles=aligned_angles)
         return table, stack, tlt
 
-    def _resolve_previous_alignment(self, ts_name):
+    def _resolve_previous_alignment(self, ts_name, required=('stack', 'tlt', 'aln')):
         """Resolve the previous AreTomo3 Cmd 1 outputs for a given tilt series.
 
         The exact outputs live in the prior job output tree under the series
@@ -149,6 +149,12 @@ class Aretomo3ModularBase(AreTomo3Pipeline):
         roots.extend([self.outputDir, self.workingDir, os.getcwd()])
 
         seen = set()
+        filenames = {
+            'stack': f'{ts_name}.mrc',
+            'tlt': f'{ts_name}_TLT.txt',
+            'aln': f'{ts_name}.aln',
+        }
+        expected = ', '.join(filenames[name] for name in required)
         for root in roots:
             if not root or root in seen:
                 continue
@@ -165,14 +171,13 @@ class Aretomo3ModularBase(AreTomo3Pipeline):
                     'tlt': os.path.join(candidate, f'{ts_name}_TLT.txt'),
                     'aln': os.path.join(candidate, f'{ts_name}.aln'),
                 }
-                missing = [name for name, path in files.items() if not os.path.exists(path)]
+                missing = [name for name in required if not os.path.exists(files[name])]
                 if not missing:
-                    return files
-                if len(missing) != len(files):
                     return files
         raise FileNotFoundError(
             f'{ts_name}: Could not find prior AreTomo3 alignment files in the expected '
-            f' tilt_series/<TS_NAME>/ folder. Expected: {ts_name}.mrc, {ts_name}_TLT.txt, {ts_name}.aln.'
+            f' tilt_series/<TS_NAME>/ folder. Expected: '
+            f'{expected}.'
         )
 
     def _copy_result(self, result, ts_name, include_tilt=True):

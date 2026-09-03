@@ -108,6 +108,20 @@ class TestAreTomo3ModularStaging(unittest.TestCase):
                 'aln': os.path.join(prev_dir, 'TS.aln'),
             })
 
+    def test_previous_alignment_can_require_only_stack_and_tlt(self):
+        pipeline = self._pipeline(AreTomo3AlignPipeline)
+        with tempfile.TemporaryDirectory() as directory:
+            ts_name = 'TS'
+            star = os.path.join(directory, 'tilt_series', 'aligned_tilt_series.star')
+            prev_dir = os.path.join(directory, 'tilt_series', ts_name)
+            os.makedirs(prev_dir, exist_ok=True)
+            for name in ('TS.mrc', 'TS_TLT.txt'):
+                open(os.path.join(prev_dir, name), 'w').close()
+            pipeline._args = {'input_tiltseries': star}
+            resolved = pipeline._resolve_previous_alignment(ts_name, required=('stack', 'tlt'))
+            self.assertTrue(resolved['stack'].endswith('TS.mrc'))
+            self.assertTrue(resolved['tlt'].endswith('TS_TLT.txt'))
+
     def test_synthetic_ctf_rejects_missing_required_values(self):
         pipeline = self._pipeline(AreTomo3ReconstructPipeline)
         table = Table(['rlnDefocusU', 'rlnDefocusV', 'rlnDefocusAngle'])

@@ -17,7 +17,7 @@
                     "name": "UsePreviousAlignment",
                     "label": "Use previous AreTomo3 alignment",
                     "paramClass": "BooleanParam",
-                    "default": false,
+                    "default": true,
                     "help": "Reuse the exact prior AreTomo3 Cmd 1 results from tilt_series/<TS_NAME>/ (TS_NAME.mrc, TS_NAME_TLT.txt, TS_NAME.aln) instead of synthesizing an ALN file from the RELION aligned_tilt_series.star. This option is intended for jobs that already ran an Aretomo3 alignment step."
                 }
             ]

@@ -10,7 +10,7 @@
                     "name": "input_tiltseries",
                     "label": "Input tilt series",
                     "paramClass": "PathParam",
-                    "pointerClass": "TiltSeries",
+                    "pointerClass": "TiltSeries, TiltSeriesAligned",
                     "help": "RELION5 tilt_series.star; every per-series STAR must contain rlnMicrographName and nominal tilt angles."
                 },
                 {
@@ -23,6 +23,13 @@
                         "preserve": "Preserve existing CTF metadata"
                     },
                     "help": "Preserve disables AreTomo3 CTF correction and retains input CTF columns unchanged."
+                },
+                {
+                    "name": "UsePreviousAlignment",
+                    "label": "Use previous AreTomo3 alignment",
+                    "paramClass": "BooleanParam",
+                    "default": false,
+                    "help": "Reuse TS_NAME.mrc and TS_NAME_TLT.txt from the previous job's tilt_series/TS_NAME/ folder instead of rebuilding the input stack and tilt-angle file."
                 }
             ]
         },
