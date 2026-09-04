@@ -3,6 +3,8 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 import os
 
+# TODO: We do need this anymore however it can be useful to have as a utils for Warp XML parsing. We can move it to a utils module if we want to keep it.
+
 
 def get_warp_movie_names(xml_file):
     """Return Warp MoviePath basenames in Warp/XF alignment order."""
