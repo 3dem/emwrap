@@ -26,7 +26,7 @@ class AreTomo3AlignPipeline(Aretomo3ModularBase):
             if self.use_previous_alignment:
                 previous = self._install_previous_alignment(batch, ts_name)
                 full_stack = previous['stack']
-                table = None
+                table = self._read_series(ts_name, row)
             else:
                 table, full_stack, _ = self._stage_stack_and_tlt(batch, ts_name, row) # Not using aligned angles
             # Cmd 1 writes alignment metadata but not the output MRC stacks.
@@ -41,18 +41,24 @@ class AreTomo3AlignPipeline(Aretomo3ModularBase):
             at3 = AreTomo3(self.acq, **args)
 
             # Only if coming from a non-previous alignment path do we have a table of images to write half-set stacks from.
-            have_half_sets = table is not None and (
+            have_half_sets = (
                 self._has_complete_image_column(table, 'rlnMicrographNameOdd')
                 and self._has_complete_image_column(table, 'rlnMicrographNameEven')
             )
+            
             if have_half_sets:
                 for column, suffix in (
                     ('rlnMicrographNameOdd', '_ODD'),
                     ('rlnMicrographNameEven', '_EVN'),
                 ):
-                    stack = batch.join(f'{ts_name}{suffix}.mrc')
+                    stack = batch.join('output', f'{ts_name}{suffix}.mrc')
                     self._write_stack_from_images(stack, table, column)
-                    shutil.copy2(stack, batch.join('output', f'{ts_name}{suffix}.mrc'))
+
+            tlt_src = (previous['tlt'] if previous else batch.join(f'{ts_name}_TLT.txt'))
+            if os.path.exists(tlt_src):
+                tlt_dst = batch.join('output', f'{ts_name}_TLT.txt')
+                if os.path.abspath(tlt_src) != os.path.abspath(tlt_dst):
+                    shutil.copy2(tlt_src, tlt_dst)
 
             # Cmd 1 is the alignment-only public job.  Set this after form
             # serialization so ExtraArgs cannot accidentally request a volume.
@@ -60,26 +66,6 @@ class AreTomo3AlignPipeline(Aretomo3ModularBase):
             at3.process_batch(batch, gpu=gpu, cmd=1, input_prefix=f'./{ts_name}',
                               input_suffix='.mrc', input_skips='_ODD,_EVN,_Vol,_CTF',
                               ts_name=ts_name)
-
-            tlt_src = (previous['tlt'] if previous else batch.join(f'{ts_name}_TLT.txt'))
-            if os.path.exists(tlt_src):
-                tlt_dst = batch.join('output', f'{ts_name}_TLT.txt')
-                if os.path.abspath(tlt_src) != os.path.abspath(tlt_dst):
-                    shutil.copy2(tlt_src, tlt_dst)
-            
-                batch['results'][0]['at3MappingFile'] = tlt_dst
-
-            if previous:
-                for suffix in ('_ODD', '_EVN'):
-                    key = 'odd' if suffix == '_ODD' else 'evn'
-                    result_key = ('rlnTiltSeriesAlignedOdd'
-                                  if suffix == '_ODD'
-                                  else 'rlnTiltSeriesAlignedEvn')
-                    if key in previous:
-                        dst = batch.join('output', os.path.basename(previous[key]))
-                        if os.path.abspath(previous[key]) != os.path.abspath(dst):
-                            shutil.copy2(previous[key], dst)
-                        batch['results'][0][result_key] = dst
 
             return batch
         return process
