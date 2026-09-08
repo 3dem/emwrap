@@ -15,11 +15,40 @@
 # **************************************************************************
 
 import os
+import re
 
 from emtools.jobs import Args
 from emtools.metadata import StarFile
 
 from .warp import WarpBaseTsAlign
+
+# Helper to parse flexible patches input used by both Aretomo2 and Aretomo3
+def parse_patches(val):
+    """Parse a user-provided patches string into a (x, y) tuple.
+
+    Accepts: "4x4", "4 x 4", "4 4", "4,4", "4, 4", or single-number "4".
+    Empty or zero-like values map to (1,1).
+    Returns (int, int) or None if parsing fails.
+    """
+    if val is None:
+        return None
+
+    values = re.split(r'[xX,\s]+', str(val).strip())
+    values = [value for value in values if value]
+    if not values:
+        return (1, 1)
+    if len(values) > 2:
+        return None
+
+    try:
+        x = int(values[0])
+        y = int(values[-1]) if len(values) == 2 else x
+    except ValueError:
+        return None
+
+    if x <= 0 or y <= 0:
+        return (1, 1)
+    return x, y
 
 
 class WarpTsAlign(WarpBaseTsAlign):
@@ -57,6 +86,22 @@ class WarpTsAlign(WarpBaseTsAlign):
 
         return super().alignmentFiles(tsName)
 
+    def format_patches(self, val):
+        """Format patches according to the selected alignment method.
+
+        AreTomo2 uses ``XxY`` while AreTomo3 uses ``X,Y``.
+        """
+        parsed = parse_patches(val)
+        if parsed is None:
+            return None
+        if parsed == (1, 1):
+            return ""
+
+        x, y = parsed
+        if self._method() == 0:
+            return f"{x}x{y}"
+        return f"{x},{y}"
+    
     def alignedTS(self, tsName):
         if self._method() == 1:
             return self.join(self.TS, 'tiltstack', tsName, f'{tsName}_Imod', f"{tsName}_st.mrc" )
@@ -92,10 +137,10 @@ class WarpTsAlign(WarpBaseTsAlign):
         
         if perdevice := self._alignmentPerdevice():
             subargs['--perdevice'] = perdevice
-        if patches := subargs.pop('--patches', None):
-            patches = patches.lower().strip()
-            if patches not in ['0x0', '1x1']:
-                args['--patches'] = patches
+
+        if patches := self.format_patches(subargs.pop('--patches', None)):
+            args['--patches'] = patches
+
         args.update(subargs)
         self.batch_execute('ts_aretomo', batch, args)
 
@@ -118,10 +163,10 @@ class WarpTsAlign(WarpBaseTsAlign):
         
         if perdevice := self._alignmentPerdevice():
             subargs['--perdevice'] = perdevice
-        if patches := subargs.pop('--patches', None):
-            patches = patches.lower().strip()
-            if patches not in ['0x0', '1x1']:
-                args['--patches'] = patches
+
+        if patches := self.format_patches(subargs.pop('--patches', None)):
+            subargs['--patches'] = patches
+
         args.update(subargs)
         self.batch_execute('ts_aretomo3', batch, args)
 

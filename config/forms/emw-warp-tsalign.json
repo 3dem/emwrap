@@ -98,7 +98,7 @@
                         {
                             "name": "ts_aretomo.patches",
                             "label": "Patches",
-                            "help": "Number of patches for local alignments in X, Y, separated by 'x': e.g. 6x4. By default (empty, or 0x0 or 1x1) only global alignment is performed. More patches increase the processing time."
+                            "help": "Number of patches for local alignments in X, Y. Flexible formats accepted: '4x4', '4 x 4', '4 4', '4,4', or single '4'. The value will be adapted to the underlying Aretomo implementation (Aretomo2 expects 'XxY', Aretomo3 expects 'X Y'). By default (empty, or 0x0 or 1x1) only global alignment is performed. More patches increase the processing time."
                         }
                     ]
                 },
