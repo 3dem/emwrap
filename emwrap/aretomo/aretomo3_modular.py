@@ -76,7 +76,7 @@ class Aretomo3ModularBase(AreTomo3Pipeline):
                 if angle in ('', None):
                     angle = getattr(row, 'rlnTomoNominalStageTiltAngle', '')
                 if angle in ('', None):
-                    raise ValueError(f'Missing tilt angle at row {index}')
+                    raise NameError(f'Missing tilt angle at row {index}')
 
                 index = getattr(row, 'rlnTomoTiltMovieIndex', '')
                 if index in ('', None):

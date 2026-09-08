@@ -62,15 +62,6 @@ class AreTomo3AlignPipeline(Aretomo3ModularBase):
                     stack = batch.join(f'{ts_name}{suffix}.mrc')
                     self._write_stack_from_images(stack, table, column)
                     shutil.copy2(stack, batch.join('output', f'{ts_name}{suffix}.mrc'))
-            # else:
-                # A full summed image cannot be split into independent halves.
-                # Do not create fake half-sets or let AreTomo3 expect them.
-                # at3.args['-SplitSum'] = 0
-                # batch.log(
-                    # f'WARNING: {ts_name}: no complete odd/even input image columns; '
-                    # 'running with -SplitSum 0.',
-                    # flush=True,
-                # )
 
             # Cmd 1 is the alignment-only public job.  Set this after form
             # serialization so ExtraArgs cannot accidentally request a volume.
@@ -87,7 +78,17 @@ class AreTomo3AlignPipeline(Aretomo3ModularBase):
             
                 batch['results'][0]['at3MappingFile'] = tlt_dst
 
-            # TODO: We need to copy the half-set stacks from the batch root to the batch/output and register them so the normal result collector can bring them to the main output directory.
+            if previous:
+                for suffix in ('_ODD', '_EVN'):
+                    src = os.path.join(os.path.dirname(previous['stack']), f'{ts_name}{suffix}.mrc')
+                    if os.path.exists(src):
+                        dst = batch.join('output', f'{ts_name}{suffix}.mrc')
+                        if os.path.abspath(src) != os.path.abspath(dst):
+                            shutil.copy2(src, dst)
+                            if suffix == '_ODD':
+                                batch['results'][0]['rlnTiltSeriesAlignedOdd'] = dst
+                            elif suffix == '_EVN':
+                                batch['results'][0]['rlnTiltSeriesAlignedEvn'] = dst
 
             return batch
         return process

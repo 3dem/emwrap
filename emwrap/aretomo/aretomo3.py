@@ -118,7 +118,7 @@ class AreTomo3:
             '-OutDir': './output',
             '-LogDir': './log/',
             '-TmpDir': './tmp/',
-            '-Serial': 60,
+            '-Serial': 1,
             '-Cmd': cmd,
             '-Gpu': gpu,
         }
