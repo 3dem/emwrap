@@ -31,25 +31,14 @@ class AreTomo3ReconstructPipeline(Aretomo3ModularBase):
         return self._args.get('UsePreviousAlignment', False)
 
     def _install_previous_alignment(self, batch, ts_name):
-        resolved = self._resolve_previous_alignment(ts_name)
         if self._ctf_requested():
             raise ValueError(
                 f'{ts_name}: UsePreviousAlignment does not yet support CTF correction. '
                 'Disable aretomo3.CorrCTF or generate the needed CTF file before reconstruction.'
             )
-        for key, dst_name in (('stack', f'{ts_name}.mrc'), ('tlt', f'{ts_name}_TLT.txt'), ('aln', f'{ts_name}.aln')):
-            src = resolved[key]
-            dst = batch.join(dst_name)
-            if os.path.abspath(src) != os.path.abspath(dst):
-                shutil.copy2(src, dst)
-
-        for suffix in ('_ODD', '_EVN'):
-            src = os.path.join(os.path.dirname(resolved['stack']), f'{ts_name}{suffix}.mrc')
-            if os.path.exists(src):
-                dst = batch.join(f'{ts_name}{suffix}.mrc')
-                if os.path.abspath(src) != os.path.abspath(dst):
-                    shutil.copy2(src, dst)
-        return resolved
+        _, staged = self._stage_previous_alignment(
+            batch, ts_name, required=('stack', 'tlt', 'aln'))
+        return staged
 
     def _write_synthetic_aln(self, path, table, row, pixel_size):
         rot = float(getattr(row, 'rlnTomoNominalTiltAxisAngle', 0) or 0)

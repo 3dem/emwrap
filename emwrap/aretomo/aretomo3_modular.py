@@ -136,85 +136,83 @@ class Aretomo3ModularBase(AreTomo3Pipeline):
 
     def _resolve_previous_alignment(self, ts_name, required=('stack', 'tlt', 'aln')):
         """Resolve the previous AreTomo3 Cmd 1 outputs for a given tilt series.
-
-        The exact outputs live in the prior job output tree under the series
-        folder, typically .../tilt_series/<TS_NAME>/ or .../<TS_NAME>/.
+        The previous job output tree is expected to contain the series folder
+        at tilt_series/<TS_NAME>/ alongside the input aligned tilt-series STAR.
         """
         star_file = self._args.get('input_tiltseries', '')
-        roots = []
-        if star_file:
-            star_path = os.path.abspath(str(star_file))
-            input_dir = os.path.dirname(star_path)
-            roots.extend([input_dir, os.path.dirname(input_dir)])
-        roots.extend([self.outputDir, self.workingDir, os.getcwd()])
+        if not star_file:
+            raise FileNotFoundError(
+                f'{ts_name}: Cannot resolve previous AreTomo3 alignment without '
+                'input_tiltseries.'
+            )
 
-        seen = set()
+        input_dir = os.path.dirname(os.path.abspath(str(star_file)))
+        candidate = os.path.join(input_dir, 'tilt_series', ts_name)
         filenames = {
             'stack': f'{ts_name}.mrc',
             'tlt': f'{ts_name}_TLT.txt',
             'aln': f'{ts_name}.aln',
         }
         expected = ', '.join(filenames[name] for name in required)
-        for root in roots:
-            if not root or root in seen:
-                continue
-            seen.add(root)
-            for candidate in (
-                os.path.join(root, 'tilt_series', ts_name),
-                os.path.join(root, 'TS', ts_name),
-                os.path.join(root, ts_name),
-            ):
-                if not os.path.isdir(candidate):
-                    continue
-                files = {
-                    'stack': os.path.join(candidate, f'{ts_name}.mrc'),
-                    'tlt': os.path.join(candidate, f'{ts_name}_TLT.txt'),
-                    'aln': os.path.join(candidate, f'{ts_name}.aln'),
-                }
-                missing = [name for name in required if not os.path.exists(files[name])]
-                if not missing:
-                    return files
+        files = {
+            'stack': os.path.join(candidate, filenames['stack']),
+            'tlt': os.path.join(candidate, filenames['tlt']),
+            'aln': os.path.join(candidate, filenames['aln']),
+        }
+        missing = [name for name in required if not os.path.exists(files[name])]
+        if not missing:
+            return files
         raise FileNotFoundError(
             f'{ts_name}: Could not find prior AreTomo3 alignment files in the expected '
-            f' tilt_series/<TS_NAME>/ folder. Expected: '
+            f' folder {candidate}. Expected: '
             f'{expected}.'
         )
+
+    def _stage_previous_alignment(self, batch, ts_name,
+                                  required=('stack', 'tlt'), include_half_sets=True):
+        resolved = self._resolve_previous_alignment(ts_name, required=required)
+        staged = {}
+
+        for key in required:
+            filename = os.path.basename(resolved[key])
+            destination = batch.join(filename)
+            if os.path.abspath(resolved[key]) != os.path.abspath(destination):
+                shutil.copy2(resolved[key], destination)
+            staged[key] = destination
+
+        if include_half_sets:
+            for suffix, key in (('_ODD', 'odd'), ('_EVN', 'evn')):
+                source = os.path.join(os.path.dirname(resolved['stack']),
+                                      f'{ts_name}{suffix}.mrc')
+                if os.path.exists(source):
+                    destination = batch.join(os.path.basename(source))
+                    if os.path.abspath(source) != os.path.abspath(destination):
+                        shutil.copy2(source, destination)
+                    staged[key] = destination
+
+        return resolved, staged
 
     def _copy_result(self, result, ts_name, include_tilt=True):
         ts_folder = self._getOutputTsFolder(ts_name)
         ts_folder.create()
         tom_folder = None
 
-        def copy_file(key, folder):
-            source = result.get(key)
-            if source and os.path.exists(source):
-                destination = folder.join(os.path.basename(source))
-                if os.path.abspath(source) != os.path.abspath(destination):
-                    shutil.copy2(source, destination)
-                result[key] = destination
-
         if include_tilt:
             for key in ('rlnTiltSeriesAligned', 'rlnTiltSeriesAlignedOdd',
                         'rlnTiltSeriesAlignedEvn', 'at3TomoAlignmentFile',
                         'at3MappingFile', 'at3TomoCtfFile', 'rlnCtfImage',
                         'at3MetricsCsv', 'at3TimeStampCsv'):
-                copy_file(key, ts_folder)
+                self._copy_result_file(result, key, ts_folder)
             for key in ('rlnTiltSeriesAligned', 'rlnTiltSeriesAlignedOdd',
                         'rlnTiltSeriesAlignedEvn', 'rlnCtfImage'):
-                source = result.get(key)
-                if source and source.lower().endswith('.mrc'):
-                    link = os.path.splitext(source)[0] + '.mrcs'
-                    if os.path.lexists(link):
-                        os.remove(link)
-                    os.symlink(os.path.basename(source), link)
-                    result[key] = link
+                self._link_result_stack_as_mrcs(result, key)
 
         if result.get('rlnTomoReconstructedTomogram'):
             tom_folder = self._getOutputTomFolder(ts_name)
             tom_folder.create()
             for key in ('rlnTomoReconstructedTomogram', 'rlnTomoNameOdd',
                         'rlnTomoNameEvn', 'at3ThicknessMrc', 'at3ThicknessCsv'):
-                copy_file(key, tom_folder)
+                self._copy_result_file(result, key, tom_folder)
         return result
 
     def _output(self, batch):

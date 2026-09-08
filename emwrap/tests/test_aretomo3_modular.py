@@ -122,6 +122,49 @@ class TestAreTomo3ModularStaging(unittest.TestCase):
             self.assertTrue(resolved['stack'].endswith('TS.mrc'))
             self.assertTrue(resolved['tlt'].endswith('TS_TLT.txt'))
 
+    def test_previous_alignment_stages_required_and_optional_files(self):
+        pipeline = self._pipeline(AreTomo3AlignPipeline)
+        with tempfile.TemporaryDirectory() as directory:
+            ts_name = 'TS'
+            star = os.path.join(directory, 'tilt_series', 'aligned_tilt_series.star')
+            previous_dir = os.path.join(directory, 'tilt_series', ts_name)
+            batch_dir = os.path.join(directory, 'batch')
+            os.makedirs(previous_dir, exist_ok=True)
+            os.makedirs(batch_dir, exist_ok=True)
+            for name in ('TS.mrc', 'TS_TLT.txt', 'TS_ODD.mrc', 'TS_EVN.mrc'):
+                open(os.path.join(previous_dir, name), 'w').close()
+            pipeline._args = {'input_tiltseries': star}
+
+            class Batch:
+                def join(self, name):
+                    return os.path.join(batch_dir, name)
+
+            resolved, staged = pipeline._stage_previous_alignment(Batch(), ts_name)
+            self.assertTrue(os.path.exists(staged['stack']))
+            self.assertTrue(os.path.exists(staged['tlt']))
+            self.assertTrue(os.path.exists(staged['odd']))
+            self.assertTrue(os.path.exists(staged['evn']))
+            self.assertEqual(resolved['stack'], os.path.join(previous_dir, 'TS.mrc'))
+
+    def test_shared_result_copy_updates_path_and_mrcs_link(self):
+        pipeline = self._pipeline(AreTomo3AlignPipeline)
+        with tempfile.TemporaryDirectory() as directory:
+            source = os.path.join(directory, 'source.mrc')
+            destination_dir = os.path.join(directory, 'output')
+            os.makedirs(destination_dir)
+            open(source, 'w').close()
+
+            class Folder:
+                def join(self, name):
+                    return os.path.join(destination_dir, name)
+
+            result = {'stack': source}
+            copied = pipeline._copy_result_file(result, 'stack', Folder())
+            link = pipeline._link_result_stack_as_mrcs(result, 'stack')
+            self.assertEqual(copied, os.path.join(destination_dir, 'source.mrc'))
+            self.assertEqual(link, os.path.join(destination_dir, 'source.mrcs'))
+            self.assertTrue(os.path.islink(link))
+
     def test_synthetic_ctf_rejects_missing_required_values(self):
         pipeline = self._pipeline(AreTomo3ReconstructPipeline)
         table = Table(['rlnDefocusU', 'rlnDefocusV', 'rlnDefocusAngle'])

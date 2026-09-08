@@ -13,18 +13,9 @@ class AreTomo3AlignPipeline(Aretomo3ModularBase):
         self.use_previous_alignment = self._args.get('UsePreviousAlignment', False)
 
     def _install_previous_alignment(self, batch, ts_name):
-        resolved = self._resolve_previous_alignment(ts_name, required=('stack', 'tlt'))
-        for key, filename in (('stack', f'{ts_name}.mrc'), ('tlt', f'{ts_name}_TLT.txt')):
-            destination = batch.join(filename)
-            shutil.copy2(resolved[key], destination)
-
-        for suffix in ('_ODD', '_EVN'):
-            src = os.path.join(os.path.dirname(resolved['stack']), f'{ts_name}{suffix}.mrc')
-            if os.path.exists(src):
-                dst = batch.join(f'{ts_name}{suffix}.mrc')
-                if os.path.abspath(src) != os.path.abspath(dst):
-                    shutil.copy2(src, dst)
-        return resolved
+        _, staged = self._stage_previous_alignment(
+            batch, ts_name, required=('stack', 'tlt'))
+        return staged
 
     def get_aretomo3_proc(self, gpu):
         def process(batch):
@@ -34,7 +25,7 @@ class AreTomo3AlignPipeline(Aretomo3ModularBase):
             previous = None
             if self.use_previous_alignment:
                 previous = self._install_previous_alignment(batch, ts_name)
-                full_stack = batch.join(f'{ts_name}.mrc')
+                full_stack = previous['stack']
                 table = None
             else:
                 table, full_stack, _ = self._stage_stack_and_tlt(batch, ts_name, row) # Not using aligned angles
@@ -80,15 +71,15 @@ class AreTomo3AlignPipeline(Aretomo3ModularBase):
 
             if previous:
                 for suffix in ('_ODD', '_EVN'):
-                    src = os.path.join(os.path.dirname(previous['stack']), f'{ts_name}{suffix}.mrc')
-                    if os.path.exists(src):
-                        dst = batch.join('output', f'{ts_name}{suffix}.mrc')
-                        if os.path.abspath(src) != os.path.abspath(dst):
-                            shutil.copy2(src, dst)
-                            if suffix == '_ODD':
-                                batch['results'][0]['rlnTiltSeriesAlignedOdd'] = dst
-                            elif suffix == '_EVN':
-                                batch['results'][0]['rlnTiltSeriesAlignedEvn'] = dst
+                    key = 'odd' if suffix == '_ODD' else 'evn'
+                    result_key = ('rlnTiltSeriesAlignedOdd'
+                                  if suffix == '_ODD'
+                                  else 'rlnTiltSeriesAlignedEvn')
+                    if key in previous:
+                        dst = batch.join('output', os.path.basename(previous[key]))
+                        if os.path.abspath(previous[key]) != os.path.abspath(dst):
+                            shutil.copy2(previous[key], dst)
+                        batch['results'][0][result_key] = dst
 
             return batch
         return process
