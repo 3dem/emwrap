@@ -20,6 +20,7 @@ import argparse
 
 from emtools.utils import Color
 
+from .test_data import TestData
 from .test_apof_warp import TestApoFWarp
 from .test_apof_aretomo3 import TestAretomo3ApoF
 
@@ -36,6 +37,8 @@ def main(raw_args):
     subparsers = p.add_subparsers(dest='test_name', required=False)
 
     subparsers.add_parser('list', help='List all available tests')
+    data_parser = subparsers.add_parser('data', help='Download test datasets for automated tests')
+    TestData.set_args(data_parser)
 
     for test_name, test_class in tests_map.items():
         test_parser = subparsers.add_parser(test_name, help=test_class.__doc__)
@@ -47,6 +50,10 @@ def main(raw_args):
         for test_name in tests_map.keys():
             print(Color.green(f"  {test_name}"))
         return
+
+    if args.test_name == 'data':
+        TestData.run_from_args(args)
+        return  
 
     test_class = tests_map[args.test_name]
     test_class.run_from_args(args)
