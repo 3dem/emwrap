@@ -71,6 +71,11 @@ class AreTomo3ReconstructPipeline(Aretomo3ModularBase):
                 self.log(f'{ts_name}: Using previous AreTomo3 alignment from tilt_series/{ts_name}/')
                 self._install_previous_alignment(batch, ts_name)
             else:
+                raise NotImplementedError(
+                    f'{ts_name}: Cmd 2 reconstruction without a previous AreTomo3 '
+                    'alignment is not implemented yet. Enable UsePreviousAlignment '
+                    'and provide the previous tilt_series/<TS_NAME>/ files.'
+                )
                 self.log(f'{ts_name}: Synthesizing ALN file from RELION5 aligned_tilt_series.star')
                 table, stack, _ = self._stage_stack_and_tlt(batch, ts_name, row, aligned_angles=True)
                 raw_size = Image.get_dimensions(stack)[:2]
