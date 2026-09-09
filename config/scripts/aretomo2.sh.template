@@ -1,4 +1,7 @@
 #!/bin/bash
 
-module load aretomo2/1.0.0 -s && AreTomo2 "$@"
+ /programs/sbgrid.shrc
 
+export ARETOMO2_X=1.0.0
+
+AreTomo2 "$@"
