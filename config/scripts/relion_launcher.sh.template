@@ -1,18 +1,7 @@
 #!/bin/bash
 
-module purge && module load -s relion/v5.0
+. /programs/sbgrid.shrc
 
-export PROGRAM=$1
-shift
-export MPI=$1
-shift
+export RELION_X=5.1.0-beta_cu13.0
 
-if [ "$MPI" -eq 1 ]; then
-    export CMD="${PROGRAM} $@"
-else    
-    export CMD="mpirun -np ${MPI} ${PROGRAM}_mpi $@"
-fi
-
-echo Running command: ${CMD}
-
-$CMD
+"$@"
