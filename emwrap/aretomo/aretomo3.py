@@ -149,8 +149,8 @@ class AreTomo3:
 
             # Mapping file Mic index vs Tilt Angle
             outTiltSeriesMapping = batch.join('output', f'{tsName}_TLT.txt')
-            self.__expect(outTiltSeriesMapping)
-            result['at3MappingFile'] = outTiltSeriesMapping
+            if os.path.exists(outTiltSeriesMapping):
+                result['at3MappingFile'] = outTiltSeriesMapping
             
             # Alignment file (.aln) which is not present in -Cmd 2
             alnFile = batch.join('output', f'{tsName}.aln')

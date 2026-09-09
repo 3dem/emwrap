@@ -18,7 +18,7 @@
                     "label": "Use previous AreTomo3 alignment",
                     "paramClass": "BooleanParam",
                     "default": true,
-                    "help": "Reuse the exact prior AreTomo3 Cmd 1 results from tilt_series/<TS_NAME>/ (TS_NAME.mrc, TS_NAME_TLT.txt, TS_NAME.aln) instead of synthesizing an ALN file from the RELION aligned_tilt_series.star. This option is intended for jobs that already ran an Aretomo3 alignment step."
+                    "help": "Reuse the exact prior AreTomo3 Cmd 1 results from tilt_series/<TS_NAME>/ (TS_NAME.mrc, TS_NAME_TLT.txt, TS_NAME.aln and TS_NAME_CTF.txt) instead of synthesizing an ALN file from the RELION aligned_tilt_series.star. This option is intended for jobs that already ran an Aretomo3 alignment step."
                 }
             ]
         },
@@ -50,8 +50,8 @@
                     "name": "aretomo3.CorrCTF",
                     "label": "Enable CTF correction",
                     "paramClass": "BooleanParam",
-                    "default": false,
-                    "help": "(--CorrCTF) Apply local CTF correction on the raw tilt series before reconstruction. Requires per-tilt Relion CTF values; disabled by default for this Cmd 2 job."
+                    "default": true,
+                    "help": "(--CorrCTF) Apply local CTF correction before reconstruction. With previous alignment enabled, TS_NAME_CTF.txt must exist in tilt_series/TS_NAME/. Otherwise the file is generated from the per-tilt RELION CTF columns."
                 },
                 {
                     "name": "aretomo3.Wbp",

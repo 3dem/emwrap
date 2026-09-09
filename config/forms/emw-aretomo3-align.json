@@ -22,7 +22,7 @@
                         "estimate": "Estimate CTF with AreTomo3",
                         "preserve": "Preserve existing CTF metadata"
                     },
-                    "help": "Preserve disables AreTomo3 CTF correction and retains input CTF columns unchanged."
+                    "help": "Estimate runs AreTomo3 CTF estimation and registers TS_NAME_CTF.txt in the output STAR metadata. Preserve disables AreTomo3 CTF processing and retains the input RELION CTF columns unchanged."
                 },
                 {
                     "name": "UsePreviousAlignment",
@@ -34,7 +34,7 @@
             ]
         },
         {
-            "label": "Alignment and CTF",
+            "label": "Alignment",
             "params": [
                 {
                     "name": "aretomo3.AlignZ",
@@ -68,13 +68,6 @@
                     "paramClass": "FloatParam",
                     "default": 0.07,
                     "help": "(--AmpContrast) Typically 0.07–0.10 for cryo-ET. Affects CTF fit quality."
-                },
-                {
-                    "name": "aretomo3.CorrCTF",
-                    "label": "Enable local CTF correction",
-                    "paramClass": "BooleanParam",
-                    "default": true,
-                    "help": "(--CorrCTF) Apply local CTF correction on the raw tilt series before reconstruction. Leave on by default; disable only if data is pre-corrected."
                 }
             ]
         },

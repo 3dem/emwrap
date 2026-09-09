@@ -20,9 +20,6 @@ class AreTomo3ReconstructPipeline(Aretomo3ModularBase):
 
     def __init__(self, args, output):
         super().__init__(args, output)
-        # TODO: is this really necessary?
-        self._args.setdefault('aretomo3.CorrCTF', False)
-        self._args.setdefault('UsePreviousAlignment', False)
 
     def _ctf_requested(self):
         return self._args.get('aretomo3.CorrCTF', False)
@@ -32,12 +29,9 @@ class AreTomo3ReconstructPipeline(Aretomo3ModularBase):
 
     def _install_previous_alignment(self, batch, ts_name):
         if self._ctf_requested():
-            raise ValueError(
-                f'{ts_name}: UsePreviousAlignment does not yet support CTF correction. '
-                'Disable aretomo3.CorrCTF or generate the needed CTF file before reconstruction.'
-            )
-        _, staged = self._stage_previous_alignment(
-            batch, ts_name, required=('stack', 'tlt', 'aln'))
+            _, staged = self._stage_previous_alignment(batch, ts_name, required=('stack', 'tlt', 'aln', 'ctf'))
+        else:
+            _, staged = self._stage_previous_alignment(batch, ts_name, required=('stack', 'tlt', 'aln'))
         return staged
 
     def _write_synthetic_aln(self, path, table, row, pixel_size):
@@ -58,15 +52,7 @@ class AreTomo3ReconstructPipeline(Aretomo3ModularBase):
                 handle.write(f'{index} {rot:.6f} 1 {tx:.6f} {ty:.6f} 0 0 1 0 {float(angle):.6f}\n')
 
     def _write_synthetic_ctf(self, path, table):
-        required = ('rlnDefocusU', 'rlnDefocusV', 'rlnDefocusAngle')
-        with open(path, 'w') as handle:
-            for index, row in enumerate(table, start=1):
-                if any(getattr(row, key, '') in ('', None) for key in required):
-                    raise ValueError(f'CTF correction requires {", ".join(required)} at row {index}')
-                fom = getattr(row, 'rlnCtfFigureOfMerit', 0) or 0
-                resolution = getattr(row, 'rlnCtfMaxResolution', 0) or 0
-                handle.write(f'{index} {float(row.rlnDefocusU):.6f} {float(row.rlnDefocusV):.6f} '
-                             f'{float(row.rlnDefocusAngle):.6f} 0 {float(fom):.6f} {float(resolution):.6f} 0\n')
+        self._write_aretomo3_ctf(path, table)
 
     def get_aretomo3_proc(self, gpu):
         def process(batch):

@@ -38,6 +38,29 @@ def _stack_index(value):
 class Aretomo3ModularBase(AreTomo3Pipeline):
     """Shared Cmd 1/2 staging helpers and normal AreTomo3 result handling."""
 
+    # @staticmethod
+    # def _as_bool(value):
+    #     return str(value).lower() in ('1', 'true', 'yes', 'y', 'on')
+
+    @staticmethod
+    def _write_aretomo3_ctf(path, table):
+        """Write AreTomo3 CTF input rows from RELION per-tilt metadata."""
+        required = ('rlnDefocusU', 'rlnDefocusV', 'rlnDefocusAngle')
+        with open(path, 'w') as handle:
+            for index, row in enumerate(table, start=1):
+                if any(getattr(row, key, '') in ('', None) for key in required):
+                    raise ValueError(
+                        f'CTF correction requires {", ".join(required)} at row {index}'
+                    )
+                fom = getattr(row, 'rlnCtfFigureOfMerit', 0) or 0
+                resolution = getattr(row, 'rlnCtfMaxResolution', 0) or 0
+                handle.write(
+                    f'{index} {float(row.rlnDefocusU):.6f} '
+                    f'{float(row.rlnDefocusV):.6f} '
+                    f'{float(row.rlnDefocusAngle):.6f} 0 '
+                    f'{float(fom):.6f} {float(resolution):.6f} 0\n'
+                )
+
     def newTargetTsPs(self, input_ps):
         # These jobs start after motion correction, so McBin is irrelevant.
         return float(input_ps)
@@ -152,12 +175,14 @@ class Aretomo3ModularBase(AreTomo3Pipeline):
             'stack': f'{ts_name}.mrc',
             'tlt': f'{ts_name}_TLT.txt',
             'aln': f'{ts_name}.aln',
+            'ctf': f'{ts_name}_CTF.txt',
         }
         expected = ', '.join(filenames[name] for name in required)
         files = {
             'stack': os.path.join(candidate, filenames['stack']),
             'tlt': os.path.join(candidate, filenames['tlt']),
             'aln': os.path.join(candidate, filenames['aln']),
+            'ctf': os.path.join(candidate, filenames['ctf']),
         }
         missing = [name for name in required if not os.path.exists(files[name])]
         if not missing:

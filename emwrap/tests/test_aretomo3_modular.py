@@ -172,3 +172,52 @@ class TestAreTomo3ModularStaging(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(ValueError, 'CTF correction requires'):
                 pipeline._write_synthetic_ctf(os.path.join(directory, 'ctf.txt'), table)
+
+    def test_aretomo3_ctf_writer_uses_inverse_column_mapping(self):
+        pipeline = self._pipeline(AreTomo3ReconstructPipeline)
+        table = Table(['rlnDefocusU', 'rlnDefocusV', 'rlnDefocusAngle',
+                       'rlnCtfFigureOfMerit', 'rlnCtfMaxResolution'])
+        table.addRowValues(rlnDefocusU='10000', rlnDefocusV='11000',
+                           rlnDefocusAngle='5', rlnCtfFigureOfMerit='0.8',
+                           rlnCtfMaxResolution='8')
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, 'TS_CTF.txt')
+            pipeline._write_synthetic_ctf(path, table)
+            with open(path) as handle:
+                self.assertEqual(
+                    handle.read().split(),
+                    ['1', '10000.000000', '11000.000000', '5.000000', '0',
+                     '0.800000', '8.000000', '0'],
+                )
+
+    def test_boolean_values_are_normalized(self):
+        pipeline = self._pipeline(Aretomo3ReconstructPipeline)
+        pipeline._args = {
+            'aretomo3.CorrCTF': 'false',
+            'UsePreviousAlignment': 'true',
+        }
+        self.assertFalse(pipeline._ctf_requested())
+        self.assertTrue(pipeline._use_previous_alignment())
+
+    def test_previous_alignment_can_require_ctf(self):
+        pipeline = self._pipeline(Aretomo3ReconstructPipeline)
+        with tempfile.TemporaryDirectory() as directory:
+            ts_name = 'TS'
+            star = os.path.join(directory, 'tilt_series', 'aligned_tilt_series.star')
+            previous_dir = os.path.join(directory, 'tilt_series', ts_name)
+            os.makedirs(previous_dir, exist_ok=True)
+            for name in ('TS.mrc', 'TS_TLT.txt', 'TS.aln', 'TS_CTF.txt'):
+                open(os.path.join(previous_dir, name), 'w').close()
+            pipeline._args = {
+                'input_tiltseries': star,
+                'aretomo3.CorrCTF': True,
+            }
+
+            class Batch:
+                def join(self, name):
+                    return os.path.join(directory, 'batch', name)
+
+            os.makedirs(os.path.join(directory, 'batch'), exist_ok=True)
+            _, staged = pipeline._stage_previous_alignment(
+                Batch(), ts_name, required=('stack', 'tlt', 'aln', 'ctf'))
+            self.assertTrue(os.path.exists(staged['ctf']))
