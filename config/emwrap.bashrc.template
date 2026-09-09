@@ -19,7 +19,7 @@ export EMWRAP_CONFIG=$(cat <<EOF
         },
         {
             "name": "cryo",
-            "template": "$SCRIPTS/lsf_template.sh",
+            "template": "$SCRIPTS/lsf_template.txt",
             "submit": "$SCRIPTS/lsf_submit.sh {job_script}",
             "params": [
                 {
@@ -39,7 +39,7 @@ export EMWRAP_CONFIG=$(cat <<EOF
         },
         {
             "name": "cryo_core",
-            "template": "$SCRIPTS/lsf_template.sh",
+            "template": "$SCRIPTS/lsf_template.txt",
             "submit": "$SCRIPTS/lsf_submit.sh {job_script}",
             "params": [
                 {
@@ -48,6 +48,12 @@ export EMWRAP_CONFIG=$(cat <<EOF
                     "condition": "false"
                 }
             ]
+        },
+        {
+            "name": "rtx5000",
+            "template": "$SCRIPTS/slurm_rtx5000_template.txt",
+            "submit": "$SCRIPTS/slurm_submit.sh {job_script}",
+            "cancel": "scancel {job_id}"
         }
     ],
     "programs": {
