@@ -82,9 +82,10 @@ class EMhubTomo:
     def _copy_missing_templates(cls, templates_dir, target_dir, executable=False):
         """ Copy every '*.template' file found directly under 'templates_dir'
         into 'target_dir', stripping the '.template' suffix. Existing files
-        in 'target_dir' are never overwritten (their content is left alone),
-        but when 'executable' is True their permissions are still (re-)set
-        to 755 on every call -- some shipped .template files are not
+        in 'target_dir' are never overwritten (their content is left alone).
+        When 'executable' is True, every '.sh' file among them (once the
+        '.template' suffix is stripped) also has its permissions (re-)set to
+        755 on every call -- some shipped .template files are not
         executable in the repo (e.g. depending on how they were checked
         out), and this makes sure the scripts generated from them can always
         be run directly, even on a re-run of 'emh-tomo --update'.
@@ -107,7 +108,7 @@ class EMhubTomo:
                 shutil.copy2(src_file, dst_file)
                 print(f"    {Color.green('COPIED')}           {name}")
 
-            if executable:
+            if executable and name.endswith('.sh'):
                 os.chmod(dst_file, 0o755)
 
         return template_files
@@ -179,14 +180,16 @@ class EMhubTomo:
 
     @classmethod
     def _run_update(cls):
-        """ Run the '--update' action: set up/refresh the local
-        configuration files and 'scripts' folder (previously done via
-        '--config update'), and pull the latest changes for the
+        """ Run the '--update' action: pull the latest changes for the
         emtools/emhub/emwrap source checkouts (previously done by the
-        standalone 'update.sh' script).
+        standalone 'update.sh' script), then set up/refresh the local
+        configuration files and 'scripts' folder from the (now up to date)
+        shipped templates (previously done via '--config update'). Source
+        is updated first so that any newly added/changed script templates
+        are already in place before they are copied into './scripts'.
         """
-        cls._update_config()
         cls._update_source()
+        cls._update_config()
 
     @classmethod
     def _copy_processing_extras(cls, instance_dir):
@@ -366,12 +369,12 @@ class EMhubTomo:
                             "'form:JOB_TYPE' (print the form for the given job "
                             "type).")
         g.add_argument('--update', '-u', action='store_true',
-                       help="Copy any missing configuration file "
-                            "(emwrap.bashrc) into the current directory, "
-                            "create ./scripts if missing and copy any "
-                            "missing script template into it, and pull the "
-                            "latest changes (git pull --prune) for the "
-                            "emtools/emhub/emwrap source checkouts.")
+                       help="Pull the latest changes (git pull --prune) for "
+                            "the emtools/emhub/emwrap source checkouts, "
+                            "then copy any missing configuration file "
+                            "(emwrap.bashrc) into the current directory and "
+                            "create ./scripts if missing, copying into it "
+                            "any missing script template.")
         g.add_argument('--run', '-r', nargs='?', const=0, default=None,
                        type=int, metavar='PORT',
                        help=f"Run the emh-tomo instance at {INSTANCE_DIR}. "
