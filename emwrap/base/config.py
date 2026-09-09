@@ -154,10 +154,20 @@ class ProcessingConfig:
             "output": "Refine3D",
             "tomo": True
         },
-        "emw-aretomo3": {
+        "emw-aretomo3": { 
             "launcher": "emwrap.aretomo.aretomo3_pipeline",
             "label": "Aretomo3",
             "output": "Aretomo3"
+        },
+        "emw-aretomo3-align": {
+            "launcher": "emwrap.aretomo.aretomo3_align",
+            "label": "Aretomo3 Align",
+            "output": "Aretomo3Align"
+        },
+        "emw-aretomo3-reconstruct": {
+            "launcher": "emwrap.aretomo.aretomo3_reconstruct",
+            "label": "Aretomo3 Reconstruct",
+            "output": "Aretomo3Reconstruct"
         },
         "emw-denoiset": {
             "launcher": "emwrap.aretomo.denoiset_pipeline",
@@ -172,7 +182,7 @@ class ProcessingConfig:
         { "name": "warp", "prefixes": ["emw-warp"] },
         { "name": "relion", "prefixes": ["emw-relion", "relion."] },
         { "name": "pytom", "prefixes": ["emw-pytom"] },
-        { "name": "aretomo", "prefixes": ["emw-aretomo", "emw-aretomo3", "emw-denoiset"] }
+        { "name": "aretomo", "prefixes": ["emw-aretomo", "emw-aretomo3", "emw-aretomo3-align", "emw-aretomo3-reconstruct", "emw-denoiset"] }
     ]
 
     @classmethod

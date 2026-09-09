@@ -175,6 +175,7 @@
                         {
                             "name": "aretomo3.Sart",
                             "label": "SART (used only if WBP disabled)",
+                            "condition": "aretomo3.Wbp == False",
                             "default": "15 5",
                             "paramClass": "StringParam",
                             "help": "(--Sart) 1st value number of SART iterations. 2nd value number of projections per update."
