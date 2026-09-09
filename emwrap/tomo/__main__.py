@@ -79,10 +79,15 @@ class EMhubTomo:
                 "Expected one of: 'list', 'check', 'form:JOB_TYPE'.")
 
     @classmethod
-    def _copy_missing_templates(cls, templates_dir, target_dir):
+    def _copy_missing_templates(cls, templates_dir, target_dir, executable=False):
         """ Copy every '*.template' file found directly under 'templates_dir'
         into 'target_dir', stripping the '.template' suffix. Existing files
-        in 'target_dir' are never overwritten.
+        in 'target_dir' are never overwritten (their content is left alone),
+        but when 'executable' is True their permissions are still (re-)set
+        to 755 on every call -- some shipped .template files are not
+        executable in the repo (e.g. depending on how they were checked
+        out), and this makes sure the scripts generated from them can always
+        be run directly, even on a re-run of 'emh-tomo --update'.
 
         Prints one line per template: copied ones in green, skipped
         (already existing) ones in red. Returns the list of template file
@@ -101,6 +106,9 @@ class EMhubTomo:
             else:
                 shutil.copy2(src_file, dst_file)
                 print(f"    {Color.green('COPIED')}           {name}")
+
+            if executable:
+                os.chmod(dst_file, 0o755)
 
         return template_files
 
@@ -140,7 +148,8 @@ class EMhubTomo:
         print(f"    {Color.green('CREATED')} scripts folder" if created_dir
               else "    scripts folder already exists")
 
-        script_templates = cls._copy_missing_templates(templates_dir, target_dir)
+        script_templates = cls._copy_missing_templates(
+            templates_dir, target_dir, executable=True)
         if not script_templates:
             print(Color.red(f"    No script templates found in {templates_dir}"))
 
