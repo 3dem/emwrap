@@ -13,8 +13,10 @@ class AreTomo3AlignPipeline(Aretomo3ModularBase):
         self.use_previous_alignment = self._args.get('UsePreviousAlignment', False)
 
     def _install_previous_alignment(self, batch, ts_name):
-        _, staged = self._stage_previous_alignment(
-            batch, ts_name, required=('stack', 'tlt'))
+        if self.ctf_mode == 'preserve':
+            _, staged = self._stage_previous_alignment(batch, ts_name, required=('stack', 'tlt', 'ctf', 'ctf_stack'))
+        else:
+            _, staged = self._stage_previous_alignment(batch, ts_name, required=('stack', 'tlt'))
         return staged
 
     def get_aretomo3_proc(self, gpu):
@@ -36,17 +38,26 @@ class AreTomo3AlignPipeline(Aretomo3ModularBase):
             shutil.copy2(full_stack, batch.join('output', f'{ts_name}.mrc'))
 
             args = dict(self._args)
-            
-            if self.ctf_mode == 'preserve':
-                args['aretomo3.CorrCTF'] = False
-
             at3 = AreTomo3(self.acq, **args)
 
-            # Remove argument -PixSize to deactivate the CTF estimation. 
+            # Remove argument to deactivate the CTF estimation. 
             if self.ctf_mode == 'preserve':
-                at3.args.pop('-PixSize', None)
+                # at3.args.pop('-PixSize', None)
                 at3.args.pop('-kV', None)
                 at3.args.pop('-Cs', None)
+                # Write the previous CTF file to the output directory if it exists.
+                if self.use_previous_alignment:
+                    ctf_src = (previous['ctf'] if previous else batch.join(f'{ts_name}_CTF.txt'))
+                    if os.path.exists(ctf_src):
+                        ctf_dst = batch.join('output', f'{ts_name}_CTF.txt')
+                        if os.path.abspath(ctf_src) != os.path.abspath(ctf_dst):
+                            shutil.copy2(ctf_src, ctf_dst)
+
+                    ctf_stack_src = (previous['ctf_stack'] if previous else batch.join(f'{ts_name}_CTF.mrc'))
+                    if os.path.exists(ctf_stack_src):
+                        ctf_stack_dst = batch.join('output', f'{ts_name}_CTF.mrc')
+                        if os.path.abspath(ctf_stack_src) != os.path.abspath(ctf_stack_dst):
+                            shutil.copy2(ctf_stack_src, ctf_stack_dst)
 
             # Only if coming from a non-previous alignment path do we have a table of images to write half-set stacks from.
             have_half_sets = (

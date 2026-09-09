@@ -176,7 +176,8 @@ class AreTomo3:
                         batch['outputs'].append(thickCsv)
                         result['at3ThicknessCsv'] = thickCsv
 
-            if self.ctf_estimation and expect_ctf_output:
+            # if self.ctf_estimation and expect_ctf_output:
+            if expect_ctf_output:
                 ctfFileTxt = batch.join('output', f'{tsName}_CTF.txt')
                 self.__expect(ctfFileTxt)
                 batch['outputs'].append(ctfFileTxt)

@@ -88,7 +88,8 @@ class TestAreTomo3ModularStaging(unittest.TestCase):
             with open(aln) as handle:
                 self.assertIn('1 85.000000 1 2.000000 -1.000000 0 0 1 0 30.000000', handle.read())
             with open(ctf) as handle:
-                self.assertEqual(handle.read().split()[0:4], ['1', '10000.000000', '11000.000000', '5.000000'])
+                data_lines = [line for line in handle if not line.startswith('#')]
+                self.assertEqual(data_lines[0].split()[0:4], ['1', '10000.000000', '11000.000000', '5.000000'])
 
     def test_previous_alignment_files_are_resolved_from_input_dir(self):
         pipeline = self._pipeline(AreTomo3ReconstructPipeline)
@@ -184,14 +185,15 @@ class TestAreTomo3ModularStaging(unittest.TestCase):
             path = os.path.join(directory, 'TS_CTF.txt')
             pipeline._write_synthetic_ctf(path, table)
             with open(path) as handle:
+                data_lines = [line for line in handle if not line.startswith('#')]
                 self.assertEqual(
-                    handle.read().split(),
+                    data_lines[0].split(),
                     ['1', '10000.000000', '11000.000000', '5.000000', '0',
                      '0.800000', '8.000000', '0'],
                 )
 
     def test_boolean_values_are_normalized(self):
-        pipeline = self._pipeline(Aretomo3ReconstructPipeline)
+        pipeline = self._pipeline(AreTomo3ReconstructPipeline)
         pipeline._args = {
             'aretomo3.CorrCTF': 'false',
             'UsePreviousAlignment': 'true',
@@ -200,7 +202,7 @@ class TestAreTomo3ModularStaging(unittest.TestCase):
         self.assertTrue(pipeline._use_previous_alignment())
 
     def test_previous_alignment_can_require_ctf(self):
-        pipeline = self._pipeline(Aretomo3ReconstructPipeline)
+        pipeline = self._pipeline(AreTomo3ReconstructPipeline)
         with tempfile.TemporaryDirectory() as directory:
             ts_name = 'TS'
             star = os.path.join(directory, 'tilt_series', 'aligned_tilt_series.star')

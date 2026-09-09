@@ -47,6 +47,13 @@ class Aretomo3ModularBase(AreTomo3Pipeline):
         """Write AreTomo3 CTF input rows from RELION per-tilt metadata."""
         required = ('rlnDefocusU', 'rlnDefocusV', 'rlnDefocusAngle')
         with open(path, 'w') as handle:
+            handle.write(
+                '# Columns: #1 micrograph number; #2 - defocus 1 [A]; '
+                '#3 - defocus 2; #4 - azimuth of astigmatism; '
+                '#5 - additional phase shift [radian]; #6 - cross correlation; '
+                '#7 - spacing (in Angstroms) up to which CTF rings were fit '
+                'successfully; #8 - dfHand\n'
+            )
             for index, row in enumerate(table, start=1):
                 if any(getattr(row, key, '') in ('', None) for key in required):
                     raise ValueError(
@@ -176,6 +183,7 @@ class Aretomo3ModularBase(AreTomo3Pipeline):
             'tlt': f'{ts_name}_TLT.txt',
             'aln': f'{ts_name}.aln',
             'ctf': f'{ts_name}_CTF.txt',
+            'ctf_stack': f'{ts_name}_CTF.mrc',
         }
         expected = ', '.join(filenames[name] for name in required)
         files = {
@@ -183,6 +191,7 @@ class Aretomo3ModularBase(AreTomo3Pipeline):
             'tlt': os.path.join(candidate, filenames['tlt']),
             'aln': os.path.join(candidate, filenames['aln']),
             'ctf': os.path.join(candidate, filenames['ctf']),
+            'ctf_stack': os.path.join(candidate, filenames['ctf_stack']),
         }
         missing = [name for name in required if not os.path.exists(files[name])]
         if not missing:

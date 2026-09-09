@@ -8,6 +8,7 @@ from emtools.image import Image
 from emtools.metadata import Table
 from .utils import create_dummy_edf_file
 
+# TODO: Implement handling the synthetic ALN generation and ensure consistency with AreTomo3 input requirements.
 
 class AreTomo3ReconstructPipeline(Aretomo3ModularBase):
     name = 'emw-aretomo3-reconstruct'
@@ -34,10 +35,17 @@ class AreTomo3ReconstructPipeline(Aretomo3ModularBase):
             _, staged = self._stage_previous_alignment(batch, ts_name, required=('stack', 'tlt', 'aln'))
         return staged
 
-    def _write_synthetic_aln(self, path, table, row, pixel_size):
+    def _write_synthetic_aln(self, path, table, row, pixel_size, raw_size=None):
         rot = float(getattr(row, 'rlnTomoNominalTiltAxisAngle', 0) or 0)
+        raw_x, raw_y = raw_size if raw_size else (0, 0)
         with open(path, 'w') as handle:
-            handle.write('# Synthetic ALN generated from RELION5 metadata; no local alignment.\n')
+            handle.write('# AreTomo Alignment / Priims bprmMn (synthetic, from RELION5 metadata; no local alignment)\n')
+            handle.write(f'# RawSize = {raw_x} {raw_y} {len(table)}\n')
+            handle.write('# NumPatches = 0\n')
+            handle.write('# AlphaOffset =     0.00\n')
+            handle.write('# BetaOffset =     0.00\n')
+            handle.write('# Thickness = 0\n')
+            handle.write('# SEC     ROT         GMAG       TX          TY      SMEAN     SFIT    SCALE     BASE     TILT\n')
             for index, tilt in enumerate(table, start=1):
                 x_tilt = float(getattr(tilt, 'rlnTomoXTilt', 0) or 0)
                 z_rot = float(getattr(tilt, 'rlnTomoZRot', 0) or 0)
@@ -64,10 +72,13 @@ class AreTomo3ReconstructPipeline(Aretomo3ModularBase):
                 self._install_previous_alignment(batch, ts_name)
             else:
                 self.log(f'{ts_name}: Synthesizing ALN file from RELION5 aligned_tilt_series.star')
-                table, _, _ = self._stage_stack_and_tlt(batch, ts_name, row, aligned_angles=True)
-                self._write_synthetic_aln(batch.join(f'{ts_name}.aln'), table, row, self._pixel_size(row))
+                table, stack, _ = self._stage_stack_and_tlt(batch, ts_name, row, aligned_angles=True)
+                raw_size = Image.get_dimensions(stack)[:2]
+                self._write_synthetic_aln(batch.join(f'{ts_name}.aln'), table, row, self._pixel_size(row),
+                                          raw_size=raw_size)
                 if self._ctf_requested():
                     self._write_synthetic_ctf(batch.join(f'{ts_name}_CTF.txt'), table)
+            
             at3 = AreTomo3(self.acq, **self._args)
             at3.process_batch(batch, gpu=gpu, cmd=2, input_prefix=f'./{ts_name}',
                               input_suffix='.mrc', input_skips='_ODD,_EVN', ts_name=ts_name, expect_tilt_series=False,
