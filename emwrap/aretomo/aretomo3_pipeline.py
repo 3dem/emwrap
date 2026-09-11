@@ -18,10 +18,6 @@ import os
 import shutil
 import csv
 
-#Plots and reading mrc
-# import mrcfile
-# import numpy as np
-
 from emtools.utils import Color, FolderManager
 from emtools.image import Image
 from emtools.jobs import TsStarBatchManager
@@ -185,6 +181,10 @@ class AreTomo3Pipeline(ProcessingPipeline):
         newPx = inputPs * float(binning) if binning > 0 else inputPs
         return newPx
 
+    def _registeredTsPs(self, tsRow):
+        inputPs = float(tsRow.rlnMicrographOriginalPixelSize)
+        return self.newTargetTsPs(inputPs)
+
     def newTargetTomPs(self, inputPs):
         tsPs = self.newTargetTsPs(inputPs)
         tomBinning = self._get_first_binning_value(self._args.get('aretomo3.AtBin', ''))
@@ -209,6 +209,47 @@ class AreTomo3Pipeline(ProcessingPipeline):
 
     def _getOutputTomFolder(self, tsName):
         return FolderManager(self.join(self.outputTomDir, tsName))
+
+    def _copy_result_file(self, result, key, destination_folder):
+        source = result.get(key)
+        if not source or not os.path.exists(source):
+            return None
+
+        destination = destination_folder.join(os.path.basename(source))
+        if os.path.abspath(source) != os.path.abspath(destination):
+            shutil.copy2(source, destination)
+        result[key] = destination
+        return destination
+
+    def _copy_result_folder(self, result, key, destination_folder):
+        source = result.get(key)
+        if not source or not os.path.isdir(source):
+            return None
+
+        destination = destination_folder.join(os.path.basename(source))
+        if os.path.abspath(source) != os.path.abspath(destination):
+            if os.path.exists(destination):
+                shutil.rmtree(destination)
+            shutil.copytree(source, destination)
+        result[key] = destination
+        return destination
+
+    def _link_result_stack_as_mrcs(self, result, key):
+        source = result.get(key)
+        if not source or not os.path.exists(source):
+            return None
+
+        root, extension = os.path.splitext(source)
+        if extension.lower() != '.mrc':
+            return source
+
+        destination = root + '.mrcs'
+        if os.path.abspath(source) != os.path.abspath(destination):
+            if os.path.lexists(destination):
+                os.remove(destination)
+            os.symlink(os.path.basename(source), destination)
+        result[key] = destination
+        return destination
 
     def _copy_mdoc_to_output(self, tsName, result):
         mdocFile = result.get('rlnTomoMdocFile', None)
@@ -879,8 +920,7 @@ class AreTomo3Pipeline(ProcessingPipeline):
                 continue
 
             if newTsPs is None:
-                inputPs = float(tsRow.rlnMicrographOriginalPixelSize)
-                newTsPs = self.newTargetTsPs(inputPs)
+                newTsPs = self._registeredTsPs(tsRow)
                 self.log(f"New target tilt series pixel size: {newTsPs:0.3f} Å/px")
 
             if 'error' in result:
@@ -1028,101 +1068,28 @@ class AreTomo3Pipeline(ProcessingPipeline):
             tsFolder.create()
             tomFolder = None  # only created if a tomogram was produced
 
-            def _copy(srcKey, destFolder):
-                """ Copy the file at result[srcKey] into destFolder, update
-                result[srcKey] to the copied file. Returns the new path, or
-                None if srcKey wasn't populated for this batch. """
-                src = result.get(srcKey, None)
-                if src is None or not os.path.exists(src):
-                    return None
-
-                dst = destFolder.join(os.path.basename(src))
-                
-                if os.path.abspath(src) != os.path.abspath(dst):
-                    shutil.copy2(src, dst)
-                
-                result[srcKey] = dst
-                return dst
-
-            def _copy_folder(srcKey, destFolder):
-                """Copy the folder at result[srcKey] into destFolder, update result[srcKey].
-                Returns the copied folder path, or None if srcKey is missing.
-                """
-                src = result.get(srcKey, None)
-                if src is None or not os.path.isdir(src):
-                    return None
-
-                dst = destFolder.join(os.path.basename(src))
-
-                if os.path.abspath(src) != os.path.abspath(dst):
-                    if os.path.exists(dst):
-                        shutil.rmtree(dst)
-                    shutil.copytree(src, dst)
-
-                result[srcKey] = dst
-                return dst
-            
-            def _link_mrc_stack_as_mrcs(srcKey):
-                """Create a .mrcs symlink for an MRC stack and update result[srcKey].
-
-                RELION expects stacks of 2D images to have extension .mrcs.
-                AreTomo3 writes them as .mrc, so we keep the original .mrc file and
-                create a sibling .mrcs symlink pointing to it.
-                """
-                src = result.get(srcKey, None)
-
-                if src is None or not os.path.exists(src):
-                    return None
-
-                root, ext = os.path.splitext(src)
-
-                if ext.lower() != '.mrc':
-                    return src
-
-                dst = root + '.mrcs'
-
-                if os.path.abspath(src) == os.path.abspath(dst):
-                    result[srcKey] = dst
-                    return dst
-
-                if os.path.lexists(dst):
-                    os.remove(dst)
-
-                # Relative symlink keeps the output folder movable.
-                os.symlink(os.path.basename(src), dst)
-
-                result[srcKey] = dst
-                return dst            
-
             # --- Aligned tilt series outputs -> outputTsDir
-            _copy('rlnTiltSeriesAligned', tsFolder)
-            _copy('rlnTiltSeriesAlignedOdd', tsFolder)
-            _copy('rlnTiltSeriesAlignedEvn', tsFolder)
-            _copy('at3TomoAlignmentFile', tsFolder)
-            _copy('at3MappingFile', tsFolder)
-            _copy('at3TomoCtfFile', tsFolder)
-            _copy('rlnCtfImage', tsFolder)
-            _copy('at3MetricsCsv', tsFolder)
-            _copy('at3TimeStampCsv', tsFolder)
+            for key in ('rlnTiltSeriesAligned', 'rlnTiltSeriesAlignedOdd',
+                        'rlnTiltSeriesAlignedEvn', 'at3TomoAlignmentFile',
+                        'at3MappingFile', 'at3TomoCtfFile', 'rlnCtfImage',
+                        'at3MetricsCsv', 'at3TimeStampCsv'):
+                self._copy_result_file(result, key, tsFolder)
 
             # RELION expects image stacks to use .mrcs extension.
-            _link_mrc_stack_as_mrcs('rlnTiltSeriesAligned')
-            _link_mrc_stack_as_mrcs('rlnTiltSeriesAlignedOdd')
-            _link_mrc_stack_as_mrcs('rlnTiltSeriesAlignedEvn')
-            _link_mrc_stack_as_mrcs('rlnCtfImage')
+            for key in ('rlnTiltSeriesAligned', 'rlnTiltSeriesAlignedOdd',
+                        'rlnTiltSeriesAlignedEvn', 'rlnCtfImage'):
+                self._link_result_stack_as_mrcs(result, key)
 
             # --- IMOD folder -> outputTsDir/TS_NAME/
-            _copy_folder('at3ImodFolder', tsFolder)
+            self._copy_result_folder(result, 'at3ImodFolder', tsFolder)
 
             # --- Tomogram outputs (only present if reconstruction was enabled) -> outputTomDir
             if result.get('rlnTomoReconstructedTomogram', None) is not None:
                 tomFolder = self._getOutputTomFolder(tsName)
                 tomFolder.create()
-                _copy('rlnTomoReconstructedTomogram', tomFolder)
-                _copy('rlnTomoNameOdd', tomFolder)
-                _copy('rlnTomoNameEvn', tomFolder)
-                _copy('at3ThicknessMrc', tomFolder)
-                _copy('at3ThicknessCsv', tomFolder)
+                for key in ('rlnTomoReconstructedTomogram', 'rlnTomoNameOdd',
+                            'rlnTomoNameEvn', 'at3ThicknessMrc', 'at3ThicknessCsv'):
+                    self._copy_result_file(result, key, tomFolder)
 
             batch.info['result'] = {k: v for k, v in result.items()
                                     if k != 'error'}
