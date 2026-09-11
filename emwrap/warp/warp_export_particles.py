@@ -473,6 +473,44 @@ class WarpExportParticles(WarpBasePipeline):
         with StarFile(iosFn, 'w') as sf:
             sf.writeTable('optimisation_set', Table.fromDict(values), timeStamp=True)
 
+    def _inputTomoTiltSeriesPixelSize(self):
+        """Return the tilt-series pixel size from input tomograms.star."""
+        self._ensureInputsResolved()
+        tomoTable, _ = self._resolveInputs()
+        values = {float(row.rlnTomoTiltSeriesPixelSize) for row in tomoTable}
+        if len(values) > 1:
+            self.log(
+                "WARNING: input tomograms have multiple "
+                f"rlnTomoTiltSeriesPixelSize values: {sorted(values)}; "
+                f"using {min(values)}"
+            )
+        return next(iter(values))
+
+    def _fixTomoTiltSeriesPixelSizeTable(self, table):
+        """Correct rlnTomoTiltSeriesPixelSize in Warp STAR tables.
+
+        Some Warp versions (e.g. 2.0.0-dev040) write the particle or
+        tomogram pixel size into rlnTomoTiltSeriesPixelSize. Use the input
+        tomograms.star as the source of truth.
+        """
+        col = 'rlnTomoTiltSeriesPixelSize'
+        if col not in table.getColumnNames():
+            return table
+
+        correctPs = self._inputTomoTiltSeriesPixelSize()
+        newTable = Table(table.getColumnNames())
+        for row in table:
+            rowDict = row._asdict()
+            current = float(rowDict[col])
+            if current != correctPs:
+                self.log(
+                    f"Correcting {col} from {current} to {correctPs} "
+                    f"(Warp ts_export_particles regression)"
+                )
+                rowDict[col] = correctPs
+            newTable.addRowValues(**rowDict)
+        return newTable
+
     def _particlesOutputColumns(self, warpColumns):
         """Build output column order with Relion 5 centered coordinates."""
         outputColumns = []
@@ -533,7 +571,7 @@ class WarpExportParticles(WarpBasePipeline):
 
                             newTable.addRowValues(**rowDict)
                     else:
-                        newTable = table
+                        newTable = self._fixTomoTiltSeriesPixelSizeTable(table)
 
                     singleRow = len(newTable) == 1
                     sfOut.writeTable(

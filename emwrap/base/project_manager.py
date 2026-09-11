@@ -284,6 +284,12 @@ class ProjectManager(FolderManager):
             self._updateJobInputs(job, job_params)
             if is_existing:
                 self._data.resetJobForSave(job.id)
+            prev_force = self._force
+            self._force = True
+            try:
+                self._data.updateWorkflow()
+            finally:
+                self._force = prev_force
             self._persist_workflow()
 
         return job

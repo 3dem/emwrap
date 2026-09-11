@@ -205,18 +205,9 @@ class ProcessingConfig:
         return cls._get_config().get('scratch')
 
     @classmethod
-    def get_testdata(cls, name):
-        return cls._get_config('testdata', {}).get(name, {})
-
-    @classmethod
     def get_testdata_path(cls, name, validate=False):
-        data_path = cls.get_testdata(name).get('path', '')
-        if validate:
-            if not os.path.exists(data_path):
-                raise FileNotFoundError(f"Test data folder does not exist: {data_path}")
-            if not os.path.isdir(data_path):
-                raise NotADirectoryError(f"Test data folder is not a directory: {data_path}")
-        return data_path
+        from emwrap.tests.test_data import TestData
+        return TestData.get_dataset_path(name, validate=validate)
 
     @classmethod
     def get_packages(cls):

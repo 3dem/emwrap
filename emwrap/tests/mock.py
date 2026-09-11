@@ -23,11 +23,10 @@ from emtools.utils import Color, Process, FolderManager
 from emtools.jobs import Args
 from emtools.metadata import Table, Acquisition, StarFile, RelionStar, WarpPopulation
 from emtools.jobs import BatchManager
-from emwrap.base.config import ProcessingConfig
 
 
 class MockWarpApoF:
-    path = ProcessingConfig.get_testdata_path('WarpApoF')
+    path = os.path.join(os.environ.get('ROOT', ''), 'mock', 'data')
     fm = FolderManager(path)
 
     acquisition = Acquisition(

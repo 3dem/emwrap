@@ -224,13 +224,32 @@ class ProjectData(FolderManager):
             info['outputs'] = []
             self._set_info(self._jobs, job_id, info)
 
+    def invalidateJobOutputs(self, job_id):
+        """Reset output metadata for a re-saved job without removing graph nodes."""
+        job = self._wf.getJob(job_id, None)
+        if not job:
+            return
+
+        output_ids = self._collectJobOutputIds(job_id, job=job)
+        for output_id in output_ids:
+            if not job.hasOutput(output_id):
+                job.registerOutput(output_id, datatype="File")
+            if output_id in self._outputs:
+                self._set_info(self._outputs, output_id,
+                               self._pendingOutputInfo(output_id))
+
+        if job_id in self._jobs:
+            info = dict(self._jobs[job_id])
+            info['outputs'] = output_ids
+            self._set_info(self._jobs, job_id, info)
+
     def resetJobForSave(self, job_id):
-        """Reset a re-saved job: drop stale RELION markers, outputs, and cache."""
+        """Reset a re-saved job: drop stale RELION markers and output metadata."""
         self._clearJobStatusFiles(job_id)
         output_nodes = self.join(job_id, 'RELION_OUTPUT_NODES.star')
         if os.path.exists(output_nodes):
             os.remove(output_nodes)
-        self.clearJobOutputs(job_id)
+        self.invalidateJobOutputs(job_id)
 
     def setJobStatus(self, job_id, status):
         """ Persist status in project.json and the in-memory workflow."""
@@ -435,6 +454,23 @@ class ProjectData(FolderManager):
             if output_id not in outputs:
                 outputs.append(output_id)
 
+        # Infer expected outputs from downstream job parameter references.
+        job_prefix = f'{job_id}/'
+        for other in self._wf.jobs():
+            if other.id == job_id:
+                continue
+            job_star = self.join(other.id, 'job.star')
+            if not os.path.exists(job_star):
+                continue
+            params = RelionStar.read_jobstar(job_star)
+            for value in params.values():
+                if not isinstance(value, str):
+                    continue
+                rel_value = (self._project.relpath(value)
+                             if os.path.isabs(value) else value)
+                if rel_value.startswith(job_prefix) and rel_value not in outputs:
+                    outputs.append(rel_value)
+
         return outputs
 
     def _extendJobInfoOutputs(self, job_id, jobInfo, job=None):
@@ -603,11 +639,17 @@ class ProjectData(FolderManager):
 
         inputs = jobInfo.get('inputs', [])
         for pid, rel_value in inputs:
+            data = None
             if job.hasInput(rel_value):
                 data = job.getInput(rel_value)
-            else:
+                if data.parent.id != pid:
+                    del job._inputs[rel_value]
+                    if job in data.childs:
+                        data.childs.remove(job)
+                    data = None
+
+            if data is None:
                 # If the parent job has been deleted, it might be None
-                data = None
                 if parent_job := self._wf.getJob(pid):
                     if not parent_job.hasOutput(rel_value):
                         data = parent_job.registerOutput(rel_value)
@@ -617,6 +659,8 @@ class ProjectData(FolderManager):
 
             if data:
                 _update_data(data, rel_value)
+                if job not in data.childs:
+                    data.childs.append(job)
 
         outputs = jobInfo.get('outputs', [])
         output_ids = set(outputs)

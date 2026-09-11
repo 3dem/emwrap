@@ -77,14 +77,6 @@ export EMWRAP_CONFIG=$(cat <<EOF
         "CRYOCARE": {"launcher": "$SCRIPTS/cryocare_launcher.sh"},
         "DENOISET": {"launcher": "$SCRIPTS/denoiset_launcher.sh"},
         "MISSALIGNMENT": {"launcher": "$SCRIPTS/missalignment.sh"}
-    },
-    "testdata": {
-        "WarpApofTutorial": {
-            "path": "$ROOT/testdata/WarpTutorialTomo"
-        },
-        "WarpApofMockup": {
-           "path": "$ROOT/testdata/WarpTutorialMockup"
-        }
     }
 }
 EOF

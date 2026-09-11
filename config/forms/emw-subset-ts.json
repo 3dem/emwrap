@@ -1,7 +1,7 @@
 {
     "name": "emw-subset-ts",
     "label": "EMwrap Subset TS",
-    "help": "Create a subset of a tilt-series, tomogram, or particle/coordinate set by selecting tomogram names (rlnTomoName).",
+    "help": "Create a subset of a tilt-series, tomogram, or particle/coordinate set by selecting tomogram names (rlnTomoName). Optionally, individual tilts can also be excluded from specific tomograms' tilt-series metadata.",
     "sections": [
         {
             "label": "Input",
@@ -10,14 +10,34 @@
                     "name": "input_set",
                     "label": "Input set:",
                     "paramClass": "PathParam",
-                    "pointerClass": "TiltSeriesMovies, TiltSeries, Tomograms, TomoParticles, TomoCoordinates",
+                    "pointerClass": "TiltSeriesMovies, TiltSeries, TiltSeriesAligned, Tomograms, TomoParticles, TomoCoordinates",
                     "help": "Input STAR file: tilt_series.star, tomograms.star, or optimisation_set.star (TomoParticles / TomoCoordinates)."
                 },
                 {
                     "name": "subset_tomo_names",
                     "label": "Subset Tomo Names",
                     "paramClass": "StringParam",
-                    "help": "Space-separated list of rlnTomoName values to keep in the output set."
+                    "help": "Space-separated list of rlnTomoName values to keep in the output set. Can be left empty if 'Exclude Tilts' below is used instead: in that case every tomogram from the input set is kept, and only the requested tilts are excluded."
+                },
+                {
+                    "name": "exclude_tilts",
+                    "label": "Exclude Tilts",
+                    "paramClass": "TableParam",
+                    "help": "Optional: for one or more tomograms in the subset above, exclude individual tilts from their tilt-series STAR file (the file referenced by the 'rlnTomoTiltSeriesStarFile' column). When at least one row is provided here, the job rewrites that per-tomogram STAR file for each listed tomogram, dropping the rows for the excluded tilts, and points the output 'rlnTomoTiltSeriesStarFile' at the rewritten file instead of the original. Every other tomogram in the subset (not listed here) keeps all its tilts, but its tilt-series STAR file is still copied as-is into this job's own output folder, so that all rows in the output set point to metadata files living in the same job folder.",
+                    "params": [
+                        {
+                            "name": "tomoName",
+                            "label": "Tomo name",
+                            "paramClass": "StringParam",
+                            "help": "rlnTomoName of the tomogram to exclude tilts from. Must be one of the names also listed in 'Subset Tomo Names' above."
+                        },
+                        {
+                            "name": "excludedTilts",
+                            "label": "Excluded tilts",
+                            "paramClass": "StringParam",
+                            "help": "rlnTomoTiltMovieIndex value(s) to exclude from this tomogram's tilt-series STAR file. Separate multiple values with spaces, commas, or both, and use inclusive ranges written as 'start-end' (e.g. '3 5, 9' or '5-9, 12' for tilts 5 through 9 plus 12)."
+                        }
+                    ]
                 }
             ]
         }

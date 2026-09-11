@@ -103,8 +103,9 @@ class TestApoF(unittest.TestCase):
             self.fail('EMWRAP_CONFIG is not configured (source emwrap.bashrc)')
         if not self.data_root:
             self.fail(
-                'Test data path for WarpApofTutorial is not configured in '
-                'EMWRAP_CONFIG')
+                'Test data path for WarpApofTutorial could not be resolved. '
+                'Source emwrap.bashrc and download the dataset with: '
+                'python -m emwrap.tests data -d WarpApofTutorial')
         if not os.path.isdir(self.data_root):
             self.fail(f'Test data folder does not exist: {self.data_root}')
 
