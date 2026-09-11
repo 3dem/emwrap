@@ -30,7 +30,7 @@ class AreTomo3ReconstructPipeline(Aretomo3ModularBase):
 
     def _install_previous_alignment(self, batch, ts_name):
         if self._ctf_requested():
-            _, staged = self._stage_previous_alignment(batch, ts_name, required=('stack', 'tlt', 'aln', 'ctf'))
+            _, staged = self._stage_previous_alignment(batch, ts_name, required=('stack', 'tlt', 'aln', 'ctf', 'ctf_stack'))
         else:
             _, staged = self._stage_previous_alignment(batch, ts_name, required=('stack', 'tlt', 'aln'))
         return staged

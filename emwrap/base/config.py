@@ -170,8 +170,8 @@ class ProcessingConfig:
             "output": "Aretomo3Reconstruct"
         },
         "emw-denoiset": {
-            "launcher": "emwrap.aretomo.denoiset_pipeline",
-            "label": "DenoisET Pipeline",
+            "launcher": "emwrap.aretomo.denoiset",
+            "label": "DenoisET",
             "output": "DenoisET"
         }
     }
@@ -182,7 +182,7 @@ class ProcessingConfig:
         { "name": "warp", "prefixes": ["emw-warp"] },
         { "name": "relion", "prefixes": ["emw-relion", "relion."] },
         { "name": "pytom", "prefixes": ["emw-pytom"] },
-        { "name": "aretomo", "prefixes": ["emw-aretomo", "emw-aretomo3", "emw-aretomo3-align", "emw-aretomo3-reconstruct", "emw-denoiset"] }
+        { "name": "aretomo", "prefixes": ["emw-aretomo", "emw-denoiset"] }
     ]
 
     @classmethod
