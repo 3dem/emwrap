@@ -26,6 +26,25 @@ from emwrap.base import ProcessingPipeline
 
 class PyTom:
     """ PyTom wrapper to run in a batch folder. """
+
+    # Aliases for the '--g'/'--s' keys this class builds internally
+    # (from the 'g'/'s' pytom_match_template.py options) to their real,
+    # documented long-form flag names ('--gpu-ids'/'--volume-split').
+    # Used only to detect collisions with 'extra_args', so that e.g.
+    # '--gpu-ids ...' typed in extra_args is still recognized as already
+    # set via the 'GPUs' form field. NOTE: pytom_match_template.py's own
+    # true single-letter short flags (-t, -v, -d, -m, -a, -r, -g, -s) are
+    # not usable from extra_args at all, since emtools' Args.fromString
+    # only recognizes options with 2+ characters after the dash(es).
+    _EXTRA_ARGS_ALIASES = {
+        '--g': '--gpu-ids',
+        '--s': '--volume-split',
+    }
+
+    @classmethod
+    def _canonical_arg(cls, key):
+        return cls._EXTRA_ARGS_ALIASES.get(key, key)
+
     def __init__(self, acq, args):
         #self.args = self.argsFromAcq(acq)
         self.acq = acq
@@ -59,7 +78,11 @@ class PyTom:
 
         args.update(extraArgs)
 
+        extra_args_str = self.args['pytom'].get('extra_args', '')
+
         for k, v in self.args['pytom'].items():
+            if k == 'extra_args':
+                continue  # handled separately below, once all other args are set
             # Let's create some relative symbolic links and update arguments
             if k in ['template', 'mask']:
                 args[f'--{k}'] = batch.link(v)
@@ -69,6 +92,28 @@ class PyTom:
                 args[f'--{k}'] = ""  # For booleans just add the argument
             else:
                 args[f'--{k}'] = v
+
+        if extra_args_str:
+            # Free-form extra arguments for pytom_match_template.py
+            # (e.g. '--rng-seed 42'). Any option already set above --
+            # either directly through its own form field, or
+            # automatically from the acquisition/batch data -- is
+            # rejected: the user already has a dedicated way to set it,
+            # so silently overriding it here would be confusing.
+            extra = Args.fromString(extra_args_str)
+            canonical_set = {self._canonical_arg(k) for k in args}
+            clashes = sorted(
+                k for k in extra if self._canonical_arg(k) in canonical_set
+            )
+            if clashes:
+                verb = 'is' if len(clashes) == 1 else 'are'
+                raise ValueError(
+                    f"pytom.extra_args: {', '.join(clashes)} {verb} already "
+                    "set (by its own form field, or automatically from the "
+                    "acquisition/batch data). Remove it from extra_args and "
+                    "use the dedicated field instead."
+                )
+            args.update(extra)
 
         with batch.execute('pytom_match'):
             batch.call(launcher, args)

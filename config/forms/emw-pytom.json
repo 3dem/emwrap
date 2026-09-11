@@ -77,6 +77,12 @@
                     "label": "Tomogram CTF model:",
                     "default": "phase-flip",
                     "help": ""
+                },
+                {
+                    "name": "pytom.extra_args",
+                    "label": "pytom_match_template.py extra arguments",
+                    "paramClass": "StringParam",
+                    "help": "Extra command-line arguments to pass directly to pytom_match_template.py, exactly as they would be typed on the command line (e.g. \"--rng-seed 42\"). Multiple options can be combined (e.g. \"--rng-seed 42 --spectral-whitening\"). Use this for options not already exposed above, such as:\n--rng-seed (seed the RNG used by random phase correction, for reproducible results across runs)\n--non-spherical-mask (allow a non-spherical template mask)\n--z-axis-rotational-symmetry (divisor for rotational symmetry around Z)\n--phase-shift (phase plate phase shift, in degrees)\n--defocus-handedness (correct for the defocus gradient handedness)\n--spectral-whitening (apply power spectrum whitening)\n--half-precision (write output as float16 instead of float32)\n--tomogram-mask (skip subvolumes outside this mask)\n--search-x / --search-y / --search-z (restrict the search to index ranges)\n--tilt-angles-first-column (tilt-angle file has extra columns)\n--relion5-tomograms-star / --warp-xml-file (alternative metadata sources)\n--log (logging level: info or debug)\nSee the pytom-match-pick documentation for the full list: https://sbc-utrecht.github.io/pytom-match-pick/\n\nOptions already set above (or computed automatically from the acquisition/batch data, such as --tomogram or --dose-accumulation) must not be repeated here -- doing so will fail the job with an error."
                 }
 
             ]
