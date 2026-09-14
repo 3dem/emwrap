@@ -440,6 +440,17 @@ class DenoisET(ProcessingPipeline):
         for row in tomTable:
             tomDict = row._asdict()
 
+            # os.path.abspath('') silently resolves to the cwd, so an empty
+            # path here (e.g. missing half-tomogram) must be rejected first.
+            for key in ('rlnTomoReconstructedTomogram',
+                       'rlnTomoReconstructedTomogramHalf1',
+                       'rlnTomoReconstructedTomogramHalf2'):
+                if not tomDict.get(key):
+                    raise ValueError(
+                        f"{tomDict['rlnTomoName']}: Missing {key} for training; "
+                        'denoise3d training requires full and half-set tomograms.'
+                    )
+
             fullSrc = os.path.abspath(tomDict['rlnTomoReconstructedTomogram'])
             evnSrc = os.path.abspath(tomDict['rlnTomoReconstructedTomogramHalf1'])
             oddSrc = os.path.abspath(tomDict['rlnTomoReconstructedTomogramHalf2'])

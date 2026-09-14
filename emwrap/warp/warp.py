@@ -281,7 +281,7 @@ class WarpBasePipeline(ProcessingPipeline):
             self.log(f"Mdoc {mdocFile} not found for TS {tsName}, skipping...")
             return False, None, None
 
-        tsTable = StarFile.getTableFromFile(tsName, tsDict['rlnTomoTiltSeriesStarFile'])
+        tsTable = StarFile.getTableFromFile(tsName, tsDict['rlnTomoTiltSeriesStarFile'], guessType=False)
 
         # Each input movie must have xml + average mrc (same idea as WarpAreTomo
         # requiring aligned stack per TS). Collect missing before building output.
@@ -457,7 +457,7 @@ class WarpBasePipeline(ProcessingPipeline):
         })
 
         # Generate the proper metadata star file for this row
-        tsTable = StarFile.getTableFromFile(tsName, inputTsStar)
+        tsTable = StarFile.getTableFromFile(tsName, inputTsStar, guessType=False)
         alignments = self.parseAlignmentParams(tsDict, newPs)
         if len(alignments) != len(tsTable):
             self.log(f"ERROR: Alignment count mismatch for TS {tsName}: "
@@ -657,7 +657,7 @@ class WarpBaseTsAlign(WarpBasePipeline):
         """ Load input or output information. """
         first = tsAllTable[0]
         ps = first.rlnTomoTiltSeriesPixelSize
-        tsTable = StarFile.getTableFromFile(first.rlnTomoName, first.rlnTomoTiltSeriesStarFile)
+        tsTable = StarFile.getTableFromFile(first.rlnTomoName, first.rlnTomoTiltSeriesStarFile, guessType=False)
         N = len(tsAllTable)
         n = len(tsTable)
         movieFn = tsTable[0].rlnMicrographMovieName
@@ -674,7 +674,7 @@ class WarpBaseTsAlign(WarpBasePipeline):
     def runBatch(self, batch, importInputs=True, **kwargs):
         # Input run folder from the Motion correction and CTF job
         inputTs = kwargs['inputTs']
-        tsAllTable = StarFile.getTableFromFile('global', inputTs)
+        tsAllTable = StarFile.getTableFromFile('global', inputTs, guessType=False)
         N, x, y, n, ps = self._getInfo(tsAllTable)
         self.writeInfo()
 
@@ -734,7 +734,7 @@ class WarpBaseTsAlign(WarpBasePipeline):
         """ Register output STAR files. """
         batch.mkdir('tilt_series')
         self.log("Registering output STAR files.")
-        tsAllTable = StarFile.getTableFromFile('global', self.inputTs)
+        tsAllTable = StarFile.getTableFromFile('global', self.inputTs, guessType=False)
         newPs = self.alignmentPs()
 
         newTsStarFile = batch.join('aligned_tilt_series.star')

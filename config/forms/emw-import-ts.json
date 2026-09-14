@@ -19,6 +19,7 @@
                     "name": "acq.gain",
                     "label": "Gain file",
                     "paramClass": "PathParam",
+                    "allowsEmpty": true,
                     "help": ""
                 },
                 {

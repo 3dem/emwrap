@@ -1,0 +1,142 @@
+{
+    "name": "relion.ctffind.tomo",
+    "label": "Relion Tomo CTF Estimation",
+    "help": "RELION CTFFIND-4.1 CTF estimation for tomography tilt series. Matches RelionJob::initialiseCtffindJob with is_tomo=true and produces tilt_series_ctf.star with per-tilt CTF metadata.",
+    "sections": [
+        {
+            "label": "I/O",
+            "params": [
+                {
+                    "name": "input_star_mics",
+                    "label": "Input tilt series:",
+                    "pattern": "Tilt series STAR file (*.star)",
+                    "help": "A motion-corrected tilt series STAR file. RELION will estimate CTF parameters for each tilt image.",
+                    "paramClass": "PathParam",
+                    "pointerClass": "TiltSeries"
+                },
+                {
+                    "name": "do_phaseshift",
+                    "label": "Estimate phase shifts?",
+                    "default": false,
+                    "paramClass": "BooleanParam",
+                    "help": "If set to Yes, CTFFIND4 will estimate phase shifts, for example those introduced by a Volta phase plate."
+                },
+                {
+                    "name": "phase_min",
+                    "label": "Phase shift (deg) - Min:",
+                    "default": 0,
+                    "paramClass": "IntParam",
+                    "help": "Minimum phase shift to search, in degrees."
+                },
+                {
+                    "name": "phase_max",
+                    "label": "Phase shift (deg) - Max:",
+                    "default": 180,
+                    "paramClass": "IntParam",
+                    "help": "Maximum phase shift to search, in degrees."
+                },
+                {
+                    "name": "phase_step",
+                    "label": "Phase shift (deg) - Step:",
+                    "default": 10,
+                    "paramClass": "IntParam",
+                    "help": "Phase-shift search step size, in degrees."
+                },
+                {
+                    "name": "dast",
+                    "label": "Amount of astigmatism (A):",
+                    "default": 100,
+                    "paramClass": "IntParam",
+                    "help": "CTFFIND's dAst parameter. This value is suitable for most data sets on reasonably well-aligned microscopes."
+                }
+            ]
+        },
+        {
+            "label": "CTFFIND-4.1",
+            "params": [
+                {
+                    "name": "fn_ctffind_exe",
+                    "label": "CTFFIND-4.1 executable:",
+                    "help": "Location of the CTFFIND release 4.1 or later executable."
+                },
+                {
+                    "name": "use_given_ps",
+                    "label": "Use power spectra from MotionCorr job?",
+                    "default": true,
+                    "paramClass": "BooleanParam",
+                    "help": "If set to Yes, estimate CTF parameters using power spectra calculated during motion correction. This is recommended when those power spectra are available, and is required when motion correction wrote float16 images."
+                },
+                {
+                    "name": "slow_search",
+                    "label": "Use exhaustive search?",
+                    "default": false,
+                    "paramClass": "BooleanParam",
+                    "help": "If set to Yes, CTFFIND4 will use a slower but more exhaustive search. This can help when astigmatism or phase shifts are difficult to fit."
+                },
+                {
+                    "name": "ctf_win",
+                    "label": "Estimate CTF on window size (pix):",
+                    "default": -1,
+                    "paramClass": "IntParam",
+                    "help": "If positive, use a centered square window of this size for CTF estimation. A negative value uses the original tilt image."
+                },
+                {
+                    "name": "box",
+                    "label": "FFT box size (pix):",
+                    "default": 512,
+                    "paramClass": "IntParam",
+                    "help": "CTFFIND's FFT box size."
+                },
+                {
+                    "name": "resmin",
+                    "label": "Minimum resolution (A):",
+                    "default": 50,
+                    "paramClass": "IntParam",
+                    "help": "Lowest resolution used for CTF estimation. For the tutorial data this is 50 A."
+                },
+                {
+                    "name": "resmax",
+                    "label": "Maximum resolution (A):",
+                    "default": 5,
+                    "paramClass": "IntParam",
+                    "help": "Highest resolution used for CTF estimation in the lowest-dose image."
+                },
+                {
+                    "name": "dfmin",
+                    "label": "Minimum defocus value (A):",
+                    "default": 5000,
+                    "paramClass": "IntParam",
+                    "help": "Minimum defocus search value. This is ignored when Nominal defocus search range is positive."
+                },
+                {
+                    "name": "dfmax",
+                    "label": "Maximum defocus value (A):",
+                    "default": 50000,
+                    "paramClass": "IntParam",
+                    "help": "Maximum defocus search value. This is ignored when Nominal defocus search range is positive."
+                },
+                {
+                    "name": "dfstep",
+                    "label": "Defocus step size (A):",
+                    "default": 500,
+                    "paramClass": "IntParam",
+                    "help": "Defocus search step size."
+                },
+                {
+                    "name": "localsearch_nominal_defocus",
+                    "label": "Nominal defocus search range (A):",
+                    "default": 10000,
+                    "paramClass": "IntParam",
+                    "help": "If positive, search within plus or minus this value around the nominal defocus from the input STAR file. Set to zero or a negative value to use the overall minimum and maximum defocus ranges instead."
+                },
+                {
+                    "name": "exp_factor_dose",
+                    "label": "Dose-dependent Thon ring fading (e/A2):",
+                    "default": 100,
+                    "paramClass": "IntParam",
+                    "help": "If positive, lower the maximum resolution used for CTF estimation as accumulated dose increases. A value of 100 e/A2 gives an exp(1) reduction factor at 100 e/A2. Set to zero or a negative value to keep the maximum resolution fixed."
+                }
+            ]
+        }
+    ]
+}
