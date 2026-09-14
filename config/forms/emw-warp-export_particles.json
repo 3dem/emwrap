@@ -61,7 +61,8 @@
                             "label": "Export type: ",
                             "paramClass": "EnumParam",
                             "choices": ["2d", "3d"],
-                            "display": "combo"
+                            "display": "combo", 
+                            "help": "--2d Output particles as 2d image series centered on the particle (particle series)\n--3d Output particles as 3d images (subtomograms)"
                         }
                     ]
                 }

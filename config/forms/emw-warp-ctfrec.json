@@ -22,7 +22,7 @@
                             "name": "ts_reconstruct.angpix",
                             "label": "Reconstruction Voxel size (A/pix)",
                             "paramClass": "FloatParam",
-                            "help": "",
+                            "help": "Pixel size of the reconstructed tomograms in Angstrom",
                             "allowsEmpty": true
                         },
                         {
@@ -53,14 +53,14 @@
                                     "label": "low",
                                     "default": 30,
                                     "paramClass": "FloatParam",
-                                    "help": "(--range_min) Default: 500. Minimum resolution in Angstrom to consider in fit"
+                                    "help": "(--range_low) Default: 30. Lowest (worst) resolution in Angstrom to consider in fit"
                                 },
                                 {
                                     "name": "ts_ctf.range_high",
                                     "label": "high",
                                     "default": 4,
                                     "paramClass": "FloatParam",
-                                    "help": "(--range_high) Default: 10. Maximum resolution in Angstrom to consider in fit"
+                                    "help": "(--range_high) Default: 4. Highest (best) resolution in Angstrom to consider in fit"
                                 }
                             ]
                         },
@@ -73,14 +73,14 @@
                                     "label": "min",
                                     "default": 0.5,
                                     "paramClass": "FloatParam",
-                                    "help": "(--defocus_min) Default: 500. Minimum resolution in Angstrom to consider in fit"
+                                    "help": "(--defocus_min) Default: 0.5. Minimum defocus value in um to explore during fitting (positive = underfocus)"
                                 },
                                 {
                                     "name": "ts_ctf.defocus_max",
                                     "label": "max",
                                     "default": 5,
                                     "paramClass": "FloatParam",
-                                    "help": "(--defocus_max) Default: 10. Maximum resolution in Angstrom to consider in fit"
+                                    "help": "(--defocus_max) Default: 5. Maximum defocus value in um to explore during fitting (positive = underfocus)"
                                 }
                             ]
                         }

@@ -136,13 +136,13 @@
                     "name": "fs_motion_and_ctf.c_use_sum",
                     "label": "Use sum",
                     "paramClass": "BooleanParam",
-                    "help": "(--c_use_sum) "
+                    "help": "(--c_use_sum) Use the movie average spectrum instead of the average of individual frames spectra. Can help in the absence of an energy filter, or when signal is low."
                 },
                 {
                     "name": "fs_motion_and_ctf.out_average_halves",
                     "label": "Output averages halves",
                     "paramClass": "BooleanParam",
-                    "help": "(--out_average_halves) "
+                    "help": "(--out_average_halves) Export aligned averages of odd and even frames separately, e.g. for denoiser training"
                 }
             ]
         },

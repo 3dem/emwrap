@@ -48,7 +48,7 @@
                     "label": "Min FOV",
                     "default": 0,
                     "paramClass": "FloatParam",
-                    "help": "Disable tilts that contain less than this fraction of the tomogram's field of view due to excessive shifts"
+                    "help": "Default: 0. Disable tilts that contain less than this fraction of the tomogram's field of view due to excessive shifts"
                 },
                 {
                     "name": "method",
@@ -86,14 +86,14 @@
                             "label": "Axis Iter",
                             "default": 0,
                             "paramClass": "FloatParam",
-                            "help": ""
+                            "help": "Default: 0. Number of tilt axis angle refinement iterations; each iteration will be started with median value from previous iteration, final iteration will use fixed angle."
                         },
                         {
                             "name": "ts_aretomo.axis_batch",
                             "label": "Axis Batch",
                             "default": 0,
                             "paramClass": "FloatParam",
-                            "help": ""
+                            "help": "Default: 0. Use only this many tilt series for the tilt axis angle search; only relevant if --axis_iter isnt 0."
                         },
                         {
                             "name": "ts_aretomo.patches",
@@ -119,7 +119,7 @@
                             "label": "Patch size (A)",
                             "default": 500,
                             "paramClass": "FloatParam",
-                            "help": "Patch size for patch tracking in Angstroms"
+                            "help": "Default: 500. Patch size for patch tracking in Angstroms."
                         },
                         {
                             "name": "ts_etomo_patches.initial_axis",
