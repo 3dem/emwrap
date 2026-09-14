@@ -151,6 +151,14 @@ class AreTomo3:
             outTiltSeriesMapping = batch.join('output', f'{tsName}_TLT.txt')
             if os.path.exists(outTiltSeriesMapping):
                 result['at3MappingFile'] = outTiltSeriesMapping
+
+            # Modular (Cmd 1/2) pipelines persist their own mapping between
+            # AreTomo3's sequential per-tilt index and the original
+            # rlnTomoTiltMovieIndex, since the two diverge once tilt images
+            # have been removed upstream (e.g. via emw-subset-ts).
+            rlnIndexMapFile = batch.join('output', f'{tsName}_at3_rln_idx.txt')
+            if os.path.exists(rlnIndexMapFile):
+                result['at3RlnIndexMapFile'] = rlnIndexMapFile
             
             # Alignment file (.aln) which is not present in -Cmd 2
             alnFile = batch.join('output', f'{tsName}.aln')

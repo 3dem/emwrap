@@ -81,6 +81,16 @@ class AreTomo3AlignPipeline(Aretomo3ModularBase):
                 if os.path.abspath(tlt_src) != os.path.abspath(tlt_dst):
                     shutil.copy2(tlt_src, tlt_dst)
 
+            # Propagate the AreTomo3-index -> rlnTomoTiltMovieIndex mapping
+            # generated in _stage_stack_and_tlt (or a previously staged one)
+            # so process_batch can register it for use in
+            # _write_individual_tilt_series_star.
+            idx_map_src = (previous.get('idx_map') if previous else None) or batch.join(f'{ts_name}_at3_rln_idx.txt')
+            if os.path.exists(idx_map_src):
+                idx_map_dst = batch.join('output', f'{ts_name}_at3_rln_idx.txt')
+                if os.path.abspath(idx_map_src) != os.path.abspath(idx_map_dst):
+                    shutil.copy2(idx_map_src, idx_map_dst)
+
             # Cmd 1 is the alignment-only public job.  Set this after form
             # serialization so ExtraArgs cannot accidentally request a volume.
             at3.args['-VolZ'] = 0
