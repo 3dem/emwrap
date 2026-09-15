@@ -120,6 +120,16 @@ class ProcessingConfig:
             "label": "Warp M Resample",
             "output": "WarpMResample"
         },
+        "relion.motioncorr.tomo": {
+            "launcher": "emwrap.relion.native",
+            "label": "Relion Motion Correction",
+            "output": "TiltSeries"
+        },
+        "relion.ctffind.tomo": {
+            "launcher": "emwrap.relion.native",
+            "label": "Relion CTF Estimation",
+            "output": "TiltSeries"
+        },
         "relion.reconstructtomograms": {
             "launcher": "emwrap.relion.native",
             "label": "Relion Reconstruct Tomograms",

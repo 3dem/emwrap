@@ -99,20 +99,40 @@ class Aretomo3ModularBase(AreTomo3Pipeline):
 
     # TODO: use_algined_angles should be revised carefully before using them 
     def _write_tlt(self, path, table, use_aligned_angles=False):
+        # AreTomo3 infers acquisition order from line order, not from a
+        # written index, so the input .tlt must only carry the angle. Any
+        # gaps in rlnTomoTiltMovieIndex (e.g. after emw-subset-ts removes a
+        # tilt) would otherwise break AreTomo3's own index expectations.
         table.sort(key='rlnTomoNominalStageTiltAngle')
         with open(path, 'w') as handle:
             for row in table:
+                index = getattr(row, 'rlnTomoTiltMovieIndex', '')
                 angle = getattr(row, 'rlnTomoYTilt', '') if use_aligned_angles else ''
                 if angle in ('', None):
                     angle = getattr(row, 'rlnTomoNominalStageTiltAngle', '')
                 if angle in ('', None):
                     raise NameError(f'Missing tilt angle at row {index}')
-
-                index = getattr(row, 'rlnTomoTiltMovieIndex', '')
                 if index in ('', None):
                     raise ValueError(f'Missing order of acquisition at angle {angle}')
-                
-                handle.write(f'{float(angle):.6f} {index}\n')
+
+                handle.write(f'{float(angle):.6f}\n')
+
+    def _write_rln_index_map(self, path, table):
+        """Persist the mapping between AreTomo3's sequential per-tilt index
+        (1-based, in the same angle-sorted order used to build the .mrc
+        stack and .tlt file) and the original rlnTomoTiltMovieIndex.
+        AreTomo3 outputs (*_TLT.txt, *_CTF.txt, *.aln) number rows
+        sequentially in stack order, which no longer matches
+        rlnTomoTiltMovieIndex once tilt images have been removed
+        (e.g. via emw-subset-ts). This file lets us map results back to the
+        correct row in the individual tilt-series STAR file.
+        """
+        table.sort(key='rlnTomoNominalStageTiltAngle')
+        with open(path, 'w') as handle:
+            handle.write('# at3_index rlnTomoTiltMovieIndex\n')
+            for at3Index, row in enumerate(table, start=1):
+                rlnIndex = getattr(row, 'rlnTomoTiltMovieIndex', '')
+                handle.write(f'{at3Index} {rlnIndex}\n')
 
     def _write_stack_from_images(self, path, table, image_column='rlnMicrographName'):
         """Compose an MRC stack from one per-tilt RELION image column."""
@@ -160,8 +180,10 @@ class Aretomo3ModularBase(AreTomo3Pipeline):
         table = self._read_series(ts_name, row)
         stack = batch.join(f'{ts_name}.mrc')
         tlt = batch.join(f'{ts_name}_TLT.txt')
+        idxMap = batch.join(f'{ts_name}_at3_rln_idx.txt')
         self._write_stack_from_images(stack, table)
         self._write_tlt(tlt, table, use_aligned_angles=aligned_angles)
+        self._write_rln_index_map(idxMap, table)
         return table, stack, tlt
 
     def _resolve_previous_alignment(self, ts_name, required=('stack', 'tlt', 'aln')):
@@ -184,6 +206,7 @@ class Aretomo3ModularBase(AreTomo3Pipeline):
             'aln': f'{ts_name}.aln',
             'ctf': f'{ts_name}_CTF.txt',
             'ctf_stack': f'{ts_name}_CTF.mrc',
+            'idx_map': f'{ts_name}_at3_rln_idx.txt',
         }
         expected = ', '.join(filenames[name] for name in required)
         files = {
@@ -192,6 +215,8 @@ class Aretomo3ModularBase(AreTomo3Pipeline):
             'aln': os.path.join(candidate, filenames['aln']),
             'ctf': os.path.join(candidate, filenames['ctf']),
             'ctf_stack': os.path.join(candidate, filenames['ctf_stack']),
+            # Optional: only present for previous runs that already persisted it.
+            'idx_map': os.path.join(candidate, filenames['idx_map']),
         }
         missing = [name for name in required if not os.path.exists(files[name])]
         if not missing:
@@ -214,6 +239,13 @@ class Aretomo3ModularBase(AreTomo3Pipeline):
                 shutil.copy2(resolved[key], destination)
             staged[key] = destination
 
+        # idx_map is optional: older runs may not have persisted it.
+        if 'idx_map' not in required and os.path.exists(resolved.get('idx_map', '')):
+            destination = batch.join(os.path.basename(resolved['idx_map']))
+            if os.path.abspath(resolved['idx_map']) != os.path.abspath(destination):
+                shutil.copy2(resolved['idx_map'], destination)
+            staged['idx_map'] = destination
+
         if include_half_sets:
             for suffix, key in (('_ODD', 'odd'), ('_EVN', 'evn')):
                 source = os.path.join(os.path.dirname(resolved['stack']),
@@ -235,7 +267,7 @@ class Aretomo3ModularBase(AreTomo3Pipeline):
             for key in ('rlnTiltSeriesAligned', 'rlnTiltSeriesAlignedOdd',
                         'rlnTiltSeriesAlignedEvn', 'at3TomoAlignmentFile',
                         'at3MappingFile', 'at3TomoCtfFile', 'rlnCtfImage',
-                        'at3MetricsCsv', 'at3TimeStampCsv'):
+                        'at3MetricsCsv', 'at3TimeStampCsv', 'at3RlnIndexMapFile'):
                 self._copy_result_file(result, key, ts_folder)
             for key in ('rlnTiltSeriesAligned', 'rlnTiltSeriesAlignedOdd',
                         'rlnTiltSeriesAlignedEvn', 'rlnCtfImage'):

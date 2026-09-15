@@ -312,6 +312,42 @@ class AreTomo3Pipeline(ProcessingPipeline):
 
         return tiltAnglesByIndex
 
+    def _read_rln_index_mapping(self, mappingFile):
+        """Read the AreTomo3-index -> rlnTomoTiltMovieIndex mapping file
+        written by the modular (Cmd 1/2) pipelines. See
+        Aretomo3ModularBase._write_rln_index_map.
+
+        Returns:
+            dict[int, str]: {at3_sequential_index_1_based: rlnTomoTiltMovieIndex}
+        """
+        mapping = {}
+
+        if not mappingFile or not os.path.exists(mappingFile):
+            return mapping
+
+        with open(mappingFile) as f:
+            for lineNo, line in enumerate(f, start=1):
+                line = line.strip()
+
+                if not line or line.startswith('#'):
+                    continue
+
+                parts = line.split()
+                if len(parts) < 2:
+                    continue
+
+                try:
+                    at3Index = int(parts[0])
+                except ValueError:
+                    self.log(
+                        f"WARNING: Could not parse rln index mapping line {lineNo}: {line}"
+                    )
+                    continue
+
+                mapping[at3Index] = parts[1]
+
+        return mapping
+
     def _read_ctf_estimation_file(self, ctfFile):
         """Read AreTomo3 *_CTF.txt file.
 
@@ -651,6 +687,9 @@ class AreTomo3Pipeline(ProcessingPipeline):
         tiltAnglesByIndex = self._read_tilt_angle_mapping(
             result.get('at3MappingFile', None))
 
+        rlnIndexMap = self._read_rln_index_mapping(
+            result.get('at3RlnIndexMapFile', None))
+
         ctfByIndex = self._read_ctf_estimation_file(
             result.get('at3TomoCtfFile', None))
 
@@ -662,14 +701,50 @@ class AreTomo3Pipeline(ProcessingPipeline):
 
         refinedTiltAxisAngle = self._get_refined_tilt_axis_angle(alignmentByIndex)
 
-        # Checks rejection of tilt images
-        if tiltAnglesByIndex and len(tiltAnglesByIndex) != len(idvTsTable):
-            self.log(
-                f"WARNING: {tsName}: AreTomo3 mapping has {len(tiltAnglesByIndex)} "
-                f"entries but STAR has {len(idvTsTable)} rows."
-            )
+        if rlnIndexMap:
+            # Modular (Cmd 1/2) pipelines: AreTomo3 numbers its outputs
+            # sequentially in the angle-sorted stack order it was given,
+            # which no longer matches rlnTomoTiltMovieIndex once tilt
+            # images have been removed upstream. Use the persisted mapping
+            # to resolve the correct STAR row for each AreTomo3 index
+            # instead of assuming row order.
+            rowsByRlnIndex = {
+                str(getattr(r, 'rlnTomoTiltMovieIndex', '')): r for r in idvTsTable
+            }
+            if len(rlnIndexMap) != len(idvTsTable):
+                self.log(
+                    f"WARNING: {tsName}: rln index mapping has {len(rlnIndexMap)} "
+                    f"entries but STAR has {len(idvTsTable)} rows."
+                )
+            orderedAt3Indices = sorted(rlnIndexMap)
+        else:
+            # No persisted mapping (e.g. Cmd 0): fall back to assuming
+            # AreTomo3 processed rows in tilt-angle order, matching the
+            # sort applied when composing its inputs.
+            idvTsTable.sort(key='rlnTomoNominalStageTiltAngle')
+            rowsByRlnIndex = None
+            orderedAt3Indices = range(1, len(idvTsTable) + 1)
 
-        for micrographIndex, tiltRow in enumerate(idvTsTable, start=1):
+            if tiltAnglesByIndex and len(tiltAnglesByIndex) != len(idvTsTable):
+                self.log(
+                    f"WARNING: {tsName}: AreTomo3 mapping has {len(tiltAnglesByIndex)} "
+                    f"entries but STAR has {len(idvTsTable)} rows."
+                )
+
+        for micrographIndex in orderedAt3Indices:
+            if rowsByRlnIndex is not None:
+                rlnIndex = rlnIndexMap[micrographIndex]
+                tiltRow = rowsByRlnIndex.get(rlnIndex)
+                if tiltRow is None:
+                    self.log(
+                        f"WARNING: {tsName}: Could not find STAR row for "
+                        f"rlnTomoTiltMovieIndex={rlnIndex} "
+                        f"(AreTomo3 index {micrographIndex})."
+                    )
+                    continue
+            else:
+                tiltRow = idvTsTable[micrographIndex - 1]
+
             tiltDict = tiltRow._asdict()
             
             tiltDict = self._setAretomo3Params(
@@ -1045,7 +1120,20 @@ class AreTomo3Pipeline(ProcessingPipeline):
 
             at3 = AreTomo3(acq, **self._args)
             at3.process_batch(batch, gpu=gpu)
-            
+
+            # Persist the AreTomo3-index -> rlnTomoTiltMovieIndex mapping for
+            # consistency with the modular (Cmd 1/2) pipelines, since Cmd 0
+            # numbers its outputs sequentially in mdoc/items order too.
+            results = batch['results']
+            if results and not results[0].get('error'):
+                tsName = batch['tsName']
+                idxMapFile = batch.join('output', f'{tsName}_at3_rln_idx.txt')
+                with open(idxMapFile, 'w') as handle:
+                    handle.write('# at3_index rlnTomoTiltMovieIndex\n')
+                    for at3Index, item in enumerate(items, start=1):
+                        handle.write(f'{at3Index} {item.get("rlnTomoTiltMovieIndex", "")}\n')
+                results[0]['at3RlnIndexMapFile'] = idxMapFile
+
             return batch
 
         return _aretomo3
@@ -1072,7 +1160,7 @@ class AreTomo3Pipeline(ProcessingPipeline):
             for key in ('rlnTiltSeriesAligned', 'rlnTiltSeriesAlignedOdd',
                         'rlnTiltSeriesAlignedEvn', 'at3TomoAlignmentFile',
                         'at3MappingFile', 'at3TomoCtfFile', 'rlnCtfImage',
-                        'at3MetricsCsv', 'at3TimeStampCsv'):
+                        'at3MetricsCsv', 'at3TimeStampCsv', 'at3RlnIndexMapFile'):
                 self._copy_result_file(result, key, tsFolder)
 
             # RELION expects image stacks to use .mrcs extension.

@@ -88,12 +88,12 @@ class WarpMotionCtf(WarpBasePipeline):
 
         # Input movies pattern for the frame series
         inputTsStar = kwargs['inputTs']
-        tsAllTable = StarFile.getTableFromFile('global', inputTsStar)
+        tsAllTable = StarFile.getTableFromFile('global', inputTsStar, guessType=False)
 
         for tsRow in tsAllTable:
             tsName = tsRow.rlnTomoName
-            ps = tsRow.rlnMicrographOriginalPixelSize
-            tsTable = StarFile.getTableFromFile(tsName, tsRow.rlnTomoTiltSeriesStarFile)
+            ps = float(tsRow.rlnMicrographOriginalPixelSize)
+            tsTable = StarFile.getTableFromFile(tsName, tsRow.rlnTomoTiltSeriesStarFile, guessType=False)
             
             N = len(tsTable)
             for frameRow in tsTable:
@@ -198,7 +198,7 @@ class WarpMotionCtf(WarpBasePipeline):
         """ Register output STAR files. """
         batch.mkdir('tilt_series')
         self.log("Registering output STAR files.")
-        tsAllTable = StarFile.getTableFromFile('global', self.inputTs)
+        tsAllTable = StarFile.getTableFromFile('global', self.inputTs, guessType=False)
 
         newTsStarFile = batch.join('tilt_series.star')
         failedStarFile = batch.join('failed_tilt_series.star')
