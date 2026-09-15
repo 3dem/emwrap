@@ -126,6 +126,9 @@ class WarpOTF(WarpBasePipeline):
                 if value not in (None, ''):
                     ctf_args[f'ts_ctf.{ctf_key}'] = value
 
+            if perdevice := self._args.get('perdevice'):
+                ctf_args['ts_ctf.perdevice'] = perdevice
+
             _run(WarpCtfReconstruct, ctf_args, inputTs=inputTs)
 
             return batch

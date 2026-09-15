@@ -53,7 +53,8 @@ class WarpCtfReconstruct(WarpBasePipeline):
         if self.gpuList:
             args['--device_list'] = self.gpuList
 
-        args.update(self.get_subargs('ts_ctf', '--'))
+        ctf_subargs = self.get_subargs('ts_ctf', '--')
+        args.update(ctf_subargs)
         self.batch_execute('ts_ctf', batch, args)
 
         # Run ts_reconstruct
@@ -63,7 +64,10 @@ class WarpCtfReconstruct(WarpBasePipeline):
         })
         if self.gpuList:
             args['--device_list'] = self.gpuList
-        args.update(self.get_subargs('ts_reconstruct', '--'))
+        reconstruct_subargs = self.get_subargs('ts_reconstruct', '--')
+        if '--perdevice' not in reconstruct_subargs and '--perdevice' in ctf_subargs:
+            reconstruct_subargs['--perdevice'] = ctf_subargs['--perdevice']
+        args.update(reconstruct_subargs)
         self.batch_execute('ts_reconstruct', batch, args)
         self.updateBatchInfo(batch)
 

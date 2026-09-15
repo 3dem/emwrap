@@ -665,7 +665,8 @@ class WarpBaseTsAlign(WarpBasePipeline):
         self.log(f"get_dimensions: {dim}")
         x = dim[0]
         y = dim[1]
-        return N, x, y, n, ps
+        tilt_axis = getattr(tsTable[0], 'rlnTomoNominalTiltAxisAngle', None)
+        return N, x, y, n, ps, tilt_axis
 
     def runAlignment(self, batch):
         """ Abstract method that should be implemented in subclasses. """
@@ -675,7 +676,7 @@ class WarpBaseTsAlign(WarpBasePipeline):
         # Input run folder from the Motion correction and CTF job
         inputTs = kwargs['inputTs']
         tsAllTable = StarFile.getTableFromFile('global', inputTs, guessType=False)
-        N, x, y, n, ps = self._getInfo(tsAllTable)
+        N, x, y, n, ps, tilt_axis = self._getInfo(tsAllTable)
         self.writeInfo()
 
         inputFolder = FolderManager(os.path.dirname(inputTs))
@@ -697,7 +698,6 @@ class WarpBaseTsAlign(WarpBasePipeline):
             '--mdocs': 'mdocs'
         })
         subargs = self.get_subargs('ts_import', '--')
-        tilt_axis = getattr(tsAllTable[0], 'rlnTomoNominalTiltAxisAngle', None)
         if tilt_axis not in (None, ''):
             subargs['--override_axis'] = tilt_axis
             self.log(f"Using tilt axis angle from input STAR: {tilt_axis}")
