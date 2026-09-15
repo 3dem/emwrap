@@ -120,6 +120,126 @@ class MissAlignment(WarpBasePipeline):
             keys=['fs', 'fss', 'ts', 'tss', 'tm', 'frames', 'mdocs'],
         )
 
+    def _source_has_warp_project(self, input_folder):
+        """Whether the folder that produced ``input_tiltseries`` also has a
+        Warp project (i.e. this MissAlignment job was entered from a prior
+        Warp-based job such as WarpTsAlign). When it does not, the input
+        tilt-series set was built entirely from RELION's own data model
+        (e.g. a native RELION AlignTiltSeries job) and must be converted
+        with ``relion-warp-convert import`` instead.
+        """
+        keys = [k for k in self.INPUTS if k != self.M]
+        inputs = [self.toProjectPath(input_folder.join(self.INPUTS[k])) for k in keys]
+        return all(self.projectExists(fn) for fn in inputs)
+
+    def _run_relion_warp_convert_import(self, batch):
+        """Convert a RELION-only tilt-series set into a Warp-style project.
+
+        Runs ``relion-warp-convert import`` so that the rest of the pipeline
+        (training subset preparation, YAML config, Miss-Alignment train/infer)
+        can operate exactly as it does on a WarpTools project, without any
+        further changes. The generated XMLs already carry the full image and
+        volume geometry, so ``_update_warp_xmls`` must not be run afterwards.
+        """
+        output_directory = os.path.abspath(self.join(self.TS))
+
+        if glob(os.path.join(output_directory, '*.xml')):
+            self.log(
+                'Using the existing relion-warp-convert project for '
+                'resume/re-registration.'
+            )
+            return
+
+        os.makedirs(output_directory, exist_ok=True)
+
+        tomogram_size_x = self._args.get('relion_import.tomogram_size_x', '')
+        tomogram_size_y = self._args.get('relion_import.tomogram_size_y', '')
+        tomogram_size_z = self._args.get('relion_import.tomogram_size_z', '')
+        stack_pixel_size = self._args.get('relion_import.stack_pixel_size', '')
+
+        sizes = [tomogram_size_x, tomogram_size_y, tomogram_size_z]
+        has_any_size = any(str(v).strip() for v in sizes)
+        has_all_sizes = all(str(v).strip() for v in sizes)
+        if has_any_size and not has_all_sizes:
+            raise ValueError(
+                'Provide all three tomogram size parameters (X, Y, Z) for '
+                'converting a RELION-only MissAlignment input, or leave all '
+                'of them empty to use rlnTomoSizeX/Y/Z from the input STAR.'
+            )
+
+        config_in = self._config_template_path()
+        config_out = os.path.join(output_directory, self.CONFIG_NAME)
+
+        args = Args({
+            'relion-warp-convert': '',
+            'import': '',
+            '--input-star': os.path.abspath(self.inputTs),
+            '--output-directory': output_directory,
+            '--config-in': config_in,
+            '--config-out': config_out,
+        })
+
+        if has_all_sizes:
+            args.update({
+                '--tomogram-size-x': tomogram_size_x,
+                '--tomogram-size-y': tomogram_size_y,
+                '--tomogram-size-z': tomogram_size_z,
+            })
+
+        if str(stack_pixel_size).strip():
+            args.update({'--stack-pixel-size': stack_pixel_size})
+
+        self.log(
+            'Running relion-warp-convert import: '
+            f'input_star={self.inputTs}, output_directory={output_directory}, '
+            f'tomogram_size=({tomogram_size_x},{tomogram_size_y},{tomogram_size_z}), '
+            f'stack_pixel_size={stack_pixel_size}'
+        )
+
+        self.batch_execute(
+            'relion_warp_convert_import',
+            batch,
+            args,
+            launcher=self._get_launcher(),
+        )
+
+        if not glob(os.path.join(output_directory, '*.xml')):
+            raise FileNotFoundError(
+                'relion-warp-convert import finished but no Warp XML files '
+                f'were created in: {output_directory}'
+            )
+
+        self.log(
+            'Converted RELION-only tilt-series set into a Warp project: '
+            f'{output_directory}'
+        )
+
+    def _prepare_warp_project(self, batch):
+        """Populate the local Warp tilt-series project.
+
+        Two entry points are supported:
+        - The input tilt-series set comes from a prior Warp-based job
+          (e.g. WarpTsAlign): the existing Warp project is imported/linked
+          as before.
+        - The input tilt-series set comes only from RELION's own data model
+          (e.g. a native RELION AlignTiltSeries job, with no Warp project
+          alongside it): it is converted into a Warp-style directory with
+          ``relion-warp-convert import``.
+
+        Returns True when the RELION-only conversion path was used, in
+        which case the caller must skip ``_dataset_geometry``/
+        ``_update_warp_xmls`` since the converter already writes complete
+        geometry into the XMLs.
+        """
+        input_folder = FolderManager(os.path.abspath(os.path.dirname(self.inputTs)))
+
+        if self._source_has_warp_project(input_folder):
+            self._ensure_project_inputs(input_folder)
+            return False
+
+        self._run_relion_warp_convert_import(batch)
+        return True
+
     def _dataset_geometry(self):
         """Resolve image shape, volume shape, and pixel size for XML preparation."""
         global_table = StarFile.getTableFromFile('global', self.inputTs)
@@ -854,13 +974,16 @@ class MissAlignment(WarpBasePipeline):
 
         batch = Batch(id=self.name, path=self.path)
 
-        # The input Warp project belongs to the input STAR job folder.
-        input_folder = FolderManager(os.path.abspath(os.path.dirname(self.inputTs)))
-        self._ensure_project_inputs(input_folder)
+        # The Warp project is either imported from a prior Warp-based job, or
+        # converted from a RELION-only tilt-series set with
+        # relion-warp-convert import.
+        converted_from_relion = self._prepare_warp_project(batch)
 
-        # Update every imported Warp tilt-series XML first.
-        geometry = self._dataset_geometry()
-        self._update_warp_xmls(batch, geometry)
+        if not converted_from_relion:
+            # Update every imported Warp tilt-series XML first. The
+            # relion-warp-convert path already writes complete geometry.
+            geometry = self._dataset_geometry()
+            self._update_warp_xmls(batch, geometry)
 
         # Then create an isolated training dataset containing only the selected tilt-series XML files.
         training_directory = self._prepare_training_subset(training_subset)
@@ -894,13 +1017,17 @@ class MissAlignment(WarpBasePipeline):
 
         batch = Batch(id=self.name, path=self.path)
 
-        input_folder = FolderManager(os.path.abspath(os.path.dirname(self.inputTs)))
+        # If mode is train+infer, the Warp project was already prepared during
+        # training. If mode is infer-only, prepare it now: import an existing
+        # Warp project, or convert a RELION-only tilt-series set with
+        # relion-warp-convert import.
+        converted_from_relion = self._prepare_warp_project(batch)
 
-        self._ensure_project_inputs(input_folder)
-        geometry = self._dataset_geometry()
-        # If mode is train+infer, the Warp project was already imported during training. 
-        # If mode is infer-only, we need to import the Warp project and update the XMLs now. 
-        if mode == self.MODE_INFER_ONLY:
+        # If mode is infer-only and the input came from a prior Warp job, the
+        # XMLs still need their geometry updated now. relion-warp-convert
+        # already writes complete geometry, so it is skipped in that case.
+        if mode == self.MODE_INFER_ONLY and not converted_from_relion:
+            geometry = self._dataset_geometry()
             self._update_warp_xmls(batch, geometry)
 
         data_directory = os.path.abspath(self.join(self.TS))

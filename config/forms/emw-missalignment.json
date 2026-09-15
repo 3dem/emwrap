@@ -39,6 +39,46 @@
                     ]
                 },
                 {
+                    "label": "RELION-only input conversion",
+                    "paramClass": "Group",
+                    "collapsed": true,
+                    "help": "Used only when the input tilt-series set was produced entirely within RELION (e.g. a native RELION AlignTiltSeries job), with no accompanying Warp project. In that case, relion-warp-convert import is run first to build a Warp-style project, and 'Prepare stacks' above is not used (use 'Stack pixel size' instead). When the input comes from a prior Warp-based job (e.g. WarpTsAlign), these parameters are ignored.",
+                    "params": [
+                        {
+                            "name": "relion_import.tomogram_size_x",
+                            "label": "Tomogram size X (px):",
+                            "default": "",
+                            "allowsEmpty": true,
+                            "paramClass": "IntParam",
+                            "help": "(--tomogram-size-x) Tomogram X-size in unbinned pixels. Leave all three sizes empty to use rlnTomoSizeX/Y/Z from the input STAR, if present."
+                        },
+                        {
+                            "name": "relion_import.tomogram_size_y",
+                            "label": "Tomogram size Y (px):",
+                            "default": "",
+                            "allowsEmpty": true,
+                            "paramClass": "IntParam",
+                            "help": "(--tomogram-size-y) Tomogram Y-size in unbinned pixels."
+                        },
+                        {
+                            "name": "relion_import.tomogram_size_z",
+                            "label": "Tomogram size Z (px):",
+                            "default": "",
+                            "allowsEmpty": true,
+                            "paramClass": "IntParam",
+                            "help": "(--tomogram-size-z) Tomogram Z-size in unbinned pixels."
+                        },
+                        {
+                            "name": "relion_import.stack_pixel_size",
+                            "label": "Stack pixel size (A):",
+                            "default": 10.0,
+                            "allowsEmpty": true,
+                            "paramClass": "FloatParam",
+                            "help": "(--stack-pixel-size) Write the tilt stacks at this pixel size in Angstrom instead of the tilt images' own. Strongly recommended: without it, the full-size stacks make the run I/O-bound. This replaces 'Prepare stacks' for RELION-only inputs, since --prepare-stacks cannot rebuild the stack from RELION's per-tilt images."
+                        }
+                    ]
+                },
+                {
                     "label": "Data loading configuration",
                     "paramClass": "Group",
                     "collapsed": true,
@@ -241,7 +281,7 @@
                             "name": "launcher_missalignment",
                             "label": "Missalignment",
                             "paramClass": "StringParam",
-                            "help": "Launcher to use for Miss-alignment"
+                            "help": "Launcher to use for Miss-alignment and relion-warp-convert (relion-warp-convert must be installed in the same environment, see its README)."
                         }
                     ]
                 }
