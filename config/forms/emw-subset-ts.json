@@ -1,7 +1,7 @@
 {
     "name": "emw-subset-ts",
     "label": "EMwrap Subset TS",
-    "help": "Create a subset of a tilt-series, tomogram, or particle/coordinate set by selecting tomogram names (rlnTomoName). Optionally, individual tilts can also be excluded from specific tomograms' tilt-series metadata.",
+    "help": "Create a subset of a tilt-series, tomogram, or particle/coordinate set by selecting tomogram names (rlnTomoName). The subset can be picked in three ways (see 'Selection mode' below): an explicit list of names, matching the names present in a second set, or a random selection of N tomograms. Optionally, individual tilts can also be excluded from specific tomograms' tilt-series metadata.",
     "sections": [
         {
             "label": "Input",
@@ -14,22 +14,60 @@
                     "help": "Input STAR file: tilt_series.star, tomograms.star, or optimisation_set.star (TomoParticles / TomoCoordinates)."
                 },
                 {
+                    "name": "mode",
+                    "label": "Selection mode",
+                    "paramClass": "EnumParam",
+                    "choices": {
+                        "0": "Explicit tomogram names list",
+                        "1": "Match names from a second set",
+                        "2": "Random selection of N tomograms"
+                    },
+                    "default": "0",
+                    "help": "How to choose the rlnTomoName values to keep:\n\n*Explicit tomogram names list*: provide the names directly in 'Subset Tomo Names' below.\n*Match names from a second set*: keep the tomograms from the input set whose rlnTomoName is also present in another STAR file (matched by the 'rlnTomoName' column).\n*Random selection of N tomograms*: randomly pick N tomograms out of the ones present in the input set."
+                },
+                {
                     "name": "subset_tomo_names",
                     "label": "Subset Tomo Names",
                     "paramClass": "StringParam",
+                    "condition": "mode == 0",
+                    "allowsEmpty": true,
                     "help": "Space-separated list of rlnTomoName values to keep in the output set. Can be left empty if 'Exclude Tilts' below is used instead: in that case every tomogram from the input set is kept, and only the requested tilts are excluded."
+                },
+                {
+                    "name": "subset_match_set",
+                    "label": "Second set (match by rlnTomoName):",
+                    "paramClass": "PathParam",
+                    "condition": "mode == 1",
+                    "pointerClass": "TiltSeriesMovies, TiltSeries, TiltSeriesAligned, Tomograms, TomoParticles, TomoCoordinates",
+                    "help": "Another STAR file containing an 'rlnTomoName' column (e.g. a tilt_series.star, tomograms.star, optimisation_set.star, or particles.star). The output subset will keep the tomograms from 'Input set' above whose rlnTomoName also appears in this second set."
+                },
+                {
+                    "name": "subset_random_count",
+                    "label": "Number of tomograms (N)",
+                    "paramClass": "IntParam",
+                    "condition": "mode == 2",
+                    "help": "Number of tomograms to randomly select from the input set."
+                },
+                {
+                    "name": "subset_random_seed",
+                    "label": "Random seed (optional)",
+                    "paramClass": "IntParam",
+                    "condition": "mode == 2",
+                    "allowsEmpty": true,
+                    "help": "Optional seed for the random selection, so the same subset can be reproduced across runs. Leave empty to select a different random subset each time."
                 },
                 {
                     "name": "exclude_tilts",
                     "label": "Exclude Tilts",
                     "paramClass": "TableParam",
-                    "help": "Optional: for one or more tomograms in the subset above, exclude individual tilts from their tilt-series STAR file (the file referenced by the 'rlnTomoTiltSeriesStarFile' column). When at least one row is provided here, the job rewrites that per-tomogram STAR file for each listed tomogram, dropping the rows for the excluded tilts, and points the output 'rlnTomoTiltSeriesStarFile' at the rewritten file instead of the original. Every other tomogram in the subset (not listed here) keeps all its tilts, but its tilt-series STAR file is still copied as-is into this job's own output folder, so that all rows in the output set point to metadata files living in the same job folder.",
+                    "condition": "mode == 0 or mode == 1",
+                    "help": "Optional: for one or more tomograms in the subset above, exclude individual tilts from their tilt-series STAR file (the file referenced by the 'rlnTomoTiltSeriesStarFile' column). When at least one row is provided here, the job rewrites that per-tomogram STAR file for each listed tomogram, dropping the rows for the excluded tilts, and points the output 'rlnTomoTiltSeriesStarFile' at the rewritten file instead of the original. Every other tomogram in the subset (not listed here) keeps all its tilts, but its tilt-series STAR file is still copied as-is into this job's own output folder, so that all rows in the output set point to metadata files living in the same job folder. Not available in 'Random selection' mode, since the tomogram names are not known until the job runs.",
                     "params": [
                         {
                             "name": "tomoName",
                             "label": "Tomo name",
                             "paramClass": "StringParam",
-                            "help": "rlnTomoName of the tomogram to exclude tilts from. Must be one of the names also listed in 'Subset Tomo Names' above."
+                            "help": "rlnTomoName of the tomogram to exclude tilts from. Must be one of the names that end up in the output subset (the explicit list in Mode 0, or the matched names in Mode 1)."
                         },
                         {
                             "name": "excludedTilts",
