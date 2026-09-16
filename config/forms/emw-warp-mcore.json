@@ -17,6 +17,7 @@
                     "label": "Sub-iterations",
                     "default": 3,
                     "paramClass": "IntParam",
+                    "allowsEmpty": true,
                     "help": "Number of refinement sub-iterations (--iter). Default: 3."
                 },
                 {

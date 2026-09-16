@@ -57,14 +57,16 @@
                             "label": "Lowpass (Å):",
                             "paramClass": "FloatParam",
                             "default": -1,
-                            "help": "Lowpass filter in Angstroms applied to the input map before binarization (--lowpass). Use -1 or leave empty for none."
+                            "help": "Lowpass filter in Angstroms applied to the input map before binarization (--lowpass). Use -1 or leave empty for none.",
+                            "allowsEmpty": true
                         },
                         {
                             "name": "relion_mask_create.volume.angpix",
                             "label": "Pixel size (Å):",
                             "paramClass": "FloatParam",
                             "default": -1,
-                            "help": "Pixel size in Angstroms for the lowpass filter (--angpix). Use -1 to read from map header."
+                            "help": "Pixel size in Angstroms for the lowpass filter (--angpix). Use -1 to read from map header.",
+                            "allowsEmpty": true
                         }
                     ]
                 },
