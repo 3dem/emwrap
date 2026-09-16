@@ -272,6 +272,7 @@ class ProjectManager(FolderManager):
                 # if job['status'] != STATUS_SAVED:
                 #     raise Exception("Can only save un-run jobs.")
                 job_params = self._readJobParams(job, extraParams=params)
+                self._data.resetJobForSave(job.id)
                 self._writeJobStarFile(job['jobtype'], job_params, self.join(job.id, 'job.star'))
             else:
                 if jobDef := ProcessingConfig.get_job_form(jobTypeOrId):
@@ -282,8 +283,6 @@ class ProjectManager(FolderManager):
 
             self._data.setJobStatus(job.id, ProjectData.STATUS_SAVED)
             self._updateJobInputs(job, job_params)
-            if is_existing:
-                self._data.resetJobForSave(job.id)
             prev_force = self._force
             self._force = True
             try:
@@ -879,6 +878,14 @@ class ProjectManager(FolderManager):
 
         return int(job_params.get('gpus', 0))
 
+    @staticmethod
+    def _relionJobIsContinue(job_dir):
+        """Return 1 when the job folder has Relion run markers (resume), else 0."""
+        for status_file in ProjectData.JOB_STATUS_FILES:
+            if os.path.exists(os.path.join(job_dir, status_file)):
+                return 1
+        return 0
+
     def _writeJobStarFile(self, job_type, params, job_star):
         job_conf = ProcessingConfig.get_job_conf(job_type)
         job_form = ProcessingConfig.get_job_form(job_type)
@@ -888,7 +895,8 @@ class ProjectManager(FolderManager):
             params_to_write = JobForm.encode_table_params(job_form, params)
             params_to_write = JobForm.encode_multi_pointer_params(job_form, params_to_write)
         values.update(params_to_write)
-        is_continue = 1 if os.path.exists(job_star) else 0
+        job_dir = os.path.dirname(os.path.abspath(job_star))
+        is_continue = self._relionJobIsContinue(job_dir)
         is_tomo = 1 if job_conf.get('tomo', False) else 0
 
         # Queue submission is handled by ProjectManager, not relion_pipeliner.
