@@ -30,51 +30,35 @@
                             "help": "Select the mode of operation for the denoising process. Train and inference by default. Train only will train a model without performing inference. Infer only will use an existing model to denoise tomograms."
                         }, 
                         {
-                            "name": "missalign.prepare-stacks",
+                            "name": "prepare_stacks_pixel_size",
                             "label": "Prepare stacks (A):",
                             "default": 10.0,
                             "paramClass": "FloatParam",
-                            "help": "(--prepare-stacks) Pixel size (in Angstroms) for preprocessing tilt stacks. If provided, loads raw tilt images, rescales to this pixel size, and creates tilt stacks with thumbnails before training."
-                        }
-                    ]
-                },
-                {
-                    "label": "RELION-only input conversion",
-                    "paramClass": "Group",
-                    "collapsed": true,
-                    "help": "Used only when the input tilt-series set was produced entirely within RELION (e.g. a native RELION AlignTiltSeries job), with no accompanying Warp project. In that case, relion-warp-convert import is run first to build a Warp-style project, and 'Prepare stacks' above is not used (use 'Stack pixel size' instead). When the input comes from a prior Warp-based job (e.g. WarpTsAlign), these parameters are ignored.",
-                    "params": [
+                            "help": "Pixel size (in Angstroms) used to rescale the tilt stacks before training/inference. For input coming from a prior Warp-based job, this is used as miss-alignment's --prepare-stacks. For RELION-only input (no prior Warp project), it is used as relion-warp-convert import's --stack-pixel-size instead, since --prepare-stacks cannot rebuild a stack from RELION's per-tilt images. Either way, the tilt stacks end up downsampled to this pixel size."
+                        },
                         {
-                            "name": "relion_import.tomogram_size_x",
+                            "name": "tomogram_thickness",
+                            "label": "Tomogram thickness (px):",
+                            "default": "",
+                            "allowsEmpty": false,
+                            "paramClass": "IntParam",
+                            "help": "Tomogram Z-thickness in the same pixel grid as the input tilt-series stack. This value is required for all inputs."
+                        },
+                        {
+                            "name": "tomogram_size_x",
                             "label": "Tomogram size X (px):",
                             "default": "",
                             "allowsEmpty": true,
                             "paramClass": "IntParam",
-                            "help": "(--tomogram-size-x) Tomogram X-size in unbinned pixels. Leave all three sizes empty to use rlnTomoSizeX/Y/Z from the input STAR, if present."
+                            "help": "Tomogram X-size in the input tilt-series stack pixel grid. Set both X and Y to override the inferred dimensions; if either is empty, both dimensions are inferred from the tilt-series stack."
                         },
                         {
-                            "name": "relion_import.tomogram_size_y",
+                            "name": "tomogram_size_y",
                             "label": "Tomogram size Y (px):",
                             "default": "",
                             "allowsEmpty": true,
                             "paramClass": "IntParam",
-                            "help": "(--tomogram-size-y) Tomogram Y-size in unbinned pixels."
-                        },
-                        {
-                            "name": "relion_import.tomogram_size_z",
-                            "label": "Tomogram size Z (px):",
-                            "default": "",
-                            "allowsEmpty": true,
-                            "paramClass": "IntParam",
-                            "help": "(--tomogram-size-z) Tomogram Z-size in unbinned pixels."
-                        },
-                        {
-                            "name": "relion_import.stack_pixel_size",
-                            "label": "Stack pixel size (A):",
-                            "default": 10.0,
-                            "allowsEmpty": true,
-                            "paramClass": "FloatParam",
-                            "help": "(--stack-pixel-size) Write the tilt stacks at this pixel size in Angstrom instead of the tilt images' own. Strongly recommended: without it, the full-size stacks make the run I/O-bound. This replaces 'Prepare stacks' for RELION-only inputs, since --prepare-stacks cannot rebuild the stack from RELION's per-tilt images."
+                            "help": "Tomogram Y-size in the input tilt-series stack pixel grid. For Warp input, inferred dimensions are swapped when the tilt axis is within 20 degrees of 90 or 270 degrees."
                         }
                     ]
                 },
