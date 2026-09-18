@@ -657,6 +657,12 @@ class WarpBaseTsAlign(WarpBasePipeline):
         """ Load input or output information. """
         first = tsAllTable[0]
         ps = first.rlnTomoTiltSeriesPixelSize
+        # Raw/original (unbinned) pixel size, needed because WarpTools'
+        # create_settings expects --angpix to be the raw pixel size and
+        # --bin_angpix the (possibly binned) processing pixel size; the
+        # --tomo_dimensions value is always given in raw/unbinned pixels.
+        # Falls back to ps if the original pixel size column is missing.
+        rawPs = getattr(first, 'rlnMicrographOriginalPixelSize', None) or ps
         tsTable = StarFile.getTableFromFile(first.rlnTomoName, first.rlnTomoTiltSeriesStarFile, guessType=False)
         N = len(tsAllTable)
         n = len(tsTable)
@@ -666,7 +672,7 @@ class WarpBaseTsAlign(WarpBasePipeline):
         x = dim[0]
         y = dim[1]
         tilt_axis = getattr(tsTable[0], 'rlnTomoNominalTiltAxisAngle', None)
-        return N, x, y, n, ps, tilt_axis
+        return N, x, y, n, ps, rawPs, tilt_axis
 
     def runAlignment(self, batch):
         """ Abstract method that should be implemented in subclasses. """
@@ -676,7 +682,7 @@ class WarpBaseTsAlign(WarpBasePipeline):
         # Input run folder from the Motion correction and CTF job
         inputTs = kwargs['inputTs']
         tsAllTable = StarFile.getTableFromFile('global', inputTs, guessType=False)
-        N, x, y, n, ps, tilt_axis = self._getInfo(tsAllTable)
+        N, x, y, n, ps, rawPs, tilt_axis = self._getInfo(tsAllTable)
         self.writeInfo()
 
         inputFolder = FolderManager(os.path.dirname(inputTs))
@@ -708,15 +714,24 @@ class WarpBaseTsAlign(WarpBasePipeline):
         self.batch_execute('ts_import', batch, args)
 
         # Run create_settings
+        # NOTE: --angpix must be the raw/original (unbinned) pixel size and
+        # --bin_angpix the (possibly binned) tilt-series pixel size, mirroring
+        # WarpMotionCtf._create_settings. WarpTools scales --tomo_dimensions
+        # (given in raw/unbinned pixels) by --angpix, so passing the binned
+        # ps as --angpix here previously produced a VolumeDimensionsAngstrom
+        # inflated by the binning factor (e.g. 2x per axis / 8x in volume
+        # when motion correction binned by 2).
         args = Args({
             'WarpTools': 'create_settings',
             '--folder_data': self.TM,
             '--extension': "*.tomostar",
             '--folder_processing': self.TS,
             '--output': self.TSS,
-            '--angpix': ps,
+            '--angpix': rawPs,
             '--exposure': self.acq['total_dose']
         })
+        if float(ps) > float(rawPs):
+            args['--bin_angpix'] = ps
         subargs = self.get_subargs('create_settings', '--')
 
         args.update(subargs)

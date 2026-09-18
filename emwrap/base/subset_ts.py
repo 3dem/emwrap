@@ -16,6 +16,7 @@
 
 
 import os
+import random
 import shutil
 
 from emtools.utils import Color
@@ -34,6 +35,11 @@ OUTPUT_NODE_LABELS = {
     'TomoCoordinates': 'TomogramGroupMetadata.star.emwrap.TomoCoordinates',
 }
 
+# Values for the 'mode' EnumParam: how the subset's tomogram names are picked.
+MODE_EXPLICIT_NAMES = 0  # 'subset_tomo_names': space-separated rlnTomoName list.
+MODE_MATCH_SET = 1       # 'subset_match_set': keep names also found in a 2nd set.
+MODE_RANDOM = 2          # 'subset_random_count' (+ optional 'subset_random_seed').
+
 
 class SubsetTsPipeline(ProcessingPipeline):
     name = 'emw-subset-ts'
@@ -41,8 +47,78 @@ class SubsetTsPipeline(ProcessingPipeline):
     def __init__(self, args, output):
         ProcessingPipeline.__init__(self, args, output)
         self.inputSet = args['input_set']
-        self.subsetNames = set((args.get('subset_tomo_names') or '').split())
-        self.excludedTiltsMap = self._parseExcludeTiltsParam(args)
+        self.mode = self._parseMode(args.get('mode'))
+
+        self.subsetNames = set()
+        self.randomCount = None
+        self.randomSeed = None
+        self.matchSet = ''
+
+        if self.mode == MODE_EXPLICIT_NAMES:
+            self.subsetNames = set((args.get('subset_tomo_names') or '').split())
+        elif self.mode == MODE_MATCH_SET:
+            self.matchSet = (args.get('subset_match_set') or '').strip()
+        else:  # MODE_RANDOM
+            self.randomCount = self._parseRandomCount(args.get('subset_random_count'))
+            self.randomSeed = self._parseRandomSeed(args.get('subset_random_seed'))
+
+        # 'exclude_tilts' only makes sense when the resulting tomogram names
+        # are known ahead of the run: Mode 0 (explicit list) and Mode 1
+        # (matched against a second set). In Mode 2 (random selection) the
+        # names are not known until the job actually runs, so it's ignored
+        # even if a stale value is still present in 'args'.
+        self.excludedTiltsMap = (
+            {} if self.mode == MODE_RANDOM else self._parseExcludeTiltsParam(args))
+
+    @staticmethod
+    def _parseMode(value):
+        """ Parse the 'mode' EnumParam value into an int: 0 (explicit
+        names), 1 (match a second set) or 2 (random selection). """
+        if value is None or str(value).strip() == '':
+            return MODE_EXPLICIT_NAMES
+        try:
+            mode = int(value)
+        except (TypeError, ValueError):
+            raise Exception(
+                f"Invalid 'mode' value: {value!r}. Expected 0 (explicit "
+                "names list), 1 (match a second set) or 2 (random selection).")
+        if mode not in (MODE_EXPLICIT_NAMES, MODE_RANDOM, MODE_MATCH_SET):
+            raise Exception(
+                f"Invalid 'mode' value: {mode}. Expected 0 (explicit names "
+                "list), 1 (match a second set) or 2 (random selection).")
+        return mode
+
+    @staticmethod
+    def _parseRandomCount(value):
+        """ Parse 'subset_random_count' (Mode 2) into a positive int. """
+        if value is None or str(value).strip() == '':
+            raise Exception(
+                "Missing or empty parameter 'subset_random_count'. Provide "
+                "the number of tomograms to randomly select (Mode 2)."
+            )
+        try:
+            count = int(value)
+        except (TypeError, ValueError):
+            raise Exception(
+                f"Invalid 'subset_random_count' value: {value!r}. Expected "
+                "a positive integer.")
+        if count <= 0:
+            raise Exception(
+                f"'subset_random_count' must be a positive integer, got {count}.")
+        return count
+
+    @staticmethod
+    def _parseRandomSeed(value):
+        """ Parse the optional 'subset_random_seed' (Mode 2) into an int,
+        or None when left empty (non-reproducible random selection). """
+        if value is None or str(value).strip() == '':
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            raise Exception(
+                f"Invalid 'subset_random_seed' value: {value!r}. Expected "
+                "an integer, or leave it empty.")
 
     @staticmethod
     def _parseTiltIds(text):
@@ -144,9 +220,9 @@ class SubsetTsPipeline(ProcessingPipeline):
         """ Return every rlnTomoName found in the relevant 'global' table
         of 'inputStar' (the tomograms/tilt-series table itself, or, for an
         optimisation_set, the tomograms table it points to). Used when no
-        'subset_tomo_names' was provided but 'exclude_tilts' was, so the
-        job keeps every tomogram and only applies the requested tilt
-        exclusions. """
+        'subset_tomo_names' was provided but 'exclude_tilts' was (Mode 0),
+        and to resolve the full universe of tomogram names for Mode 1
+        (match a second set) and Mode 2 (random selection). """
         if RelionStar.isTomoOptimisationSet(inputStar):
             optRow = RelionStar.readTomoOptimisationSet(inputStar)[0]
             tomoStar = optRow._asdict().get('rlnTomoTomogramsFile', '')
@@ -162,6 +238,41 @@ class SubsetTsPipeline(ProcessingPipeline):
             raise Exception(f"Could not read 'global' table from {tomoStar}")
 
         return {row.rlnTomoName for row in table}
+
+    def _resolveTomoNamesFromStar(self, starPath, paramLabel):
+        """ Return the set of rlnTomoName values found in 'starPath'.
+        Accepts the same kind of STAR files as 'input_set' (tilt_series.star,
+        tomograms.star, optimisation_set.star), as well as any other STAR
+        file that has at least one table with an 'rlnTomoName' column (e.g.
+        a plain particles.star). Used by Mode 1 ('subset_match_set') to
+        build the set of tomogram names to match against. """
+        if not os.path.exists(starPath):
+            raise Exception(f"{paramLabel} STAR file not found: {starPath}")
+
+        lookupStar = starPath
+        if RelionStar.isTomoOptimisationSet(starPath):
+            optRow = RelionStar.readTomoOptimisationSet(starPath)[0]
+            tomoStar = optRow._asdict().get('rlnTomoTomogramsFile', '')
+            if tomoStar:
+                lookupStar = tomoStar
+
+        tables = StarFile.getTablesDict(lookupStar)
+
+        # Prefer the well-known 'global' (tilt_series/tomograms) or
+        # 'particles' table names, falling back to any other table that
+        # happens to carry an 'rlnTomoName' column.
+        for preferred in ('global', 'particles'):
+            table = tables.get(preferred)
+            if table is not None and table.hasColumn('rlnTomoName'):
+                return {row.rlnTomoName for row in table}
+
+        for table in tables.values():
+            if table.hasColumn('rlnTomoName'):
+                return {row.rlnTomoName for row in table}
+
+        raise Exception(
+            f"Could not find a table with an 'rlnTomoName' column in "
+            f"{paramLabel} STAR file: {lookupStar}")
 
     def _writeFilteredGlobalTable(self, inputStar, outputStar, subsetNames):
         inputTable = StarFile.getTableFromFile('global', inputStar)
@@ -296,27 +407,69 @@ class SubsetTsPipeline(ProcessingPipeline):
         self.writeRelionOutputNodes([[outOptimisationStar, outputNode]])
         return inputType, len(ptsTable)
 
-    def prerun(self):
-        if not self.subsetNames and not self.excludedTiltsMap:
-            raise Exception(
-                "Missing or empty parameter 'subset_tomo_names'. "
-                "Provide a space-separated list of rlnTomoName values (or, "
-                "to keep every tomogram and only exclude some tilts, leave "
-                "it empty and use 'exclude_tilts' instead)."
-            )
+    def _resolveSubsetNames(self, inputStar):
+        """ Compute self.subsetNames according to the selected 'mode':
+        Mode 0 (explicit list), Mode 1 (match names present in a second
+        set), or Mode 2 (random selection of N). """
+        if self.mode == MODE_EXPLICIT_NAMES:
+            if not self.subsetNames and not self.excludedTiltsMap:
+                raise Exception(
+                    "Missing or empty parameter 'subset_tomo_names'. "
+                    "Provide a space-separated list of rlnTomoName values (or, "
+                    "to keep every tomogram and only exclude some tilts, leave "
+                    "it empty and use 'exclude_tilts' instead)."
+                )
+            if not self.subsetNames:
+                # No explicit subset requested, but exclude_tilts was: keep
+                # every tomogram found in the input set.
+                self.subsetNames = self._resolveAllTomoNames(inputStar)
+                self.log("No 'subset_tomo_names' provided; keeping all "
+                         f"{Color.green(len(self.subsetNames))} tomogram(s) "
+                         "found in the input set.")
 
+        elif self.mode == MODE_MATCH_SET:
+            if not self.matchSet:
+                raise Exception(
+                    "Missing parameter 'subset_match_set'. Provide a second "
+                    "STAR file with an 'rlnTomoName' column to match against "
+                    "(Mode 1)."
+                )
+            matchNames = self._resolveTomoNamesFromStar(
+                self.matchSet, "'subset_match_set'")
+            allNames = self._resolveAllTomoNames(inputStar)
+            self.subsetNames = allNames & matchNames
+            if not self.subsetNames:
+                raise Exception(
+                    "No tomograms in common between the input set and "
+                    f"'subset_match_set' ({self.matchSet})."
+                )
+            self.log(f"Matched {Color.green(len(self.subsetNames))} / "
+                     f"{Color.bold(len(allNames))} tomogram(s) present in "
+                     f"the second set ({Color.cyan(self.matchSet)}, which "
+                     f"has {Color.bold(len(matchNames))} rlnTomoName "
+                     "value(s)).")
+
+        else:  # MODE_RANDOM
+            allNames = self._resolveAllTomoNames(inputStar)
+            if self.randomCount > len(allNames):
+                raise Exception(
+                    f"'subset_random_count' ({self.randomCount}) is greater "
+                    "than the number of tomograms available in the input "
+                    f"set ({len(allNames)})."
+                )
+            rng = random.Random(self.randomSeed)
+            self.subsetNames = set(rng.sample(sorted(allNames), self.randomCount))
+            seedMsg = f", seed={self.randomSeed}" if self.randomSeed is not None else ""
+            self.log(f"Randomly selected {Color.green(len(self.subsetNames))} / "
+                     f"{Color.bold(len(allNames))} tomogram(s){seedMsg}.")
+
+    def prerun(self):
         if not os.path.exists(self.inputSet):
             raise Exception(f"Input STAR file not found: {self.inputSet}")
 
         inputStar = self.inputSet
 
-        if not self.subsetNames:
-            # No explicit subset requested, but exclude_tilts was: keep
-            # every tomogram found in the input set.
-            self.subsetNames = self._resolveAllTomoNames(inputStar)
-            self.log("No 'subset_tomo_names' provided; keeping all "
-                     f"{Color.green(len(self.subsetNames))} tomogram(s) "
-                     "found in the input set.")
+        self._resolveSubsetNames(inputStar)
 
         self.log(f"Input set: {Color.bold(self.inputSet)}")
         self.log(f"Subset tomogram names ({Color.green(len(self.subsetNames))}): "
@@ -341,9 +494,16 @@ class SubsetTsPipeline(ProcessingPipeline):
             inputType, count = self._subsetGlobalInput(inputStar, self.subsetNames)
 
         self.inputs = {'input_set': self.inputSet,
+                       'mode': self.mode,
                        'subset_tomo_names': sorted(self.subsetNames),
                        'exclude_tilts': {name: sorted(ids) for name, ids in
                                         self.excludedTiltsMap.items()}}
+        if self.mode == MODE_MATCH_SET:
+            self.inputs['subset_match_set'] = self.matchSet
+        elif self.mode == MODE_RANDOM:
+            self.inputs['subset_random_count'] = self.randomCount
+            self.inputs['subset_random_seed'] = self.randomSeed
+
         self.outputs = {'type': inputType, 'count': count}
         self.writeInfo()
         self.log(f"Created {inputType} subset with {Color.green(count)} item(s).")

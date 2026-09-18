@@ -1,6 +1,6 @@
 #!/bin/bash
 
- /programs/sbgrid.shrc
+. /programs/sbgrid.shrc
 
 export ARETOMO2_X=1.0.0
 
