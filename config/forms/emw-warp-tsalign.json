@@ -24,7 +24,7 @@
                     "name": "create_settings.tomo_dimensions",
                     "label": "Tomogram dimensions:",
                     "default": "4096x4096x2000",
-                    "help": ""
+                    "help": "Unbinned tomogram dimensions. If the raw sensor dimensions are 6000x4000 and the tilt axis angle is around 90 or 270 degrees, the tomogram dimensions should be 4000x6000 to match the expected orientation where the tilt axis is aligned with Y. Note that 'unbinned' refers strictly to the physical dimensions of the raw movies, completely independent of any binning factor applied during processing."
                 },
                 {
                     "name": "extra_ts_import",
