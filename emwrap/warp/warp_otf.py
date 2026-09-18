@@ -85,7 +85,12 @@ class WarpOTF(WarpBasePipeline):
 
             rowDict['rlnTomoTiltSeriesStarFile'] = localTsStarFn
             rowDict['rlnTomoMdocFile'] = mdocFn
-            rowDict['rlnTomoTiltSeriesPixelSize'] = rowDict['rlnMicrographOriginalPixelSize']  # FIXME: take into account motion cor binning
+            # Use the actual Mctf target pixel size (accounts for
+            # create_settings.bin_angpix / mctf.create_settings.bin_angpix),
+            # not just the raw/original one, so that WarpTsAlign's
+            # create_settings call later gets the correct --bin_angpix
+            # and produces correct Image/Volume dimensions when Mctf bins.
+            rowDict['rlnTomoTiltSeriesPixelSize'] = self.targetPs(rowDict['rlnMicrographOriginalPixelSize'])
             table = Table.fromDict(rowDict)
             inputTs = batch.join('tilt_series.star')
             with StarFile(inputTs, 'w') as sf:
