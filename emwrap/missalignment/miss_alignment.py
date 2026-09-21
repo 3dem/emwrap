@@ -14,16 +14,51 @@ import os
 import shutil
 import time
 import uuid
+from dataclasses import dataclass
 from glob import glob
+from typing import Optional
 
 from emtools.image import Image
 from emtools.jobs import Args, Batch
-from emtools.metadata import Imod, RelionStar, StarFile, Table, WarpXml
+from emtools.metadata import Imod, RelionStar, StarFile, Table
 from emtools.utils import FolderManager
 
 from emwrap.warp.warp import WarpBasePipeline
 
 # from .utils import warp_xml_to_imod_xf, get_warp_movie_names
+
+
+@dataclass(frozen=True)
+class TiltSeriesMetadata:
+    """Geometry metadata read from the input STAR and its per-series STAR."""
+    image_x: int
+    image_y: int
+    pixel_size: float
+    tilt_axis_angle: Optional[float]
+
+
+@dataclass(frozen=True)
+class TomogramOverrides:
+    """Validated geometry values supplied in the form."""
+    thickness: int
+    volume_x: Optional[int]
+    volume_y: Optional[int]
+
+    @property
+    def has_xy(self):
+        return self.volume_x is not None and self.volume_y is not None
+
+
+@dataclass(frozen=True)
+class TomogramGeometry:
+    """Image and volume geometry written to Warp XML files."""
+    image_x: int
+    image_y: int
+    volume_x: int
+    volume_y: int
+    volume_z: int
+    pixel_size: float
+    tilt_axis_angle: Optional[float] = None
 
 
 class MissAlignment(WarpBasePipeline):
@@ -35,6 +70,9 @@ class MissAlignment(WarpBasePipeline):
     MODE_TRAIN_INFER = 0
     MODE_TRAIN_ONLY = 1
     MODE_INFER_ONLY = 2 
+
+    INPUT_SOURCE_RELION = 'relion'
+    INPUT_SOURCE_WARP = 'warp'
 
     CONFIG_NAME = 'miss_alignment_config.yaml'
     CONFIG_TEMPLATE = 'config_template.yaml'
@@ -120,44 +158,285 @@ class MissAlignment(WarpBasePipeline):
             keys=['fs', 'fss', 'ts', 'tss', 'tm', 'frames', 'mdocs'],
         )
 
-    def _dataset_geometry(self):
-        """Resolve image shape, volume shape, and pixel size for XML preparation."""
-        global_table = StarFile.getTableFromFile('global', self.inputTs)
-        
-        first = global_table[0]
-        pixel_size = float(first.rlnTomoTiltSeriesPixelSize)
-        ts_table = StarFile.getTableFromFile(first.rlnTomoName, first.rlnTomoTiltSeriesStarFile)
+    def _source_has_warp_project(self, input_folder):
+        """Return whether ``input_tiltseries`` comes from a Warp-based job.
 
-        if len(ts_table) == 0:
-            raise ValueError('Tilt-series metadata is empty: '
-            f'{first.rlnTomoTiltSeriesStarFile}')
+        In EMHub, Warp-based jobs provide the Warp project structure alongside
+        the tilt-series STAR file. RELION-based jobs do not, so the presence of
+        these project inputs is sufficient to distinguish the two sources.
+        """
+        keys = [k for k in self.INPUTS if k != self.M]
+        inputs = [
+            self.toProjectPath(input_folder.join(self.INPUTS[k]))
+            for k in keys
+        ]
 
-        mic_file = ts_table[0].rlnMicrographName
-        dims = Image.get_dimensions(mic_file)
-        image_x, image_y = dims[0], dims[1]
+        return all(self.projectExists(fn) for fn in inputs)
 
-        settings_dims = WarpXml(self.join(self.TSS)).getDict(
-            'Settings',
-            'Tomo',
-            'Param',
-        )
+    def _run_relion_warp_convert_import(self, batch):
+        """Convert a RELION-only tilt-series set into a Warp-style project.
 
-        geometry = {
-            'image_x': image_x,
-            'image_y': image_y,
-            'volume_x': settings_dims['DimensionsX'],
-            'volume_y': settings_dims['DimensionsY'], 
-            'volume_z': settings_dims['DimensionsZ'],
-            'pixel_size': pixel_size
-        }
+        Runs ``relion-warp-convert import`` so that the rest of the pipeline
+        (training subset preparation, YAML config, Miss-Alignment train/infer)
+        can operate exactly as it does on a WarpTools project, without any
+        further changes. The generated XMLs already carry the full image and
+        volume geometry, so ``_update_warp_xmls`` must not be run afterwards.
+        """
+        output_directory = os.path.abspath(self.join(self.TS))
+        stack_pixel_size = self._relion_import_stack_pixel_size()
+
+        if glob(os.path.join(output_directory, '*.xml')):
+            self.log(
+                'Using the existing relion-warp-convert project for '
+                'resume/re-registration.'
+            )
+            return
+
+        os.makedirs(output_directory, exist_ok=True)
+
+        geometry = self._resolve_tomogram_geometry()
+
+        config_in = self._config_template_path()
+        config_out = os.path.join(output_directory, self.CONFIG_NAME)
+
+        args = Args({
+            'relion-warp-convert': '',
+            'import': '',
+            '--input-star': os.path.abspath(self.inputTs),
+            '--output-directory': output_directory,
+            '--config-in': config_in,
+            '--config-out': config_out,
+        })
+
+        args.update({
+            '--tomogram-size-x': geometry.volume_x,
+            '--tomogram-size-y': geometry.volume_y,
+            '--tomogram-size-z': geometry.volume_z,
+        })
+
+        args.update({'--stack-pixel-size': stack_pixel_size})
 
         self.log(
-            'Miss-Alignment XML geometry: '
-            f"image={geometry['image_x']}x{geometry['image_y']}, "
-            f"volume={geometry['volume_x']}x{geometry['volume_y']}x{geometry['volume_z']}, "
-            f"pixel_size={geometry['pixel_size']} A/px"
+            'Running relion-warp-convert import: '
+            f'input_star={self.inputTs}, output_directory={output_directory}, '
+            f'tomogram_size=({geometry.volume_x},{geometry.volume_y},{geometry.volume_z}), '
+            f'stack_pixel_size={stack_pixel_size}'
         )
+
+        self.batch_execute(
+            'relion_warp_convert_import',
+            batch,
+            args,
+            launcher=self._get_launcher(),
+        )
+
+        if not glob(os.path.join(output_directory, '*.xml')):
+            raise FileNotFoundError(
+                'relion-warp-convert import finished but no Warp XML files '
+                f'were created in: {output_directory}'
+            )
+
+        self.log(
+            'Converted RELION-only tilt-series set into a Warp project: '
+            f'{output_directory}'
+        )
+
+    def _get_stack_pixel_size(self):
+        """Return the 'Prepare stacks (A)' value shared by both backend commands."""
+        value = self._args.get('prepare_stacks_pixel_size', '')
+
+        if not str(value).strip():
+            return None
+
+        stack_pixel_size = float(value)
+
+        if stack_pixel_size <= 0:
+            raise ValueError(
+                'prepare_stacks_pixel_size must be a positive number, '
+                f'received: {value!r}'
+            )
+
+        return stack_pixel_size
+
+    def _relion_import_stack_pixel_size(self):
+        """Return the required stack pixel size for RELION-only conversion."""
+        stack_pixel_size = self._get_stack_pixel_size()
+
+        if stack_pixel_size is None:
+            raise ValueError(
+                'RELION-only MissAlignment input requires "Prepare stacks '
+                '(A)". It is passed as --stack-pixel-size to '
+                'relion-warp-convert import, which replaces '
+                '--prepare-stacks for RELION-only input.'
+            )
+
+        return stack_pixel_size
+
+    def _read_positive_integer(self, name):
+        """Read a positive integer form value, optionally allowing blanks."""
+        value = self._args.get(name, '')
+        if not str(value).strip():
+            return None
+
+        number = int(value)
+        if number <= 0:
+            raise ValueError(f'{name} must be a positive integer, received: {value!r}')
+
+        return number
+
+    def _read_tomogram_overrides(self):
+        """Validate the required Z value and optional paired X/Y values."""
+        overrides = TomogramOverrides(
+            thickness=self._read_positive_integer('tomogram_thickness'),
+            volume_x=self._read_positive_integer('tomogram_size_x'),
+            volume_y=self._read_positive_integer('tomogram_size_y'))
+
+        if overrides.thickness is None:
+            raise ValueError('MissAlignment requires "Tomogram thickness (px)".')
+
+        if (overrides.volume_x is None) != (overrides.volume_y is None):
+            self.log(
+                'Only one tomogram X/Y value was supplied; inferring both '
+                'volume dimensions from the input tilt-series stack.'
+            )
+
+        return overrides
+
+    @staticmethod
+    def _infer_volume_xy(metadata):
+        """Infer volume X/Y in Warp's Y-aligned tilt-axis convention."""
+        if metadata.tilt_axis_angle is None:
+            raise ValueError(
+                'rlnTomoNominalTiltAxisAngle is required to infer '
+                'volume X/Y dimensions.'
+            )
+        # Modulo 180 makes 90 and 270 degrees equivalent.
+        normalized_angle = metadata.tilt_axis_angle % 180
+
+        if abs(normalized_angle - 90) <= 20:
+            return metadata.image_y, metadata.image_x
+
+        return metadata.image_x, metadata.image_y
+
+    def _resolve_tomogram_geometry(self):
+        """Resolve tomogram geometry using Warp's geometry convention."""
+        metadata = self._read_input_tilt_series_metadata()
+        overrides = self._read_tomogram_overrides()
+
+        volume_x, volume_y = (
+            (overrides.volume_x, overrides.volume_y)
+            if overrides.has_xy
+            else self._infer_volume_xy(metadata)
+        )
+
+        geometry = TomogramGeometry(
+            image_x=metadata.image_x,
+            image_y=metadata.image_y,
+            volume_x=volume_x,
+            volume_y=volume_y,
+            volume_z=overrides.thickness,
+            pixel_size=metadata.pixel_size,
+            tilt_axis_angle=metadata.tilt_axis_angle,
+        )
+
+        self.log(
+            'Miss-Alignment geometry: '
+            f'image={geometry.image_x}x{geometry.image_y}, '
+            f'volume={geometry.volume_x}x{geometry.volume_y}x{geometry.volume_z}, '
+            f'tilt_axis_angle={geometry.tilt_axis_angle}, '
+            f'pixel_size={geometry.pixel_size} A/px'
+        )
+
         return geometry
+
+    def _detect_input_source(self):
+        """Classify the input as a native Warp project or RELION-only data."""
+        input_folder = FolderManager(os.path.abspath(os.path.dirname(self.inputTs)))
+
+        if self._source_has_warp_project(input_folder):
+            return self.INPUT_SOURCE_WARP
+        return self.INPUT_SOURCE_RELION
+
+    def _prepare_input_project(self, batch):
+        """Prepare the local project and return its explicit input source."""
+        input_source = self._detect_input_source()
+        input_folder = FolderManager(os.path.abspath(os.path.dirname(self.inputTs)))
+
+        if input_source == self.INPUT_SOURCE_WARP:
+            self._ensure_project_inputs(input_folder)
+        else:
+            self._run_relion_warp_convert_import(batch)
+        return input_source
+
+    def _read_input_tilt_series_metadata(self):
+        """Read and cache metadata from the input and per-series STAR files."""
+        if metadata := getattr(self, '_input_tilt_series_metadata', None):
+            return metadata
+
+        global_table = StarFile.getTableFromFile('global', self.inputTs)
+        if len(global_table) == 0:
+            raise ValueError(f'Input tilt-series STAR is empty: {self.inputTs}')
+
+        first = global_table[0]
+        ts_star = first.rlnTomoTiltSeriesStarFile
+        ts_table = StarFile.getTableFromFile(first.rlnTomoName, ts_star)
+
+        if len(ts_table) == 0:
+            raise ValueError(f'Tilt-series metadata is empty: {ts_star}')
+
+        first_tilt = ts_table[0]
+        mic_file = first_tilt.rlnMicrographName
+        dims = Image.get_dimensions(self._resolve_relion_image_path(mic_file))
+        tilt_axis_value = getattr(first_tilt, 'rlnTomoNominalTiltAxisAngle', '')
+        if not str(tilt_axis_value).strip():
+            tilt_axis_angle = None
+        else:
+            try:
+                tilt_axis_angle = float(tilt_axis_value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    'rlnTomoNominalTiltAxisAngle must be numeric: '
+                    f'{ts_star}'
+                ) from exc
+
+        self._input_tilt_series_metadata = TiltSeriesMetadata(
+            image_x=dims[0],
+            image_y=dims[1],
+            pixel_size=float(first.rlnTomoTiltSeriesPixelSize),
+            tilt_axis_angle=tilt_axis_angle,
+        )
+        return self._input_tilt_series_metadata
+
+    def _resolve_relion_image_path(self, image_reference):
+        """Resolve a RELION ``index@stack`` reference to an image file.
+
+        RELION commonly stores paths relative to the project root, while this
+        wrapper runs from its own job directory.  Try the current directory
+        and every ancestor of the input STAR so both project-root-relative and
+        STAR-relative paths work.
+        """
+        image_path = str(image_reference).split('@', 1)[-1]
+        if os.path.isabs(image_path):
+            candidates = [image_path]
+        else:
+            candidates = [os.path.abspath(image_path)]
+            directory = os.path.abspath(os.path.dirname(self.inputTs))
+            while True:
+                candidates.append(os.path.join(directory, image_path))
+                parent = os.path.dirname(directory)
+                if parent == directory:
+                    break
+                directory = parent
+
+        for candidate in candidates:
+            if os.path.isfile(candidate):
+                return candidate
+
+        raise FileNotFoundError(
+            'Cannot find the tilt-series image referenced by '
+            f'{image_reference!r} in {self.inputTs}. Tried: '
+            + ', '.join(candidates)
+        )
 
     def _update_warp_xml_script(self):
         """Return the standalone Warp XML update helper."""
@@ -179,12 +458,12 @@ class MissAlignment(WarpBasePipeline):
         args = Args({
             'python': script_path,
             '--xml-directory': xml_directory,
-            '--image-x': geometry['image_x'],
-            '--image-y': geometry['image_y'],
-            '--volume-x': geometry['volume_x'],
-            '--volume-y': geometry['volume_y'],
-            '--volume-z': geometry['volume_z'],
-            '--pixel-size': geometry['pixel_size'],
+            '--image-x': geometry.image_x,
+            '--image-y': geometry.image_y,
+            '--volume-x': geometry.volume_x,
+            '--volume-y': geometry.volume_y,
+            '--volume-z': geometry.volume_z,
+            '--pixel-size': geometry.pixel_size,
         })
 
         self.batch_execute(
@@ -771,7 +1050,28 @@ class MissAlignment(WarpBasePipeline):
         finally:
             self._remove_tmpdir_link()
 
-    def _run_miss_alignment_train(self, batch, config_file):
+    def _common_missalign_args(self, input_source):
+        """Return common command arguments valid for the input data source."""
+        common_args = self._get_args('missalign')
+
+        if input_source == self.INPUT_SOURCE_RELION:
+            # Defend against a stale 'missalign.prepare-stacks' value (e.g. a
+            # job submitted before 'Prepare stacks (A)' became a single
+            # field): relion-warp-convert already rescaled the stacks, and
+            # its XMLs have no MoviePath for --prepare-stacks to use.
+            if common_args.pop('--prepare-stacks', None) is not None:
+                self.log(
+                    'Ignoring --prepare-stacks for RELION-only input; '
+                    'relion-warp-convert import created the rescaled stacks.'
+                )
+        else:
+            stack_pixel_size = self._get_stack_pixel_size()
+            if stack_pixel_size is not None:
+                common_args.update({'--prepare-stacks': stack_pixel_size})
+
+        return common_args
+
+    def _run_miss_alignment_train(self, batch, config_file, input_source):
         """Launch Miss-Alignment training through the configured launcher."""
         training_devices, reconstruction_devices = self._training_gpu_devices()
 
@@ -781,18 +1081,17 @@ class MissAlignment(WarpBasePipeline):
         }
 
         extra_args.update(self._get_args('train.missalign'))
-        extra_args.update(self._get_args('missalign')) # common params (prepare-stack)
-
+        extra_args.update(self._common_missalign_args(input_source))
         
         self._run_miss_alignment('train', batch, config_file, extra_args)
 
     # ------------------------------------------------------------------
     # Miss-Alignment inference
     # ------------------------------------------------------------------
-    def _run_miss_alignment_infer(self, batch, config_file):
+    def _run_miss_alignment_infer(self, batch, config_file, input_source):
         """Launch Miss-Alignment inference on all GPUs visible to the job."""
         extra_args = self._get_args('infer.missalign')
-        extra_args.update(self._get_args('missalign')) # common params (prepare-stack)
+        extra_args.update(self._common_missalign_args(input_source))
 
         self._run_miss_alignment('infer', batch, config_file, extra_args)
 
@@ -854,13 +1153,13 @@ class MissAlignment(WarpBasePipeline):
 
         batch = Batch(id=self.name, path=self.path)
 
-        # The input Warp project belongs to the input STAR job folder.
-        input_folder = FolderManager(os.path.abspath(os.path.dirname(self.inputTs)))
-        self._ensure_project_inputs(input_folder)
+        # Native Warp input is imported; RELION-only input is converted.
+        input_source = self._prepare_input_project(batch)
 
-        # Update every imported Warp tilt-series XML first.
-        geometry = self._dataset_geometry()
-        self._update_warp_xmls(batch, geometry)
+        if input_source == self.INPUT_SOURCE_WARP:
+            # The RELION converter already writes complete XML geometry.
+            geometry = self._resolve_tomogram_geometry()
+            self._update_warp_xmls(batch, geometry)
 
         # Then create an isolated training dataset containing only the selected tilt-series XML files.
         training_directory = self._prepare_training_subset(training_subset)
@@ -869,7 +1168,11 @@ class MissAlignment(WarpBasePipeline):
         config_file = self._update_config_yaml(training_directory)
 
         # Launch training.
-        self._run_miss_alignment_train(batch, config_file)
+        self._run_miss_alignment_train(
+            batch,
+            config_file,
+            input_source,
+        )
 
         trainingBestModel = os.path.join(training_directory, 'model.ckpt')
         
@@ -894,13 +1197,12 @@ class MissAlignment(WarpBasePipeline):
 
         batch = Batch(id=self.name, path=self.path)
 
-        input_folder = FolderManager(os.path.abspath(os.path.dirname(self.inputTs)))
+        # If mode is infer-only, import native Warp input or convert RELION.
+        input_source = self._prepare_input_project(batch)
 
-        self._ensure_project_inputs(input_folder)
-        geometry = self._dataset_geometry()
-        # If mode is train+infer, the Warp project was already imported during training. 
-        # If mode is infer-only, we need to import the Warp project and update the XMLs now. 
-        if mode == self.MODE_INFER_ONLY:
+        # RELION conversion already writes complete XML geometry.
+        if mode == self.MODE_INFER_ONLY and input_source == self.INPUT_SOURCE_WARP:
+            geometry = self._resolve_tomogram_geometry()
             self._update_warp_xmls(batch, geometry)
 
         data_directory = os.path.abspath(self.join(self.TS))
@@ -908,22 +1210,16 @@ class MissAlignment(WarpBasePipeline):
             data_directory,
             model_run_directory)
 
-        self._run_miss_alignment_infer(batch, config_file)
+        self._run_miss_alignment_infer(
+            batch,
+            config_file,
+            input_source,
+        )
 
         self._validate_inference_output(data_directory, n_iter)
         
         self.log('Miss-Alignment inference finished. '
                 f'Aligned snapshots are in: {data_directory}/iterN/')
-
-        # TODO: delete if we want to use the relion-warp-convert output instead of the XF-based output.
-        # self._write_imod_xfs(data_directory, geometry['pixel_size'])
-        # Convert the optimized global XF transforms back into the RELION 5
-        # alignment columns and register a new aligned_tilt_series.star.
-        # Keep the current XF-based implementation for comparison.
-        # legacy_output_star, individual_stars = (
-        #     self._build_relion_output_metadata(
-        #         batch,
-        #         geometry['pixel_size']))
 
         # Export the refined Warp XML files through relion-warp-convert.
         converter_output_star = self._run_relion_warp_convert_export(
@@ -934,210 +1230,9 @@ class MissAlignment(WarpBasePipeline):
 
         return converter_output_star
 
-    # def _write_imod_xfs(self, data_directory, pixel_size):
-    #     """Export updated Warp global alignments as IMOD XF files.
-    #     Each ``TS_NAME.xml`` in the inference data directory is converted to
-    #     ``TS_NAME.xf`` in the same directory. The XF contains only the global
-    #     affine alignment represented by AxisAngle/AxisOffsetX/AxisOffsetY.
-    #     """
-    #     data_directory = os.path.abspath(data_directory)
-    #     xml_files = sorted(glob(os.path.join(data_directory, '*.xml')))
-
-    #     if not xml_files:
-    #         raise FileNotFoundError(
-    #             'No Warp tilt-series XML files were found for XF export in: '
-    #             f'{data_directory}')
-
-    #     xf_files = []
-    #     for xml_file in xml_files:
-    #         xf_file = os.path.splitext(xml_file)[0] + '.xf'
-    #         warp_xml_to_imod_xf(xml_file, xf_file, pixel_size)
-    #         xf_files.append(xf_file)
-
-    #     self.log(
-    #         f'Exported {len(xf_files)} IMOD XF alignment file(s) to: '
-    #         f'{data_directory}')
-
     # ------------------------------------------------------------------
     # Output registration
     # ------------------------------------------------------------------
-    # def _compute_relion_alignments_from_xf(self, xf_file, tilt_angles, pixel_size):
-    #     """Convert one IMOD XF file to RELION per-tilt alignment values."""
-    #     imod_alignments = Imod.get_alignment_from_xf(xf_file)
-
-    #     if len(imod_alignments) != len(tilt_angles):
-    #         raise ValueError(
-    #             f'XF/STAR row count mismatch for {xf_file}: '
-    #             f'{len(imod_alignments)} XF transforms versus '
-    #             f'{len(tilt_angles)} tilt angles.'
-    #         )
-
-    #     return RelionStar.alignments_from_imod(
-    #         tilt_angles,
-    #         imod_alignments,
-    #         pixel_size,
-    #     )
-
-    # def _write_individual_tilt_series_star(self, batch, ts_row, pixel_size):
-    #     """Copy one input TS STAR while replacing only RELION alignment fields.
-
-    #     Warp XML/XF entries are matched to RELION rows by movie basename rather
-    #     than by row position. The output STAR keeps the original RELION row
-    #     order.
-    #     """
-    #     ts_name = str(ts_row.rlnTomoName)
-    #     input_star = ts_row.rlnTomoTiltSeriesStarFile
-
-    #     if not input_star or not os.path.isfile(input_star):
-    #         raise FileNotFoundError(
-    #             f'Input tilt-series STAR not found for {ts_name}: {input_star}')
-
-    #     input_table = StarFile.getTableFromFile(ts_name, input_star)
-    #     if len(input_table) == 0:
-    #         raise ValueError(
-    #             f'Input tilt-series STAR is empty for {ts_name}: {input_star}')
-
-    #     data_directory = os.path.abspath(self.join(self.TS))
-    #     xml_file = os.path.join(data_directory, f'{ts_name}.xml')
-    #     xf_file = os.path.join(data_directory, f'{ts_name}.xf')
-
-    #     if not os.path.isfile(xml_file):
-    #         raise FileNotFoundError(
-    #             f'Miss-Alignment Warp XML not found for {ts_name}: {xml_file}')
-
-    #     if not os.path.isfile(xf_file):
-    #         raise FileNotFoundError(
-    #             f'Miss-Alignment XF file not found for {ts_name}: {xf_file}')
-
-    #     # Movie order in the Warp XML is the order used to write the XF.
-    #     warp_movie_names = get_warp_movie_names(xml_file)
-
-    #     # Build a lookup from movie basename to the corresponding RELION row.
-    #     star_rows_by_movie = {}
-
-    #     for tilt_row in input_table:
-    #         tilt_dict = tilt_row._asdict()
-    #         movie_path = tilt_dict.get('rlnMicrographMovieName', None)
-
-    #         if movie_path in ('', None):
-    #             raise ValueError(
-    #                 f'{ts_name}: rlnMicrographMovieName is required to match '
-    #                 'RELION rows to Warp MoviePath entries.')
-
-    #         movie_name = os.path.basename(str(movie_path))
-
-    #         if movie_name in star_rows_by_movie:
-    #             raise ValueError(
-    #                 f'{ts_name}: duplicate rlnMicrographMovieName basename: '
-    #                 f'{movie_name}')
-
-    #         star_rows_by_movie[movie_name] = tilt_row
-
-    #     # Require an exact one-to-one identity match between Warp and RELION.
-    #     warp_movies = set(warp_movie_names)
-    #     star_movies = set(star_rows_by_movie)
-
-    #     missing_from_star = sorted(warp_movies - star_movies)
-    #     missing_from_warp = sorted(star_movies - warp_movies)
-
-    #     if missing_from_star or missing_from_warp:
-    #         raise ValueError(
-    #             f'{ts_name}: Warp/RELION movie identity mismatch. '
-    #             f'Missing from STAR: {missing_from_star}; '
-    #             f'Missing from Warp XML: {missing_from_warp}')
-
-    #     # RelionStar.alignments_from_imod is positional, so build the tilt-angle
-    #     # list in the exact Warp/XF order.
-    #     # NOTE: We intentionally keep rlnTomoNominalStageTiltAngle here for now.
-    #     # Choosing between RELION nominal angles and Warp XML Angles is handled
-    #     # as a separate alignment-convention issue.
-    #     tilt_angles = []
-
-    #     for movie_name in warp_movie_names:
-    #         tilt_row = star_rows_by_movie[movie_name]
-    #         tilt_dict = tilt_row._asdict()
-    #         tilt_angle = tilt_dict.get('rlnTomoNominalStageTiltAngle', None)
-
-    #         if tilt_angle in ('', None):
-    #             raise ValueError(
-    #                 f'{ts_name}: rlnTomoNominalStageTiltAngle is required '
-    #                 f'for movie {movie_name}.')
-
-    #         tilt_angles.append(float(tilt_angle))
-
-    #     relion_alignments = self._compute_relion_alignments_from_xf(
-    #         xf_file,
-    #         tilt_angles,
-    #         pixel_size,
-    #     )
-
-    #     # Associate each converted alignment with its movie identity.
-    #     alignments_by_movie = {
-    #         movie_name: alignment
-    #         for movie_name, alignment in zip(
-    #             warp_movie_names,
-    #             relion_alignments,
-    #         )
-    #     }
-
-    #     alignment_columns = (
-    #         'rlnTomoXTilt',
-    #         'rlnTomoYTilt',
-    #         'rlnTomoZRot',
-    #         'rlnTomoXShiftAngst',
-    #         'rlnTomoYShiftAngst',
-    #     )
-
-    #     input_columns = input_table.getColumnNames()
-    #     output_table = Table(input_columns)
-
-    #     # Preserve the original STAR row order, but look up each alignment by
-    #     # movie identity instead of assuming STAR and XF have the same order.
-    #     for tilt_row in input_table:
-    #         tilt_dict = tilt_row._asdict()
-    #         movie_name = os.path.basename(str(tilt_dict['rlnMicrographMovieName']))
-    #         alignment = alignments_by_movie[movie_name]
-
-    #         for column in alignment_columns:
-    #             if column not in alignment:
-    #                 raise ValueError(
-    #                     f'{ts_name}: converted RELION alignment is missing '
-    #                     f'{column} for movie {movie_name}.'
-    #                 )
-    #             tilt_dict[column] = alignment[column]
-
-    #         output_table.addRowValues(**tilt_dict)
-
-    #     output_star = batch.join('tilt_series', f'{ts_name}.star')
-    #     self.write_ts_table(ts_name, output_table, output_star)
-
-    #     return output_star
-
-    # def _build_relion_output_metadata(self, batch, pixel_size):
-    #     """Build RELION 5 metadata using the optimized Miss-Alignment XF files."""
-    #     batch.mkdir('tilt_series')
-
-    #     input_table = StarFile.getTableFromFile('global', self.inputTs)
-    #     output_table = Table(input_table.getColumnNames())
-    #     individual_stars = []
-
-    #     for ts_row in input_table:
-    #         output_ts_star = self._write_individual_tilt_series_star(
-    #             batch,
-    #             ts_row,
-    #             pixel_size,
-    #         )
-    #         individual_stars.append(output_ts_star)
-
-    #         row_dict = ts_row._asdict()
-    #         row_dict['rlnTomoTiltSeriesStarFile'] = output_ts_star
-    #         output_table.addRowValues(**row_dict)
-
-    #     output_star = batch.join(self.OUTPUT_STAR)
-    #     self.write_ts_table('global', output_table, output_star)
-
-    #     return output_star, individual_stars
-
     def _correct_warp_converted_tilt_series_stars(self, batch):
         """Invert the RELION Y tilt in each Warp-converted tilt-series STAR."""
         tilt_series_directory = batch.join('tilt_series')
