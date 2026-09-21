@@ -51,7 +51,7 @@ class AreTomo3ReconstructPipeline(Aretomo3ModularBase):
                 z_rot = float(getattr(tilt, 'rlnTomoZRot', 0) or 0)
                 if x_tilt or z_rot:
                     self.log(f'WARNING: {row.rlnTomoName} row {index}: synthetic ALN drops '
-                             f'rlnTomoXTilt={x_tilt} and rlnTomoZRot={z_rot}.')
+                             f'rlnTomoXTilt={x_tilt} and rlnTomoZRot={z_rot}.', flush=True)
                 tx = float(getattr(tilt, 'rlnTomoXShiftAngst', 0) or 0) / pixel_size
                 ty = float(getattr(tilt, 'rlnTomoYShiftAngst', 0) or 0) / pixel_size
                 angle = getattr(tilt, 'rlnTomoYTilt', '') or getattr(tilt, 'rlnTomoNominalStageTiltAngle', '')
@@ -68,7 +68,7 @@ class AreTomo3ReconstructPipeline(Aretomo3ModularBase):
             batch.create()
             row = self._input_row(ts_name)
             if self._use_previous_alignment():
-                self.log(f'{ts_name}: Using previous AreTomo3 alignment from tilt_series/{ts_name}/')
+                self.log(f'{ts_name}: Using previous AreTomo3 alignment from tilt_series/{ts_name}/', flush=True)
                 self._install_previous_alignment(batch, ts_name)
             else:
                 raise NotImplementedError(
@@ -76,7 +76,7 @@ class AreTomo3ReconstructPipeline(Aretomo3ModularBase):
                     'alignment is not implemented yet. Enable UsePreviousAlignment '
                     'and provide the previous tilt_series/<TS_NAME>/ files.'
                 )
-                self.log(f'{ts_name}: Synthesizing ALN file from RELION5 aligned_tilt_series.star')
+                self.log(f'{ts_name}: Synthesizing ALN file from RELION5 aligned_tilt_series.star', flush=True)
                 table, stack, _ = self._stage_stack_and_tlt(batch, ts_name, row, aligned_angles=True)
                 raw_size = Image.get_dimensions(stack)[:2]
                 self._write_synthetic_aln(batch.join(f'{ts_name}.aln'), table, row, self._pixel_size(row),
