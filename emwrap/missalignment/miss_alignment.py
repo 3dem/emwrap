@@ -81,10 +81,6 @@ class MissAlignment(WarpBasePipeline):
     UPDATE_SCRIPT = 'update_warp_xml.py'
     TRAINING_DIR = 'warp_tiltseries_training'
     OUTPUT_STAR = 'aligned_tilt_series.star'
-    # Suffix relion-warp-convert writes beside each XML it produces (see its
-    # README); its presence is the reliable way to tell a converted project
-    # apart from a genuine native Warp project with the same folder layout.
-    RELION_CONVERT_PROVENANCE_SUFFIX = '.relion.json'
 
     # ------------------------------------------------------------------
     # Launcher and argument helpers
