@@ -134,6 +134,10 @@ class TestApoF(unittest.TestCase):
         job = pm._getJob(job_id)
         self.assertEqual(job['status'], 'Succeeded')
 
+    def _check_job_outputs(self, pm, job_type, job_id):
+        """Hook for subclasses to check the contents of a job's outputs."""
+        pass
+
     def _run_workflow(self):
         self._validate_environment()
         caller_name = inspect.currentframe().f_back.f_code.co_name
@@ -152,6 +156,7 @@ class TestApoF(unittest.TestCase):
                 pm.runJob(job_id, wait=True)
                 pm.update()
                 self._assert_job_succeeded(pm, job_id, self.expected_outputs[job_type])
+                self._check_job_outputs(pm, job_type, job_id)
 
     def test_apof(self):
         self._run_workflow()

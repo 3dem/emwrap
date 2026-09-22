@@ -23,6 +23,10 @@ class WarpMcore(WarpBasePopulationPipeline):
     """Warp wrapper to run MCore refinements."""
     name = 'emw-warp-mcore'
 
+    # Every MCore run rewrites the species of the population, even with
+    # --iter 0, so an unchanged population means the refinement did not run.
+    VALIDATE_POPULATION_UPDATED = True
+
     def runBatch(self, batch, **kwargs):
         subargs = self.get_subargs('mcore', 'extra_mcore')
         population_file = self._setup_population_input(subargs)
@@ -32,7 +36,7 @@ class WarpMcore(WarpBasePopulationPipeline):
             '--port': -1
         })
         args.update(subargs)
-        self.batch_execute('mcore', batch, args, call=True)
+        self.execute_population_batch('mcore', batch, args, call=True)
         self.updateBatchInfo(batch)
 
 

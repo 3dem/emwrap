@@ -53,7 +53,8 @@ class WarpMtoolsResample(WarpBasePopulationPipeline):
             '--species': os.path.join('m', species),
         })
         args.update(subargs)
-        self.batch_execute('resample_trajectories', batch, args, call=True)
+        self.execute_population_batch('resample_trajectories', batch, args,
+                                      call=True)
         self.updateBatchInfo(batch)
 
 

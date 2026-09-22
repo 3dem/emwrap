@@ -379,15 +379,34 @@ class WarpMtoolsCreate(WarpBasePipeline):
         self.updateBatchInfo(batch)
 
     def _output(self, batch):
-        """ Register output population and species paths. """
+        """ Register output population and species paths.
+
+        The population is what the M refinements take as input, so a partial
+        one has to fail the job here instead of being registered: with
+        'only_output' the checks done by runBatch are skipped altogether.
+        """
         self.log("Registering output population and species.")
         pop_name = self._args.get('create_population.name', 'population')
         population_file = batch.join(self.M, f"{pop_name}.population")
 
+        if not os.path.isfile(population_file):
+            raise Exception(f"Population file was not generated: {population_file}")
+
+        population = WarpPopulation(population_file)
+        if not population.Species:
+            raise Exception(f"Population '{pop_name}' has no species. "
+                            f"Check {self.join('run.out')} for errors.")
+
+        # getSource and getSpecies fail when an entry of the population does
+        # not have its file on disk.
+        for source in population.Sources:
+            population.getSource(source['name'])
+        for species in population.Species:
+            population.getSpecies(species['name'])
+
         #TODO: Review registration and info for population outputs
-        if os.path.isfile(population_file):
-            outputNodes = [[population_file, 'WarpPopulation']]
-            self.writeRelionOutputNodes(outputNodes)
+        outputNodes = [[population_file, 'WarpPopulation']]
+        self.writeRelionOutputNodes(outputNodes)
 
         self.updateBatchInfo(batch)
 

@@ -50,12 +50,7 @@
                 "gpus": "2",
                 "register_output_only": false,
                 "launcher_warp": "",
-                "wat.launcher_aretomo": "",
-                "queue.name": "None",
-                "queue.param.cryoem.queue_name": "cryoem",
-                "queue.param.cryoem.gpu_type": "any",
-                "queue.param.cryo_core.queue_name": "cryo_core",
-                "queue.param.rtx5000.queue_name": "rtx5000"
+                "wat.launcher_aretomo": ""
             }
         }
     ]

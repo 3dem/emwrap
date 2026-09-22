@@ -21,7 +21,8 @@ from collections import defaultdict
 from glob import glob
 
 from emtools.utils import FolderManager, Path
-from emtools.metadata import StarFile, Table, RelionStar, WarpXml, Imod
+from emtools.metadata import (StarFile, Table, RelionStar, WarpXml, Imod,
+                              WarpPopulation)
 from emtools.jobs import Batch, Args
 from emtools.image import Image
 from emwrap.base import ProcessingPipeline
@@ -576,6 +577,14 @@ class WarpBasePopulationPipeline(WarpBasePipeline):
     """Base for Warp pipelines that take a single population path and produce
     an output population (e.g. MCore, EstimateWeights, MTools resample).
     """
+    # Whether the output population must differ from the input one. Only the
+    # programs that refine the species can require this: EstimateWeights and
+    # resample_trajectories update the population without rewriting it.
+    VALIDATE_POPULATION_UPDATED = False
+
+    # Digest of the input population, taken right after it is copied into the
+    # job folder and before the program modifies it in place.
+    _input_digest = None
 
     def _population_arg_from_args(self):
         """Return the population STAR path from job parameters, if any."""
@@ -618,23 +627,51 @@ class WarpBasePopulationPipeline(WarpBasePipeline):
         population_file = os.path.join('m', self.population)
         self.log(f"Input Warp folder: {input_warp}, population: {self.population}")
         self._importInputs(input_warp, keys=['m'])
+        self._input_digest = WarpPopulation(self.join(population_file)).digest()
         return population_file
+
+    def execute_population_batch(self, label, batch, args, **kwargs):
+        """Run a program on the population, failing the job if it did not run.
+
+        The input population is copied into the job folder before the program
+        runs and is modified in place, so a program that crashes leaves a
+        complete-looking population behind. Neither batch.call nor
+        batch.execute raise on failure, so both have to be checked here for
+        the job to be marked as failed.
+        """
+        returncode = self.batch_execute(label, batch, args, **kwargs)
+
+        if batch.error:
+            raise Exception(f"{label}: failed with error:\n{batch.error}")
+
+        if returncode:
+            raise Exception(f"{label}: failed with exit code {returncode}, "
+                            f"check {self.join('run.out')}")
+
+        return returncode
+
+    def _validate_population_updated(self, population_file):
+        """Fail when the program left the input population untouched."""
+        digest = WarpPopulation(population_file).digest()
+        if digest == self._input_digest:
+            raise Exception(
+                f"Population {self.population} is identical to the input one, "
+                f"so the refinement did not update it. "
+                f"Check {self.join('run.out')} for errors.")
+        self.log(f"Population updated: {self._input_digest} -> {digest}")
 
     def _output(self, batch):
         """Register output population."""
         self.log("Registering output population.")
         population_file = batch.join(self.M, self.population)
-        population_name = self.population.replace('.population', '')
-        if os.path.isfile(population_file):
-            self.outputs['Population'] = {
-                'label': 'Population',
-                'type': 'WarpPopulation',
-                'info': f"Name: {population_name}",
-                'files': [[population_file, 'WarpPopulation']]
-            }
-            self.writeRelionOutputNodes([[population_file, 'WarpPopulation']])
-        else:
-            self.log(f"Population file not found: {population_file}")
+
+        if not os.path.isfile(population_file):
+            raise Exception(f"Population file not found: {population_file}")
+
+        if self.VALIDATE_POPULATION_UPDATED:
+            self._validate_population_updated(population_file)
+
+        self.writeRelionOutputNodes([[population_file, 'WarpPopulation']])
         self.updateBatchInfo(batch)
 
     def prerun(self):
