@@ -288,15 +288,56 @@ class ProjectData(FolderManager):
     def _outputTarget(self, output_id, filepath):
         return output_id or self._projectPath(filepath)
 
-    def _fileNoInfo(self, output_id, filepath, reason='No-info'):
+    def _fileNoInfo(self, output_id, filepath, reason='No-info', datatype='File'):
         target = self._outputTarget(output_id, filepath)
-        return {'type': 'File', 'info': f'{reason}: {target}'}
+        return {'type': datatype, 'info': f'{reason}: {target}'}
+
+    def _relionOutputNodes(self, job_id):
+        """Return {node name: node type label} from the job's RELION_OUTPUT_NODES.star. """
+        nodes_star = self.join(job_id, 'RELION_OUTPUT_NODES.star')
+        if not os.path.exists(nodes_star):
+            return {}
+        table = StarFile.getTableFromFile('pipeline_nodes', nodes_star)
+        return {row.rlnPipeLineNodeName: getattr(row, 'rlnPipeLineNodeTypeLabel', '')
+                for row in table} if table else {}
+
+    def _jobRelPath(self, path, job_id):
+        """Return the part of a path that follows the job folder, or None.
+
+        Node names can be absolute paths from a different mount point, so they
+        are matched by what follows the job folder instead of by computing a
+        path relative to the project root.
+        """
+        _, sep, rest = Path.rmslash(str(path)).partition(f'{Path.rmslash(job_id)}/')
+        return rest if sep else None
+
+    def _outputId(self, path, job_id):
+        """Normalize an output node name into a project-relative output id. """
+        if rest := self._jobRelPath(path, job_id):
+            return f'{Path.rmslash(job_id)}/{rest}'
+        return path
+
+    def _outputTypeFromRelionNodes(self, output_id):
+        """Return the output type declared in RELION_OUTPUT_NODES.star, if any.
+
+        The type is the last part of the node type label, e.g. the label
+        'TomogramGroupMetadata.star.relion.tomo.MissAlignmentModelDir'
+        gives the 'MissAlignmentModelDir' type.
+        """
+        if (job := self._outputParentJob(output_id)) is None:
+            return None
+
+        if (target := self._jobRelPath(output_id, job.id)) is None:
+            return None
+
+        for name, type_label in self._relionOutputNodes(job.id).items():
+            if self._jobRelPath(name, job.id) == target and type_label:
+                return type_label.split('.')[-1]
+        return None
 
     def _isPlaceholderOutputInfo(self, info):
         """Return True for generic cached output info that should be recomputed."""
-        if not info or info.get('type') != 'File':
-            return False
-        text = str(info.get('info', ''))
+        text = str(info.get('info', '')) if info else ''
         return text.startswith(('No-info:', 'Missing:', 'Error:'))
 
     def _outputInfoFilesForId(self, output_id):
@@ -432,7 +473,8 @@ class ProjectData(FolderManager):
                 info = f'Error: {str(e)}'
 
         if info == 'No-info':
-            return self._fileNoInfo(output_id, filepath)
+            datatype = self._outputTypeFromRelionNodes(output_id) or 'File'
+            return self._fileNoInfo(output_id, filepath, datatype=datatype)
 
         return {
             'type': 'File',
@@ -442,17 +484,18 @@ class ProjectData(FolderManager):
     def _collectJobOutputIds(self, job_id, job=None):
         """Gather output node ids from the workflow graph, RELION star, and cache."""
         job = job or self._wf.getJob(job_id)
-        outputs = [o.id for o in job.outputs]
+        outputs = []
 
-        outputs_star = self.join(job_id, 'RELION_OUTPUT_NODES.star')
-        if os.path.exists(outputs_star):
-            if output_table := StarFile.getTableFromFile('pipeline_nodes', outputs_star):
-                new_outputs = [row.rlnPipeLineNodeName for row in output_table if row.rlnPipeLineNodeName not in outputs]
-                outputs.extend(new_outputs)
+        def _add(*paths):
+            """ Add outputs, normalized and without duplicates. """
+            for path in paths:
+                output_id = self._outputId(path, job_id)
+                if output_id not in outputs:
+                    outputs.append(output_id)
 
-        for output_id in self._jobs.get(job_id, {}).get('outputs', []):
-            if output_id not in outputs:
-                outputs.append(output_id)
+        _add(*(o.id for o in job.outputs))
+        _add(*self._relionOutputNodes(job_id))
+        _add(*self._jobs.get(job_id, {}).get('outputs', []))
 
         # Infer expected outputs from downstream job parameter references.
         job_prefix = f'{job_id}/'
@@ -466,10 +509,9 @@ class ProjectData(FolderManager):
             for value in params.values():
                 if not isinstance(value, str):
                     continue
-                rel_value = (self._project.relpath(value)
-                             if os.path.isabs(value) else value)
-                if rel_value.startswith(job_prefix) and rel_value not in outputs:
-                    outputs.append(rel_value)
+                rel_value = self._outputId(value, job_id)
+                if rel_value.startswith(job_prefix):
+                    _add(rel_value)
 
         return outputs
 
