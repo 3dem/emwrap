@@ -189,7 +189,6 @@ class MissAlignment(WarpBasePipeline):
             self.log(
                 'Using the existing relion-warp-convert project for '
                 'resume/re-registration.', flush=True)
-            )
             return
 
         os.makedirs(output_directory, exist_ok=True)

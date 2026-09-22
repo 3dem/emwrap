@@ -14,6 +14,13 @@
                     "help": "Input STAR file: tilt_series.star, tomograms.star, or optimisation_set.star (TomoParticles / TomoCoordinates)."
                 },
                 {
+                    "name": "warp_previous_job",
+                    "label": "Previous job is a Warp job",
+                    "paramClass": "BooleanParam",
+                    "default": false,
+                    "help": "Enable when the input set comes from a Warp-based EMHub job. The subset job will preserve the Warp working structure and synchronize Warp's internal selection with this subset so that subsequent Warp jobs can continue from this output."
+                },
+                {
                     "name": "mode",
                     "label": "Selection mode",
                     "paramClass": "EnumParam",

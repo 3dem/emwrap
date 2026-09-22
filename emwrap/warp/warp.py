@@ -109,6 +109,240 @@ class WarpBasePipeline(ProcessingPipeline):
         if gain:
             ofm.link(gain)
 
+    @classmethod
+    def copySubsetState(cls, inputFolder, outputFolder, keys=None,
+                        gain=None, force=False, strict=False):
+        """Copy/link Warp state into a subset job.
+
+        This is similar to ``copyInputs`` but is specifically intended for
+        workflows where Warp selection metadata will be modified afterwards
+        using ``WarpTools change_selection``.
+
+        Mutable per-item XML files are copied so that changing selection in
+        the subset job never modifies the previous Warp job. Large processing
+        directories are linked whenever possible.
+
+        Args:
+            inputFolder:
+                Previous Warp job folder.
+
+            outputFolder:
+                Subset job folder. Unlike ``copyInputs``, this folder may
+                already exist.
+
+            keys:
+                Warp input keys to import. When None, import every applicable
+                Warp TS input:
+                    fs, fss, ts, tss, tm, frames, mdocs
+
+            gain:
+                Optional gain file to link at the job root.
+
+            force:
+                Replace an already existing destination asset.
+
+            strict:
+                If True, fail when any requested Warp asset is missing.
+                If False, missing assets are skipped. This is useful because
+                different points in the Warp workflow contain different
+                subsets of the full Warp directory structure.
+
+        Returns:
+            Set containing the keys that were actually imported.
+        """
+        if keys is None:
+            keys = [
+                'fs', 'fss',
+                'ts', 'tss',
+                'tm',
+                cls.FRAMES,
+                cls.MDOCS
+            ]
+        else:
+            keys = list(keys)
+
+        unknown = [key for key in keys if key not in cls.INPUTS]
+        if unknown:
+            raise Exception(
+                "Unknown Warp input key(s): "
+                + ', '.join(sorted(unknown))
+            )
+
+        def _getFM(folder):
+            return (folder if isinstance(folder, FolderManager)
+                    else FolderManager(folder))
+
+        ifm = _getFM(inputFolder)
+        ofm = _getFM(outputFolder)
+
+        if not ifm.exists():
+            raise Exception(
+                f"Previous Warp job folder does not exist: {inputFolder}"
+            )
+
+        # The SubsetTs job directory already exists when this method is
+        # called, so unlike copyInputs() we do not require a new folder.
+        if not ofm.exists():
+            ofm.create()
+
+        inputPaths = {
+            key: ifm.join(cls.INPUTS[key])
+            for key in keys
+        }
+
+        missing = [
+            key for key, path in inputPaths.items()
+            if not os.path.exists(path)
+        ]
+
+        if strict and missing:
+            raise Exception(
+                "Missing expected Warp path(s): "
+                + str([inputPaths[key] for key in missing])
+            )
+
+        present = [key for key in keys if key not in missing]
+
+        def _prepareDestination(path):
+            """Prepare one destination without ever cleaning the job root."""
+            if not os.path.lexists(path):
+                return
+
+            if not force:
+                raise Exception(
+                    f"Warp subset destination already exists: {path}"
+                )
+
+            if os.path.islink(path) or os.path.isfile(path):
+                os.unlink(path)
+            else:
+                shutil.rmtree(path)
+
+        def _copyMutableFolder(inputPath):
+            """Copy root metadata files and link nested product folders.
+
+            Warp stores per-item selection state in root XML files inside
+            warp_frameseries / warp_tiltseries. Those files must be private
+            to the subset job because change_selection modifies them.
+
+            Nested directories normally contain the large processing products
+            and can safely remain linked to the previous job.
+            """
+            inputPath = os.path.normpath(inputPath)
+
+            baseFolder = os.path.basename(inputPath)
+            outputPath = ofm.join(baseFolder)
+
+            _prepareDestination(outputPath)
+
+            inputFm = FolderManager(inputPath)
+            outputFm = FolderManager(outputPath)
+            outputFm.create()
+
+            for fn in inputFm.listdir():
+                src = inputFm.join(fn)
+
+                if os.path.isdir(src):
+                    outputFm.link(src)
+                else:
+                    outputFm.copy(src)
+
+        def _copyFile(inputPath):
+            dst = ofm.join(os.path.basename(inputPath))
+            _prepareDestination(dst)
+            ofm.copy(inputPath)
+
+        def _linkPath(inputPath):
+            dst = ofm.join(os.path.basename(inputPath))
+            _prepareDestination(dst)
+            ofm.link(inputPath)
+
+        for key in present:
+            inputPath = inputPaths[key]
+
+            if key in ('fs', 'ts'):
+                # Selection state is stored in XML files at the root of both
+                # processing folders. Make those XMLs private.
+                _copyMutableFolder(inputPath)
+
+            elif key in ('fss', 'tss'):
+                # Settings use relative DataFolder / ProcessingFolder paths,
+                # so a straight copy is sufficient.
+                _copyFile(inputPath)
+
+            elif key == 'tm':
+                # Tomostar files are input data for change_selection.
+                # The command changes the corresponding XML metadata in
+                # warp_tiltseries, not the tomostar files themselves.
+                _linkPath(inputPath)
+
+            elif key in (cls.FRAMES, cls.MDOCS):
+                _linkPath(inputPath)
+
+            else:
+                raise Exception(
+                    f"Unsupported Warp subset input key: {key}"
+                )
+
+        if gain:
+            _linkPath(gain)
+
+        return set(present)
+
+    @classmethod
+    def changeSelectionArgs(cls, settings, inputData,
+                            select=False, deselect=False):
+        """Build arguments for ``WarpTools change_selection``.
+
+        Exactly one of ``select`` and ``deselect`` must be True.
+
+        ``inputData`` may be a single path or a sequence of paths.
+        """
+        if bool(select) == bool(deselect):
+            raise ValueError(
+                "Exactly one of 'select' or 'deselect' must be True."
+            )
+
+        if isinstance(inputData, str):
+            inputData = [inputData]
+
+        inputData = [
+            str(path).strip()
+            for path in (inputData or [])
+            if str(path).strip()
+        ]
+
+        if not inputData:
+            raise ValueError(
+                "change_selection requires at least one input data path."
+            )
+
+        args = Args({
+            'WarpTools': 'change_selection',
+            '--settings': settings,
+            '--input_data': inputData,
+        })
+
+        args['--select' if select else '--deselect'] = ''
+
+        return args
+
+    @classmethod
+    def frameSelectionPath(cls, moviePath):
+        """Return a frame-series --input_data path for change_selection."""
+        return os.path.join(
+            cls.FRAMES,
+            os.path.basename(str(moviePath))
+        )
+
+    @classmethod
+    def tiltSeriesSelectionPath(cls, tomoName):
+        """Return a tilt-series --input_data path for change_selection."""
+        return os.path.join(
+            cls.TM,
+            f'{tomoName}.tomostar'
+        )
+    
     def _get_acquisition_input_star(self):
         """Return a Relion STAR file path used to load acquisition metadata."""
         return (self._args.get('input_tiltseries')
