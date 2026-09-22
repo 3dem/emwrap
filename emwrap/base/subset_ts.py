@@ -60,7 +60,8 @@ class SubsetTsPipeline(ProcessingPipeline):
         self.matchSet = ''
 
         if self.mode == MODE_EXPLICIT_NAMES:
-            self.subsetNames = set((args.get('subset_tomo_names') or '').split())
+            names = (args.get('subset_tomo_names') or '').replace(',', ' ')
+            self.subsetNames = set(names.split())
         elif self.mode == MODE_MATCH_SET:
             self.matchSet = (args.get('subset_match_set') or '').strip()
         else:  # MODE_RANDOM
@@ -74,6 +75,10 @@ class SubsetTsPipeline(ProcessingPipeline):
         # even if a stale value is still present in 'args'.
         self.excludedTiltsMap = (
             {} if self.mode == MODE_RANDOM else self._parseExcludeTiltsParam(args))
+
+        # Warp state capabilities, resolved only when warp_previous_job is enabled.
+        self.hasWarpFrames = False
+        self.hasWarpTilts = False
 
     @staticmethod
     def _parseMode(value):
@@ -169,219 +174,66 @@ class SubsetTsPipeline(ProcessingPipeline):
             or ProcessingPipeline.get_launcher('WARP')
         )
 
-    def _warpGlobalStar(self, inputStar):
-        """Return the STAR containing the global tomogram/tilt-series table.
+    def _getTomogramsStar(self, inputStar):
+        """Return the STAR file containing the global tomogram table."""
+        if not RelionStar.isTomoOptimisationSet(inputStar):
+            return inputStar
 
-        For an optimisation_set this is the rlnTomoTomogramsFile it points
-        to; otherwise it is inputStar itself.
-        """
-        if RelionStar.isTomoOptimisationSet(inputStar):
-            optRow = RelionStar.readTomoOptimisationSet(inputStar)[0]
-            tomoStar = optRow._asdict().get('rlnTomoTomogramsFile', '')
+        optRow = RelionStar.readTomoOptimisationSet(inputStar)[0]
+        tomoStar = optRow._asdict().get('rlnTomoTomogramsFile', '')
+        if not tomoStar:
+            raise Exception(
+                f"Missing rlnTomoTomogramsFile in optimisation_set STAR "
+                f"file: {inputStar}"
+            )
+        return tomoStar
 
-            if not tomoStar:
-                raise Exception(
-                    f"Missing rlnTomoTomogramsFile in optimisation_set "
-                    f"STAR file: {inputStar}"
-                )
+    def _readGlobalTable(self, starPath):
+        """Read and validate a RELION tomography global table."""
+        table = StarFile.getTableFromFile('global', starPath)
+        if not table:
+            raise Exception(f"Could not read 'global' table from {starPath}")
+        return table
 
-            return tomoStar
-
-        return inputStar
+    def _resolveAllTomoNames(self, inputStar):
+        table = self._readGlobalTable(self._getTomogramsStar(inputStar))
+        return {row.rlnTomoName for row in table}
 
     def _prepareWarpSubsetState(self):
-        """Copy/link the previous Warp job state into this subset job.
-
-        Mutable Warp XML metadata is made private by
-        WarpBasePipeline.copySubsetState(), while large processing products
-        remain linked to the previous job.
-        """
-        inputRunFolder = os.path.dirname(self.inputSet) or '.'
+        """Copy/link the usable Warp state from the previous job."""
+        inputFolder = os.path.dirname(self.inputSet) or '.'
 
         self.log(
             f"Preserving Warp state from previous job folder: "
-            f"{Color.cyan(inputRunFolder)}"
+            f"{Color.cyan(inputFolder)}"
         )
 
         self.warpStateKeys = WarpBasePipeline.copySubsetState(
-            inputRunFolder,
-            self
+            inputFolder, self
         )
 
-        frameKeys = {
-            'fs',
-            'fss',
-            WarpBasePipeline.FRAMES
-        }
-        tiltKeys = {
-            'ts',
-            'tss',
-            'tm'
-        }
-
-        presentFrameKeys = frameKeys & self.warpStateKeys
-        presentTiltKeys = tiltKeys & self.warpStateKeys
-
-        # Partial states are dangerous: change_selection would either fail
-        # or resolve its relative paths against missing data.
-        if presentFrameKeys and not frameKeys.issubset(self.warpStateKeys):
-            missing = sorted(frameKeys - self.warpStateKeys)
-            raise Exception(
-                "Incomplete Warp frame-series state in previous job. "
-                f"Missing: {', '.join(missing)}"
-            )
-
-        if presentTiltKeys and not tiltKeys.issubset(self.warpStateKeys):
-            missing = sorted(tiltKeys - self.warpStateKeys)
-            raise Exception(
-                "Incomplete Warp tilt-series state in previous job. "
-                f"Missing: {', '.join(missing)}"
-            )
-
-        hasFrameState = frameKeys.issubset(self.warpStateKeys)
-        hasTiltState = tiltKeys.issubset(self.warpStateKeys)
-
-        if not hasFrameState and not hasTiltState:
-            raise Exception(
-                "'warp_previous_job' was enabled, but no usable Warp "
-                "frame-series or tilt-series state was found next to "
-                f"the input set ({inputRunFolder})."
-            )
+        self.hasWarpFrames, self.hasWarpTilts = (
+            WarpBasePipeline.validateSubsetState(self.warpStateKeys)
+        )
 
         self.log(
             "Imported Warp state: "
             + Color.cyan(', '.join(sorted(self.warpStateKeys)))
         )
 
-        return self.warpStateKeys
-
     def _buildWarpSelectionPlan(self, inputStar):
-        """Build the Warp deselection plan from the original STAR metadata.
-
-        Returns paths to frame-series and tilt-series items that must be
-        deselected with WarpTools change_selection.
-
-        This method only reads metadata; it does not modify Warp state.
-        """
-        frameKeys = {
-            'fs',
-            'fss',
-            WarpBasePipeline.FRAMES
-        }
-        tiltKeys = {
-            'ts',
-            'tss',
-            'tm'
-        }
-
-        hasFrameState = frameKeys.issubset(self.warpStateKeys)
-        hasTiltState = tiltKeys.issubset(self.warpStateKeys)
-
-        globalStar = self._warpGlobalStar(inputStar)
-        globalTable = StarFile.getTableFromFile('global', globalStar)
-
-        if not globalTable:
-            raise Exception(
-                f"Could not read 'global' table from {globalStar}"
-            )
+        """Build frame-series and tilt-series deselections for Warp."""
+        globalStar = self._getTomogramsStar(inputStar)
+        globalTable = self._readGlobalTable(globalStar)
 
         allNames = {row.rlnTomoName for row in globalTable}
         removedNames = allNames - self.subsetNames
+        plan = {'frames': set(), 'tiltseries': set()}
 
-        plan = {
-            'removed_tomograms': set(removedNames),
-            'frames': set(),
-            'tiltseries': set()
-        }
-
-        # If Warp already has a tilt-series processing state, whole removed
-        # tomograms must also be marked deselected there.
-        if hasTiltState:
-            for tomoName in removedNames:
-                plan['tiltseries'].add(
-                    WarpBasePipeline.tiltSeriesSelectionPath(tomoName)
-                )
-
-        needFrameSelection = bool(
-            hasFrameState
-            and (removedNames or self.excludedTiltsMap)
-        )
-
-        if needFrameSelection:
-            if not globalTable.hasColumn('rlnTomoTiltSeriesStarFile'):
-                raise Exception(
-                    f"Warp frame-series synchronization requires "
-                    f"'rlnTomoTiltSeriesStarFile', but {globalStar} "
-                    "does not contain that column."
-                )
-
-            for tomoRow in globalTable:
-                tomoName = tomoRow.rlnTomoName
-
-                removeWholeTomo = tomoName in removedNames
-                excludedIds = self.excludedTiltsMap.get(tomoName, set())
-
-                if not removeWholeTomo and not excludedIds:
-                    continue
-
-                tsStar = tomoRow.rlnTomoTiltSeriesStarFile
-                tsTable = StarFile.getTableFromFile(
-                    tomoName,
-                    tsStar,
-                    guessType=False
-                )
-
-                if not tsTable:
-                    raise Exception(
-                        f"Could not read tilt-series table '{tomoName}' "
-                        f"from {tsStar} while preparing Warp subset."
-                    )
-
-                if not tsTable.hasColumn('rlnMicrographMovieName'):
-                    raise Exception(
-                        f"Tilt-series STAR file {tsStar} for '{tomoName}' "
-                        "has no 'rlnMicrographMovieName' column."
-                    )
-
-                if excludedIds and not tsTable.hasColumn(
-                        'rlnTomoTiltMovieIndex'):
-                    raise Exception(
-                        f"Tilt-series STAR file {tsStar} for '{tomoName}' "
-                        "has no 'rlnTomoTiltMovieIndex' column."
-                    )
-
-                for tiltRow in tsTable:
-                    if removeWholeTomo:
-                        deselect = True
-                    else:
-                        tiltId = int(tiltRow.rlnTomoTiltMovieIndex)
-                        deselect = tiltId in excludedIds
-
-                    if not deselect:
-                        continue
-
-                    moviePath = str(
-                        tiltRow.rlnMicrographMovieName
-                    ).strip()
-
-                    if not moviePath or moviePath == 'None':
-                        raise Exception(
-                            f"Missing rlnMicrographMovieName for a tilt "
-                            f"that must be deselected in '{tomoName}'."
-                        )
-
-                    plan['frames'].add(
-                        WarpBasePipeline.frameSelectionPath(moviePath)
-                    )
-
-        # WarpTools change_selection can select/deselect a frame series or an
-        # entire tilt series, but it does not expose a documented operation
-        # for deselecting one tilt inside an already-existing tilt-series
-        # Warp state. Do not silently claim those states are synchronized.
-        if self.excludedTiltsMap and hasTiltState:
+        if self.excludedTiltsMap and self.hasWarpTilts:
             raise Exception(
                 "Individual tilt exclusions cannot currently be synchronized "
-                "safely with an existing Warp tilt-series state. WarpTools "
+                "with an existing Warp tilt-series state. WarpTools "
                 "change_selection supports frame-series items and complete "
                 "tilt-series items, but not an individual tilt inside an "
                 "already-created warp_tiltseries state. Use exclude_tilts "
@@ -389,30 +241,85 @@ class SubsetTsPipeline(ProcessingPipeline):
                 "'Previous job is a Warp job' for this operation."
             )
 
+        if self.hasWarpTilts:
+            plan['tiltseries'].update(
+                WarpBasePipeline.tiltSeriesSelectionPath(name)
+                for name in removedNames
+            )
+
+        if not self.hasWarpFrames or not (removedNames or self.excludedTiltsMap):
+            return plan
+
+        if not globalTable.hasColumn('rlnTomoTiltSeriesStarFile'):
+            raise Exception(
+                f"Warp frame-series synchronization requires "
+                f"'rlnTomoTiltSeriesStarFile', but {globalStar} "
+                "does not contain that column."
+            )
+
+        for tomoRow in globalTable:
+            tomoName = tomoRow.rlnTomoName
+            removeWholeTomo = tomoName in removedNames
+            excludedIds = self.excludedTiltsMap.get(tomoName, set())
+
+            if not removeWholeTomo and not excludedIds:
+                continue
+
+            tsStar = tomoRow.rlnTomoTiltSeriesStarFile
+            tsTable = StarFile.getTableFromFile(
+                tomoName, tsStar, guessType=False
+            )
+            if not tsTable:
+                raise Exception(
+                    f"Could not read tilt-series table '{tomoName}' "
+                    f"from {tsStar} while preparing Warp subset."
+                )
+
+            if not tsTable.hasColumn('rlnMicrographMovieName'):
+                raise Exception(
+                    f"Tilt-series STAR file {tsStar} for '{tomoName}' has no "
+                    "'rlnMicrographMovieName' column."
+                )
+
+            if excludedIds and not tsTable.hasColumn('rlnTomoTiltMovieIndex'):
+                raise Exception(
+                    f"Tilt-series STAR file {tsStar} for '{tomoName}' has no "
+                    "'rlnTomoTiltMovieIndex' column."
+                )
+
+            for tiltRow in tsTable:
+                deselect = removeWholeTomo
+                if excludedIds:
+                    tiltId = int(tiltRow.rlnTomoTiltMovieIndex)
+                    deselect = deselect or tiltId in excludedIds
+
+                if deselect:
+                    plan['frames'].add(
+                        WarpBasePipeline.frameSelectionPath(
+                            tiltRow.rlnMicrographMovieName
+                        )
+                    )
+
         return plan
 
     def _writeWarpSelectionList(self, fileName, paths):
-        """Write a WarpTools --input_data text file."""
-        paths = sorted(set(paths))
-
-        if not paths:
-            return None
-
+        """Write a WarpTools --input_data text file and return its path."""
         relPath = fileName
-        outputPath = self.join(relPath)
-
-        with open(outputPath, 'w') as fh:
-            for path in paths:
-                fh.write(path + '\n')
-
+        with open(self.join(relPath), 'w') as fh:
+            for path in sorted(set(paths)):
+                fh.write(str(path) + '\n')
         return relPath
 
     def _applyWarpSelectionPlan(self, plan):
-        """Apply planned Warp deselections to this job's private Warp state."""
-        framePaths = sorted(plan['frames'])
-        tiltSeriesPaths = sorted(plan['tiltseries'])
+        """Apply planned Warp deselections to this job's private state."""
+        jobs = (
+            ('frames', WarpBasePipeline.FSS,
+             'warp_deselect_frames.txt', 'frame-series'),
+            ('tiltseries', WarpBasePipeline.TSS,
+             'warp_deselect_tiltseries.txt', 'tilt-series'),
+        )
 
-        if not framePaths and not tiltSeriesPaths:
+        if not any(plan.values()):
             self.log(
                 "Warp state preserved; no additional Warp items need "
                 "to be deselected."
@@ -421,49 +328,20 @@ class SubsetTsPipeline(ProcessingPipeline):
 
         batch = Batch(id=self.name, path=self.path)
 
-        if framePaths:
-            inputList = self._writeWarpSelectionList(
-                'warp_deselect_frames.txt',
-                framePaths
-            )
+        for key, settings, fileName, label in jobs:
+            paths = plan[key]
+            if not paths:
+                continue
 
-            self.log(f"Deselecting {Color.red(len(framePaths))} Warp "
-                "frame-series item(s).")
-
-            args = WarpBasePipeline.changeSelectionArgs(
-                WarpBasePipeline.FSS,
-                inputList,
-                deselect=True
-            )
-
-            self.batch_execute(
-                'change_selection_frames',
-                batch,
-                args
-            )
-
-        if tiltSeriesPaths:
-            inputList = self._writeWarpSelectionList(
-                'warp_deselect_tiltseries.txt',
-                tiltSeriesPaths
-            )
-
+            inputList = self._writeWarpSelectionList(fileName, paths)
             self.log(
-                f"Deselecting {Color.red(len(tiltSeriesPaths))} Warp "
-                "tilt-series item(s)."
+                f"Deselecting {Color.red(len(paths))} Warp {label} item(s)."
             )
 
             args = WarpBasePipeline.changeSelectionArgs(
-                WarpBasePipeline.TSS,
-                inputList,
-                deselect=True
+                settings, inputList, deselect=True
             )
-
-            self.batch_execute(
-                'change_selection_tiltseries',
-                batch,
-                args
-            )
+            self.batch_execute(f'change_selection_{key}', batch, args)
 
     def _filterTiltSeriesStar(self, tomoName, tsStarPath, excludedIds):
         """ Read the per-tilt-series STAR file for 'tomoName', remove the
@@ -524,29 +402,6 @@ class SubsetTsPipeline(ProcessingPipeline):
         shutil.copy2(tsStarPath, self.join(relTsStar))
         return self.fixOutputPath(relTsStar)
 
-    def _resolveAllTomoNames(self, inputStar):
-        """ Return every rlnTomoName found in the relevant 'global' table
-        of 'inputStar' (the tomograms/tilt-series table itself, or, for an
-        optimisation_set, the tomograms table it points to). Used when no
-        'subset_tomo_names' was provided but 'exclude_tilts' was (Mode 0),
-        and to resolve the full universe of tomogram names for Mode 1
-        (match a second set) and Mode 2 (random selection). """
-        if RelionStar.isTomoOptimisationSet(inputStar):
-            optRow = RelionStar.readTomoOptimisationSet(inputStar)[0]
-            tomoStar = optRow._asdict().get('rlnTomoTomogramsFile', '')
-            if not tomoStar:
-                raise Exception(
-                    f"Missing rlnTomoTomogramsFile in optimisation_set STAR "
-                    f"file: {inputStar}")
-        else:
-            tomoStar = inputStar
-
-        table = StarFile.getTableFromFile('global', tomoStar)
-        if not table:
-            raise Exception(f"Could not read 'global' table from {tomoStar}")
-
-        return {row.rlnTomoName for row in table}
-
     def _resolveTomoNamesFromStar(self, starPath, paramLabel):
         """ Return the set of rlnTomoName values found in 'starPath'.
         Accepts the same kind of STAR files as 'input_set' (tilt_series.star,
@@ -557,12 +412,9 @@ class SubsetTsPipeline(ProcessingPipeline):
         if not os.path.exists(starPath):
             raise Exception(f"{paramLabel} STAR file not found: {starPath}")
 
-        lookupStar = starPath
-        if RelionStar.isTomoOptimisationSet(starPath):
-            optRow = RelionStar.readTomoOptimisationSet(starPath)[0]
-            tomoStar = optRow._asdict().get('rlnTomoTomogramsFile', '')
-            if tomoStar:
-                lookupStar = tomoStar
+        lookupStar = (self._getTomogramsStar(starPath)
+                      if RelionStar.isTomoOptimisationSet(starPath)
+                      else starPath)
 
         tables = StarFile.getTablesDict(lookupStar)
 
@@ -583,9 +435,7 @@ class SubsetTsPipeline(ProcessingPipeline):
             f"{paramLabel} STAR file: {lookupStar}")
 
     def _writeFilteredGlobalTable(self, inputStar, outputStar, subsetNames):
-        inputTable = StarFile.getTableFromFile('global', inputStar)
-        if not inputTable:
-            raise Exception(f"Could not read 'global' table from {inputStar}")
+        inputTable = self._readGlobalTable(inputStar)
 
         if self.excludedTiltsMap and not inputTable.hasColumn('rlnTomoTiltSeriesStarFile'):
             raise Exception(
@@ -665,9 +515,7 @@ class SubsetTsPipeline(ProcessingPipeline):
         return 'tilt_series.star'
 
     def _subsetGlobalInput(self, inputStar, subsetNames):
-        inputTable = StarFile.getTableFromFile('global', inputStar)
-        if not inputTable:
-            raise Exception(f"Could not read 'global' table from {inputStar}")
+        inputTable = self._readGlobalTable(inputStar)
 
         inputType = self._detectGlobalTableType(inputStar, inputTable)
         outputStar = self.join(self._outputStarName(inputType))
@@ -681,12 +529,8 @@ class SubsetTsPipeline(ProcessingPipeline):
         optRow = RelionStar.readTomoOptimisationSet(inputStar)[0]
         optValues = optRow._asdict()
 
-        tomoStar = optValues.get('rlnTomoTomogramsFile', '')
+        tomoStar = self._getTomogramsStar(inputStar)
         ptsStar = optValues.get('rlnTomoParticlesFile', '')
-        if not tomoStar:
-            raise Exception(
-                f"Missing rlnTomoTomogramsFile in optimisation_set STAR file: {inputStar}"
-            )
         if not ptsStar:
             raise Exception(
                 f"Missing rlnTomoParticlesFile in optimisation_set STAR file: {inputStar}"
@@ -727,13 +571,26 @@ class SubsetTsPipeline(ProcessingPipeline):
                     "to keep every tomogram and only exclude some tilts, leave "
                     "it empty and use 'exclude_tilts' instead)."
                 )
+
+            allNames = self._resolveAllTomoNames(inputStar)
+
             if not self.subsetNames:
                 # No explicit subset requested, but exclude_tilts was: keep
                 # every tomogram found in the input set.
-                self.subsetNames = self._resolveAllTomoNames(inputStar)
+                self.subsetNames = allNames
                 self.log("No 'subset_tomo_names' provided; keeping all "
                          f"{Color.green(len(self.subsetNames))} tomogram(s) "
                          "found in the input set.")
+            else:
+                missing = sorted(self.subsetNames - allNames)
+
+                if missing:
+                    raise Exception(
+                        "The following requested tomogram name(s) were not found "
+                        f"in the input set: {', '.join(missing)}. "
+                        "Available rlnTomoName values are: "
+                        f"{', '.join(sorted(allNames))}"
+                    )
 
         elif self.mode == MODE_MATCH_SET:
             if not self.matchSet:
@@ -776,6 +633,7 @@ class SubsetTsPipeline(ProcessingPipeline):
             raise Exception(f"Input STAR file not found: {self.inputSet}")
 
         inputStar = self.inputSet
+        isOptimisationSet = RelionStar.isTomoOptimisationSet(inputStar)
 
         self._resolveSubsetNames(inputStar)
 
@@ -810,7 +668,7 @@ class SubsetTsPipeline(ProcessingPipeline):
         if self.warpPreviousJob:
             # For now this feature preserves the Warp tilt-series processing
             # chain. Warp population/m/ workflows require separate handling.
-            if RelionStar.isTomoOptimisationSet(inputStar):
+            if isOptimisationSet:
                 raise Exception(
                     "'warp_previous_job' is currently supported for Warp "
                     "tilt-series/tomogram inputs, not Warp optimisation-set "
@@ -821,7 +679,7 @@ class SubsetTsPipeline(ProcessingPipeline):
             warpPlan = self._buildWarpSelectionPlan(inputStar)
 
         # Existing RELION subset behavior remains unchanged.
-        if RelionStar.isTomoOptimisationSet(inputStar):
+        if isOptimisationSet:
             inputType, count = self._subsetOptimisationSet(
                 inputStar,
                 self.subsetNames

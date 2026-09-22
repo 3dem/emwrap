@@ -55,6 +55,20 @@ class WarpBasePipeline(ProcessingPipeline):
         M: M
     }
 
+    FRAME_STATE_KEYS = {'fs', 'fss', FRAMES}
+    TILT_STATE_KEYS = {'ts', 'tss', 'tm'}
+
+    SUBSET_STATE_KEYS = (
+        'fs', 'fss',
+        'ts', 'tss',
+        'tm',
+        FRAMES, MDOCS
+    )
+
+    MUTABLE_FOLDERS = {'fs', 'ts'}
+    COPIED_FILES = {'fss', 'tss'}
+    LINKED_PATHS = {'tm', FRAMES, MDOCS}
+
     @classmethod
     def copyInputs(cls, inputFolder, outputFolder, keys=None, gain=None, force=False):
         """ Inspect the input run folder and copy or link input folder/files
@@ -110,8 +124,7 @@ class WarpBasePipeline(ProcessingPipeline):
             ofm.link(gain)
 
     @classmethod
-    def copySubsetState(cls, inputFolder, outputFolder, keys=None,
-                        gain=None, force=False, strict=False):
+    def copySubsetState(cls, inputFolder, outputFolder, keys=None, force=False):
         """Copy/link Warp state into a subset job.
 
         This is similar to ``copyInputs`` but is specifically intended for
@@ -134,39 +147,14 @@ class WarpBasePipeline(ProcessingPipeline):
                 Warp input keys to import. When None, import every applicable
                 Warp TS input:
                     fs, fss, ts, tss, tm, frames, mdocs
-
-            gain:
-                Optional gain file to link at the job root.
-
             force:
                 Replace an already existing destination asset.
-
-            strict:
-                If True, fail when any requested Warp asset is missing.
-                If False, missing assets are skipped. This is useful because
-                different points in the Warp workflow contain different
-                subsets of the full Warp directory structure.
 
         Returns:
             Set containing the keys that were actually imported.
         """
-        if keys is None:
-            keys = [
-                'fs', 'fss',
-                'ts', 'tss',
-                'tm',
-                cls.FRAMES,
-                cls.MDOCS
-            ]
-        else:
-            keys = list(keys)
 
-        unknown = [key for key in keys if key not in cls.INPUTS]
-        if unknown:
-            raise Exception(
-                "Unknown Warp input key(s): "
-                + ', '.join(sorted(unknown))
-            )
+        keys = cls.SUBSET_STATE_KEYS if keys is None else keys
 
         def _getFM(folder):
             return (folder if isinstance(folder, FolderManager)
@@ -194,12 +182,6 @@ class WarpBasePipeline(ProcessingPipeline):
             key for key, path in inputPaths.items()
             if not os.path.exists(path)
         ]
-
-        if strict and missing:
-            raise Exception(
-                "Missing expected Warp path(s): "
-                + str([inputPaths[key] for key in missing])
-            )
 
         present = [key for key in keys if key not in missing]
 
@@ -260,32 +242,12 @@ class WarpBasePipeline(ProcessingPipeline):
         for key in present:
             inputPath = inputPaths[key]
 
-            if key in ('fs', 'ts'):
-                # Selection state is stored in XML files at the root of both
-                # processing folders. Make those XMLs private.
+            if key in cls.MUTABLE_FOLDERS:
                 _copyMutableFolder(inputPath)
-
-            elif key in ('fss', 'tss'):
-                # Settings use relative DataFolder / ProcessingFolder paths,
-                # so a straight copy is sufficient.
+            elif key in cls.COPIED_FILES:
                 _copyFile(inputPath)
-
-            elif key == 'tm':
-                # Tomostar files are input data for change_selection.
-                # The command changes the corresponding XML metadata in
-                # warp_tiltseries, not the tomostar files themselves.
-                _linkPath(inputPath)
-
-            elif key in (cls.FRAMES, cls.MDOCS):
-                _linkPath(inputPath)
-
             else:
-                raise Exception(
-                    f"Unsupported Warp subset input key: {key}"
-                )
-
-        if gain:
-            _linkPath(gain)
+                _linkPath(inputPath)
 
         return set(present)
 
@@ -327,6 +289,42 @@ class WarpBasePipeline(ProcessingPipeline):
 
         return args
 
+    @classmethod
+    def hasFrameState(cls, keys):
+        return cls.FRAME_STATE_KEYS.issubset(keys)
+
+    @classmethod
+    def hasTiltState(cls, keys):
+        return cls.TILT_STATE_KEYS.issubset(keys)
+
+    @classmethod
+    def validateSubsetState(cls, keys):
+        """Return (hasFrameState, hasTiltState)."""
+        framePresent = cls.FRAME_STATE_KEYS & keys
+        tiltPresent = cls.TILT_STATE_KEYS & keys
+
+        if framePresent and not cls.FRAME_STATE_KEYS.issubset(keys):
+            missing = cls.FRAME_STATE_KEYS - keys
+            raise Exception(
+                "Incomplete Warp frame-series state. Missing: "
+                + ', '.join(sorted(missing))
+            )
+
+        if tiltPresent and not cls.TILT_STATE_KEYS.issubset(keys):
+            missing = cls.TILT_STATE_KEYS - keys
+            raise Exception(
+                "Incomplete Warp tilt-series state. Missing: "
+                + ', '.join(sorted(missing))
+            )
+
+        hasFrames = cls.FRAME_STATE_KEYS.issubset(keys)
+        hasTilts = cls.TILT_STATE_KEYS.issubset(keys)
+
+        if not hasFrames and not hasTilts:
+            raise Exception("No usable Warp state was found.")
+
+        return hasFrames, hasTilts
+    
     @classmethod
     def frameSelectionPath(cls, moviePath):
         """Return a frame-series --input_data path for change_selection."""
