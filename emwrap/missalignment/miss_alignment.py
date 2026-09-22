@@ -1009,8 +1009,10 @@ class MissAlignment(WarpBasePipeline):
 
         if isinstance(self.gpuList, str):
             visible_devices = self.gpuList.strip().replace(' ', ',')
+            n_gpus = len([gpu for gpu in visible_devices.split(',') if gpu])
         else:
             visible_devices = ','.join(str(device) for device in self.gpuList)
+            n_gpus = len(self.gpuList)
 
         self.log(
             f'Miss-Alignment {mode}, GPU allocation: '
@@ -1020,11 +1022,15 @@ class MissAlignment(WarpBasePipeline):
         # ENV Variables
         args = Args({
             'env': '',
-            f'NCCL_P2P_DISABLE={nccl_p2p_disable}': '', 
             f'OMP_NUM_THREADS={omp_threads}': '',
             f'MKL_NUM_THREADS={mkl_threads}': '',
             f'CUDA_VISIBLE_DEVICES={visible_devices}': ''
         })
+
+        if n_gpus > 1:
+            args.update({
+                f'NCCL_P2P_DISABLE={nccl_p2p_disable}': ''
+            })
 
         if self.scratchDir:
             args.update({
@@ -1336,7 +1342,7 @@ class MissAlignment(WarpBasePipeline):
             self.log(f'Starting training with {len(training_subset)} tilt series')
             model_run_directory = self.launch_training(training_subset)
             output_nodes.append([
-                model_run_directory,
+                self.project.relpath(model_run_directory),
                 'TomogramGroupMetadata.star.relion.tomo.MissAlignmentModelDir',
             ])
         else:
