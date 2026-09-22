@@ -21,7 +21,7 @@ import os
 import sys
 import unittest
 import tempfile
-from emtools.utils import Color
+from emtools.utils import Color, Pretty, Timer
 
 from emwrap.base import ProjectManager
 from emwrap.base.config import ProcessingConfig
@@ -149,14 +149,21 @@ class TestApoF(unittest.TestCase):
         self._link_data()
         id_map = pm.loadWorkflow(workflow=workflow)
         job_ids = [id_map[job['jobid']] for job in jobs]
-        for job_type, job_id in zip(self.job_types, job_ids):
+        total = len(job_ids)
+        for i, (job_type, job_id) in enumerate(zip(self.job_types, job_ids), 1):
+            label = f"[{i}/{total}] {job_type} ({job_id})"
             if self.dry:
                 print(Color.warn(f"Dry run: would run job {job_id} for {job_type}"), flush=True)
             else:
+                print(Color.cyan(f"\n{label} running..."), flush=True)
+                timer = Timer()
                 pm.runJob(job_id, wait=True)
+                elapsed = Pretty.delta(timer.getElapsedTime())
                 pm.update()
                 self._assert_job_succeeded(pm, job_id, self.expected_outputs[job_type])
                 self._check_job_outputs(pm, job_type, job_id)
+                print(f"{Color.green(label)} completed in {Color.bold(elapsed)}",
+                      flush=True)
 
     def test_apof(self):
         self._run_workflow()
