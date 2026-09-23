@@ -49,7 +49,6 @@ class SubsetTsPipeline(ProcessingPipeline):
         ProcessingPipeline.__init__(self, args, output)
         self.inputSet = args['input_set']
 
-        self.warpPreviousJob = args.get('warp_previous_job', False)
         self.warpStateKeys = set()
 
         self.mode = self._parseMode(args.get('mode'))
@@ -76,7 +75,7 @@ class SubsetTsPipeline(ProcessingPipeline):
         self.excludedTiltsMap = (
             {} if self.mode == MODE_RANDOM else self._parseExcludeTiltsParam(args))
 
-        # Warp state capabilities, resolved only when warp_previous_job is enabled.
+        # Warp state capabilities are inferred from the input job folder.
         self.hasWarpFrames = False
         self.hasWarpTilts = False
 
@@ -199,22 +198,43 @@ class SubsetTsPipeline(ProcessingPipeline):
         table = self._readGlobalTable(self._getTomogramsStar(inputStar))
         return {row.rlnTomoName for row in table}
 
-    def _prepareWarpSubsetState(self):
-        """Copy/link the usable Warp state from the previous job."""
-        inputFolder = os.path.dirname(self.inputSet) or '.'
-
-        self.log(
-            f"Preserving Warp state from previous job folder: "
-            f"{Color.cyan(inputFolder)}"
-        )
-
-        self.warpStateKeys = WarpBasePipeline.copySubsetState(
-            inputFolder, self
-        )
+    def _prepareWarpState(self, sourceKeys):
+        """Import mutable Warp state detected next to the input STAR."""
+        inputFolder = os.path.dirname(self.inputSet)
 
         self.hasWarpFrames, self.hasWarpTilts = (
-            WarpBasePipeline.validateSubsetState(self.warpStateKeys)
+            WarpBasePipeline.validateState(sourceKeys)
         )
+
+        self.log(
+            f"Detected Warp state in previous job folder: "
+            f"{Color.cyan(inputFolder)}", flush=True
+        )
+
+        copyKeys = set(sourceKeys)
+
+        # warp_tomostar controls which tilt series WarpTools discovers for
+        # commands such as ts_ctf and ts_reconstruct. Do not copy/link the full
+        # upstream folder; create a private filtered folder instead.
+        hasTomostarState = 'tm' in copyKeys
+        copyKeys.discard('tm')
+
+        if copyKeys:
+            WarpBasePipeline.copyInputs(
+                inputFolder, self,
+                keys=copyKeys,
+                forMutation=True,
+                allowExisting=True
+            )
+
+        if hasTomostarState:
+            WarpBasePipeline.copyTomostars(
+                inputFolder,
+                self,
+                self.subsetNames
+            )
+
+        self.warpStateKeys = set(sourceKeys)
 
         self.log(
             "Imported Warp state: "
@@ -237,8 +257,7 @@ class SubsetTsPipeline(ProcessingPipeline):
                 "change_selection supports frame-series items and complete "
                 "tilt-series items, but not an individual tilt inside an "
                 "already-created warp_tiltseries state. Use exclude_tilts "
-                "before the Warp tilt-series state is created, or disable "
-                "'Previous job is a Warp job' for this operation."
+                "before the Warp tilt-series state is created."
             )
 
         if self.hasWarpTilts:
@@ -661,22 +680,26 @@ class SubsetTsPipeline(ProcessingPipeline):
                 f"tomogram(s): {Color.cyan(summary)}"
             )
 
-        # Build the Warp plan from the ORIGINAL metadata before the existing
-        # subset code rewrites any per-tomogram tilt_series STAR paths.
+        # Detect Warp state from the input job folder. Build the plan from the
+        # ORIGINAL metadata before any per-tomogram tilt_series STAR paths are
+        # rewritten by the normal subset operation.
         warpPlan = None
+        inputFolder = os.path.dirname(self.inputSet)
+        warpSourceKeys = WarpBasePipeline.detectState(inputFolder)
 
-        if self.warpPreviousJob:
-            # For now this feature preserves the Warp tilt-series processing
-            # chain. Warp population/m/ workflows require separate handling.
+        if warpSourceKeys:
+            # Warp population/m/ workflows require separate handling.
             if isOptimisationSet:
                 raise Exception(
-                    "'warp_previous_job' is currently supported for Warp "
-                    "tilt-series/tomogram inputs, not Warp optimisation-set "
-                    "population inputs."
+                    "Warp state was detected next to the input optimisation "
+                    "set, but Warp population/m/ workflows are not currently "
+                    "supported by this subset job."
                 )
 
-            self._prepareWarpSubsetState()
+            self._prepareWarpState(warpSourceKeys)
             warpPlan = self._buildWarpSelectionPlan(inputStar)
+        else:
+            self.log("No Warp state detected; using standard subset behavior.")
 
         # Existing RELION subset behavior remains unchanged.
         if isOptimisationSet:
@@ -697,7 +720,6 @@ class SubsetTsPipeline(ProcessingPipeline):
 
         self.inputs = {
             'input_set': self.inputSet,
-            'warp_previous_job': self.warpPreviousJob,
             'mode': self.mode,
             'subset_tomo_names': sorted(self.subsetNames),
             'exclude_tilts': {
