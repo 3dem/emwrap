@@ -1,6 +1,6 @@
 # **************************************************************************
 # *
-# * Authors:     J.M. de la Rosa Trevin (delarosatrevin@gmail.com)
+# * Authors:     Daniel Marchan Torres (danielmarchan3@gmail.com)
 # *
 # * This program is free software; you can redistribute it and/or modify
 # * it under the terms of the GNU General Public License as published by
@@ -88,12 +88,7 @@ class WarpSubsetTs(WarpBasePipeline):
         copyKeys.discard('tm')
 
         if copyKeys:
-            self.copyInputs(
-                self.inputFolder, self,
-                keys=copyKeys,
-                forMutation=True,
-                allowExisting=True
-            )
+            self._importInputs(self.inputFolder, keys=copyKeys, mutable=True)
 
         if hasTomostarState:
             self.copyTomostars(self.inputFolder, self, subsetNames)

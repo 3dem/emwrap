@@ -79,8 +79,9 @@ def star(args):
 
 
 def copy(args):
-    WarpBasePipeline.copyInputs(os.getcwd(), args.output,
-                                force=args.force)
+    if os.path.exists(args.output) and not args.force:
+        raise Exception("Output folder already exists.")
+    WarpBasePipeline.importInputs(os.getcwd(), args.output)
 
 
 def main():

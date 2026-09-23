@@ -117,91 +117,92 @@ class WarpBasePipeline(ProcessingPipeline):
         return hasFrames, hasTilts
 
     @classmethod
-    def copyInputs(cls, inputFolder, outputFolder, keys=None, gain=None,
-                   force=False, forMutation=False, allowExisting=False):
-        """Copy/link Warp inputs into another job folder.
+    def importInputs(cls, inputFolder, outputFolder, keys=None,
+                     mutable=False, gain=None):
+        """Copy/link Warp inputs from a previous job folder into another one.
 
-        The default behavior preserves the original Warp import policy:
-        settings files are copied, ``warp_tiltseries`` is shallow-copied, and
-        other Warp inputs are linked.
+        Settings files are copied. ``warp_tiltseries`` and ``warp_tomostar``
+        are shallow-copied: root files are copied, nested directories are
+        linked and ``logs`` folders are recreated empty. ``m`` is rsync-ed
+        (with ``sources`` linked) and every other input is linked.
+        Existing destinations are replaced.
 
-        With ``forMutation=True``, ``warp_frameseries`` is shallow-copied too.
-        This is required before running commands such as
-        ``WarpTools change_selection`` because they modify the per-item XML
-        files stored at the root of the processing folder. Nested processing
-        directories remain linked to avoid duplicating large data products.
+        Args:
+            inputFolder: previous Warp job folder.
+            outputFolder: destination folder, created if missing.
+            keys: ``INPUTS`` keys to import, by default all except ``m``.
+            mutable: shallow-copy ``warp_frameseries`` too. Required before
+                commands such as ``WarpTools change_selection`` that modify
+                the per-item XML files stored at its root.
+            gain: optional gain file to link into ``outputFolder``.
 
-        ``allowExisting=True`` allows importing into an already-created job
-        directory, while still refusing to overwrite individual destination
-        assets unless ``force=True``.
+        Returns:
+            The set of imported keys.
         """
-        keys = list(cls.INPUTS) if keys is None else list(keys)
+        if keys is None:
+            keys = [k for k in cls.INPUTS if k != cls.M]
 
-        def _getFM(folder):
-            return folder if isinstance(folder, FolderManager) else FolderManager(folder)
+        inputFolder = getattr(inputFolder, 'path', inputFolder)
+        outputFolder = getattr(outputFolder, 'path', outputFolder)
 
-        ifm = _getFM(inputFolder)
-        ofm = _getFM(outputFolder)
-
-        if not ifm.exists():
+        if not os.path.isdir(inputFolder):
             raise Exception(f"Input Warp folder does not exist: {inputFolder}")
 
-        if ofm.exists():
-            if not allowExisting and not force:
-                raise Exception("Output folder already exists.")
-        else:
-            ofm.create()
-
-        inputPaths = {key: ifm.join(cls.INPUTS[key]) for key in keys}
-        if missing := [path for path in inputPaths.values() if not os.path.exists(path)]:
+        inputPaths = {k: os.path.join(inputFolder, cls.INPUTS[k]) for k in keys}
+        if missing := [p for p in inputPaths.values() if not os.path.exists(p)]:
             raise Exception("Missing expected paths: " + str(missing))
 
-        def _prepareDestination(path):
-            if not os.path.lexists(path):
-                return
-            if not force:
-                raise Exception(f"Warp destination already exists: {path}")
-            if os.path.islink(path) or os.path.isfile(path):
-                os.unlink(path)
-            else:
-                shutil.rmtree(path)
+        os.makedirs(outputFolder, exist_ok=True)
 
-        def _copyFolder(inputPath):
-            """Copy root files and link nested directories."""
-            outputPath = ofm.join(os.path.basename(os.path.normpath(inputPath)))
-            _prepareDestination(outputPath)
+        def _replace(dst):
+            if os.path.islink(dst) or os.path.isfile(dst):
+                os.unlink(dst)
+            elif os.path.isdir(dst):
+                shutil.rmtree(dst)
 
-            inputFm = FolderManager(inputPath)
-            outputFm = FolderManager(outputPath)
-            outputFm.create()
+        def _link(src, folder=outputFolder):
+            dst = os.path.join(folder, os.path.basename(src))
+            _replace(dst)
+            os.symlink(os.path.relpath(src, folder), dst)
 
-            for fn in inputFm.listdir():
-                src = inputFm.join(fn)
-                if os.path.isdir(src):
-                    outputFm.link(src)
+        def _copyFile(src):
+            _replace(os.path.join(outputFolder, os.path.basename(src)))
+            shutil.copy(src, outputFolder)
+
+        def _copyFolder(src):
+            dst = os.path.join(outputFolder, os.path.basename(src))
+            _replace(dst)
+            os.makedirs(dst)
+            for fn in os.listdir(src):
+                path = os.path.join(src, fn)
+                if not os.path.isdir(path):
+                    shutil.copy(path, dst)
+                elif fn.endswith('logs'):
+                    os.mkdir(os.path.join(dst, fn))
                 else:
-                    outputFm.copy(src)
+                    _link(path, dst)
 
-        def _copyFile(inputPath):
-            dst = ofm.join(os.path.basename(inputPath))
-            _prepareDestination(dst)
-            ofm.copy(inputPath)
+        def _copyMFolder(src):
+            dst = os.path.join(outputFolder, cls.M)
+            os.makedirs(dst, exist_ok=True)
+            excludes = [arg for name in cls.M_IMPORT_EXCLUDES
+                        for arg in ('--exclude', name)]
+            Path.rsync(src, dst, *excludes)
+            if os.path.exists(sources := os.path.join(src, 'sources')):
+                _link(sources, dst)
 
-        def _linkPath(inputPath):
-            dst = ofm.join(os.path.basename(inputPath))
-            _prepareDestination(dst)
-            ofm.link(inputPath)
-
-        for key, inputPath in inputPaths.items():
-            if inputPath.endswith('.settings'):
-                _copyFile(inputPath)
-            elif key == 'ts' or (key == 'fs' and forMutation):
-                _copyFolder(inputPath)
+        for key, src in inputPaths.items():
+            if src.endswith('.settings'):
+                _copyFile(src)
+            elif key == cls.M:
+                _copyMFolder(src)
+            elif key in ('ts', 'tm') or (key == 'fs' and mutable):
+                _copyFolder(src)
             else:
-                _linkPath(inputPath)
+                _link(src)
 
         if gain:
-            _linkPath(gain)
+            _link(gain)
 
         return set(keys)
 
@@ -336,86 +337,21 @@ class WarpBasePipeline(ProcessingPipeline):
         else:
             self.gain = None
 
-    def _importInputs(self, inputRunFolder, keys=None, dest=None):
-        """ Inspect the input run folder and copy or link input folder/files
-        if necessary. If gain is present in the acquisition, it will be linked.
-
-        Args:
-            inputRunFolder: the input run folder
-            keys: input keys to import, if None, all inputs will be imported
-            dest: optional destination folder (defaults to the job folder)
+    def _importInputs(self, inputFolder, keys=None, dest=None, mutable=False):
+        """ Import Warp inputs (see ``importInputs``) from a previous job
+        folder into this job folder, or into its ``dest`` subfolder.
+        Paths are resolved from the project root, and the acquisition gain
+        is linked only when importing into the job root.
         """
-        print(f"{self.name}: Import inputs ", self.gain)
-        if keys is None:
-            keys = [k for k in self.INPUTS if k != self.M]  # all keys except m
+        def _abs(path):
+            path = getattr(path, 'path', path)
+            return os.path.join(self.workingDir, self.toProjectPath(path))
 
-        if isinstance(inputRunFolder, FolderManager):
-            ifm = inputRunFolder
-        else:
-            ifm = FolderManager(self.toProjectPath(inputRunFolder))
-
-        if dest is None:
-            destFm = self
-        elif isinstance(dest, FolderManager):
-            destFm = dest
-        else:
-            destFm = FolderManager(self.toProjectPath(dest))
-
-        inputs = [self.toProjectPath(ifm.join(self.INPUTS[k])) for k in keys]
-        if m := [fn for fn in inputs if not self.projectExists(fn)]:
-            raise Exception("Missing expected paths: " + str(m))
-
-        def _copyFolder(inputFolder):
-            inputFolder = self.toProjectPath(inputFolder)
-            baseFolder = os.path.basename(inputFolder)
-            inputFm = FolderManager(inputFolder)
-            output_folder = destFm.join(baseFolder)
-            outputFm = FolderManager(output_folder)
-            outputFm.create()
-            for fn in inputFm.listdir():
-                inputPath = self.toProjectPath(inputFm.join(fn))
-                if os.path.isdir(os.path.join(self.workingDir, inputPath)):
-                    if fn.endswith('logs'):
-                        outputFm.mkdir('logs')  # Don't copy logs
-                    else:
-                        self.linkProjectPath(output_folder, inputPath)
-                else:
-                    outputFm.copy(inputPath)
-
-        def _copyMFolder(inputFolder):
-            if dest is not None:
-                raise Exception("Cannot import 'm' folder into a subfolder.")
-            inputFolder = self.toProjectPath(inputFolder)
-            dst = self.mkdir(self.M)
-            rsync_args = [
-                arg for name in self.M_IMPORT_EXCLUDES
-                for arg in ('--exclude', name)
-            ]
-            Path.rsync(
-                self.toProjectPath(inputFolder),
-                dst,
-                *rsync_args,
-            )
-            sources_src = os.path.join(inputFolder, 'sources')
-            if self.projectExists(sources_src):
-                self.linkProjectPath(self.toProjectPath(dst), sources_src,
-                                     name='sources')
-
-        for inputPath in inputs:
-            inputPath = self.toProjectPath(inputPath)
-            if inputPath.endswith('.settings'):
-                destFm.copy(inputPath)
-            elif inputPath.endswith('/m'):
-                _copyMFolder(inputPath)
-            elif inputPath.endswith(self.TS) or inputPath.endswith(self.TM):
-                _copyFolder(inputPath)
-            else:  # warp_frameseries
-                self.linkProjectPath(destFm.path, inputPath)
-
-        # Link input gain file (only at job root)
-        if dest is None and (gain := self.acq.get('gain', None)):
-            self.log(f"{self.name}: Linking gain gain: {gain}")
-            self.link(gain)
+        gain = None if dest else self.acq.get('gain', None)
+        self.log(f"{self.name}: Importing Warp inputs from {inputFolder}")
+        return self.importInputs(_abs(inputFolder), _abs(dest or self.path),
+                                 keys=keys, mutable=mutable,
+                                 gain=_abs(gain) if gain else None)
 
     def prerunTs(self):
         """ Common operations for tilt-series prerun implementation in subclasses. """
