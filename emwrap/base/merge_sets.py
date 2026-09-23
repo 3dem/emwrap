@@ -476,3 +476,4 @@ class MergeSetsPipeline(ProcessingPipeline):
 
 if __name__ == '__main__':
     MergeSetsPipeline.main()
+    
