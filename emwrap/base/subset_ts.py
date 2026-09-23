@@ -24,6 +24,7 @@ from emtools.jobs import NumericList
 from emtools.metadata import StarFile, Table, RelionStar
 
 from emwrap.base import ProcessingPipeline
+from emwrap.warp.warp_subset import WarpSubsetTs
 
 
 OUTPUT_NODE_LABELS = {
@@ -47,6 +48,7 @@ class SubsetTsPipeline(ProcessingPipeline):
     def __init__(self, args, output):
         ProcessingPipeline.__init__(self, args, output)
         self.inputSet = args['input_set']
+
         self.mode = self._parseMode(args.get('mode'))
 
         self.subsetNames = set()
@@ -55,7 +57,8 @@ class SubsetTsPipeline(ProcessingPipeline):
         self.matchSet = ''
 
         if self.mode == MODE_EXPLICIT_NAMES:
-            self.subsetNames = set((args.get('subset_tomo_names') or '').split())
+            names = (args.get('subset_tomo_names') or '').replace(',', ' ')
+            self.subsetNames = set(names.split())
         elif self.mode == MODE_MATCH_SET:
             self.matchSet = (args.get('subset_match_set') or '').strip()
         else:  # MODE_RANDOM
@@ -157,6 +160,31 @@ class SubsetTsPipeline(ProcessingPipeline):
 
         return excludedTiltsMap
 
+    def _getTomogramsStar(self, inputStar):
+        """Return the STAR file containing the global tomogram table."""
+        if not RelionStar.isTomoOptimisationSet(inputStar):
+            return inputStar
+
+        optRow = RelionStar.readTomoOptimisationSet(inputStar)[0]
+        tomoStar = optRow._asdict().get('rlnTomoTomogramsFile', '')
+        if not tomoStar:
+            raise Exception(
+                f"Missing rlnTomoTomogramsFile in optimisation_set STAR "
+                f"file: {inputStar}"
+            )
+        return tomoStar
+
+    def _readGlobalTable(self, starPath):
+        """Read and validate a RELION tomography global table."""
+        table = StarFile.getTableFromFile('global', starPath)
+        if not table:
+            raise Exception(f"Could not read 'global' table from {starPath}")
+        return table
+
+    def _resolveAllTomoNames(self, inputStar):
+        table = self._readGlobalTable(self._getTomogramsStar(inputStar))
+        return {row.rlnTomoName for row in table}
+
     def _filterTiltSeriesStar(self, tomoName, tsStarPath, excludedIds):
         """ Read the per-tilt-series STAR file for 'tomoName', remove the
         rows whose 'rlnTomoTiltMovieIndex' is in 'excludedIds', write the
@@ -216,29 +244,6 @@ class SubsetTsPipeline(ProcessingPipeline):
         shutil.copy2(tsStarPath, self.join(relTsStar))
         return self.fixOutputPath(relTsStar)
 
-    def _resolveAllTomoNames(self, inputStar):
-        """ Return every rlnTomoName found in the relevant 'global' table
-        of 'inputStar' (the tomograms/tilt-series table itself, or, for an
-        optimisation_set, the tomograms table it points to). Used when no
-        'subset_tomo_names' was provided but 'exclude_tilts' was (Mode 0),
-        and to resolve the full universe of tomogram names for Mode 1
-        (match a second set) and Mode 2 (random selection). """
-        if RelionStar.isTomoOptimisationSet(inputStar):
-            optRow = RelionStar.readTomoOptimisationSet(inputStar)[0]
-            tomoStar = optRow._asdict().get('rlnTomoTomogramsFile', '')
-            if not tomoStar:
-                raise Exception(
-                    f"Missing rlnTomoTomogramsFile in optimisation_set STAR "
-                    f"file: {inputStar}")
-        else:
-            tomoStar = inputStar
-
-        table = StarFile.getTableFromFile('global', tomoStar)
-        if not table:
-            raise Exception(f"Could not read 'global' table from {tomoStar}")
-
-        return {row.rlnTomoName for row in table}
-
     def _resolveTomoNamesFromStar(self, starPath, paramLabel):
         """ Return the set of rlnTomoName values found in 'starPath'.
         Accepts the same kind of STAR files as 'input_set' (tilt_series.star,
@@ -249,12 +254,9 @@ class SubsetTsPipeline(ProcessingPipeline):
         if not os.path.exists(starPath):
             raise Exception(f"{paramLabel} STAR file not found: {starPath}")
 
-        lookupStar = starPath
-        if RelionStar.isTomoOptimisationSet(starPath):
-            optRow = RelionStar.readTomoOptimisationSet(starPath)[0]
-            tomoStar = optRow._asdict().get('rlnTomoTomogramsFile', '')
-            if tomoStar:
-                lookupStar = tomoStar
+        lookupStar = (self._getTomogramsStar(starPath)
+                      if RelionStar.isTomoOptimisationSet(starPath)
+                      else starPath)
 
         tables = StarFile.getTablesDict(lookupStar)
 
@@ -275,9 +277,7 @@ class SubsetTsPipeline(ProcessingPipeline):
             f"{paramLabel} STAR file: {lookupStar}")
 
     def _writeFilteredGlobalTable(self, inputStar, outputStar, subsetNames):
-        inputTable = StarFile.getTableFromFile('global', inputStar)
-        if not inputTable:
-            raise Exception(f"Could not read 'global' table from {inputStar}")
+        inputTable = self._readGlobalTable(inputStar)
 
         if self.excludedTiltsMap and not inputTable.hasColumn('rlnTomoTiltSeriesStarFile'):
             raise Exception(
@@ -357,9 +357,7 @@ class SubsetTsPipeline(ProcessingPipeline):
         return 'tilt_series.star'
 
     def _subsetGlobalInput(self, inputStar, subsetNames):
-        inputTable = StarFile.getTableFromFile('global', inputStar)
-        if not inputTable:
-            raise Exception(f"Could not read 'global' table from {inputStar}")
+        inputTable = self._readGlobalTable(inputStar)
 
         inputType = self._detectGlobalTableType(inputStar, inputTable)
         outputStar = self.join(self._outputStarName(inputType))
@@ -373,12 +371,8 @@ class SubsetTsPipeline(ProcessingPipeline):
         optRow = RelionStar.readTomoOptimisationSet(inputStar)[0]
         optValues = optRow._asdict()
 
-        tomoStar = optValues.get('rlnTomoTomogramsFile', '')
+        tomoStar = self._getTomogramsStar(inputStar)
         ptsStar = optValues.get('rlnTomoParticlesFile', '')
-        if not tomoStar:
-            raise Exception(
-                f"Missing rlnTomoTomogramsFile in optimisation_set STAR file: {inputStar}"
-            )
         if not ptsStar:
             raise Exception(
                 f"Missing rlnTomoParticlesFile in optimisation_set STAR file: {inputStar}"
@@ -419,13 +413,26 @@ class SubsetTsPipeline(ProcessingPipeline):
                     "to keep every tomogram and only exclude some tilts, leave "
                     "it empty and use 'exclude_tilts' instead)."
                 )
+
+            allNames = self._resolveAllTomoNames(inputStar)
+
             if not self.subsetNames:
                 # No explicit subset requested, but exclude_tilts was: keep
                 # every tomogram found in the input set.
-                self.subsetNames = self._resolveAllTomoNames(inputStar)
+                self.subsetNames = allNames
                 self.log("No 'subset_tomo_names' provided; keeping all "
                          f"{Color.green(len(self.subsetNames))} tomogram(s) "
                          "found in the input set.")
+            else:
+                missing = sorted(self.subsetNames - allNames)
+
+                if missing:
+                    raise Exception(
+                        "The following requested tomogram name(s) were not found "
+                        f"in the input set: {', '.join(missing)}. "
+                        "Available rlnTomoName values are: "
+                        f"{', '.join(sorted(allNames))}"
+                    )
 
         elif self.mode == MODE_MATCH_SET:
             if not self.matchSet:
@@ -468,6 +475,7 @@ class SubsetTsPipeline(ProcessingPipeline):
             raise Exception(f"Input STAR file not found: {self.inputSet}")
 
         inputStar = self.inputSet
+        isOptimisationSet = RelionStar.isTomoOptimisationSet(inputStar)
 
         self._resolveSubsetNames(inputStar)
 
@@ -476,37 +484,68 @@ class SubsetTsPipeline(ProcessingPipeline):
                  f"{Color.cyan(' '.join(sorted(self.subsetNames)))}")
 
         if self.excludedTiltsMap:
-            unknown = sorted(set(self.excludedTiltsMap) - self.subsetNames)
+            unknown = sorted(
+                set(self.excludedTiltsMap) - self.subsetNames
+            )
             if unknown:
                 raise Exception(
                     "exclude_tilts references tomogram name(s) not found in "
-                    f"the input set: {', '.join(unknown)}"
+                    f"the output subset: {', '.join(unknown)}"
                 )
+
             summary = ', '.join(
                 f"{name}: {sorted(ids)}"
-                for name, ids in sorted(self.excludedTiltsMap.items()))
-            self.log(f"Excluding tilts for {Color.green(len(self.excludedTiltsMap))} "
-                     f"tomogram(s): {Color.cyan(summary)}")
+                for name, ids in sorted(self.excludedTiltsMap.items())
+            )
+            self.log(
+                f"Excluding tilts for "
+                f"{Color.green(len(self.excludedTiltsMap))} "
+                f"tomogram(s): {Color.cyan(summary)}"
+            )
 
-        if RelionStar.isTomoOptimisationSet(inputStar):
-            inputType, count = self._subsetOptimisationSet(inputStar, self.subsetNames)
+        # Existing RELION subset behavior remains unchanged.
+        if isOptimisationSet:
+            inputType, count = self._subsetOptimisationSet(
+                inputStar,
+                self.subsetNames
+            )
         else:
-            inputType, count = self._subsetGlobalInput(inputStar, self.subsetNames)
+            inputType, count = self._subsetGlobalInput(
+                inputStar,
+                self.subsetNames
+            )
 
-        self.inputs = {'input_set': self.inputSet,
-                       'mode': self.mode,
-                       'subset_tomo_names': sorted(self.subsetNames),
-                       'exclude_tilts': {name: sorted(ids) for name, ids in
-                                        self.excludedTiltsMap.items()}}
+        if WarpSubsetTs.hasState(inputStar):
+            warpSubset = WarpSubsetTs(self._args, self.outputDir)
+            warpSubset.apply(self.subsetNames, self.excludedTiltsMap)
+
+        self.inputs = {
+            'input_set': self.inputSet,
+            'mode': self.mode,
+            'subset_tomo_names': sorted(self.subsetNames),
+            'exclude_tilts': {
+                name: sorted(ids)
+                for name, ids in self.excludedTiltsMap.items()
+            }
+        }
+
         if self.mode == MODE_MATCH_SET:
             self.inputs['subset_match_set'] = self.matchSet
         elif self.mode == MODE_RANDOM:
             self.inputs['subset_random_count'] = self.randomCount
             self.inputs['subset_random_seed'] = self.randomSeed
 
-        self.outputs = {'type': inputType, 'count': count}
+        self.outputs = {
+            'type': inputType,
+            'count': count
+        }
+
         self.writeInfo()
-        self.log(f"Created {inputType} subset with {Color.green(count)} item(s).")
+
+        self.log(
+            f"Created {inputType} subset with "
+            f"{Color.green(count)} item(s)."
+        )
 
 
 if __name__ == '__main__':

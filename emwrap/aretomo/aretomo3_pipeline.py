@@ -140,7 +140,7 @@ class AreTomo3Pipeline(ProcessingPipeline):
         """
         dose = self.acq.get('total_dose', None)
         if dose in ('', None):
-            self.log("WARNING: Could not find total dose per tilt in acquisition.")
+            self.log("WARNING: Could not find total dose per tilt in acquisition.", flush=True)
         return dose
 
     def _get_frame_dose(self, movieFile):
@@ -154,7 +154,7 @@ class AreTomo3Pipeline(ProcessingPipeline):
             return frameDose
         except (TypeError, ValueError, IndexError):
             self.log(
-                f"WARNING: Could not parse frame count from dimensions for {movieFile}: {dims}")
+                f"WARNING: Could not parse frame count from dimensions for {movieFile}: {dims}", flush=True)
             return None
 
     @staticmethod
@@ -959,7 +959,7 @@ class AreTomo3Pipeline(ProcessingPipeline):
                 Input tilt-series rows that failed registration.
         """
 
-        self.log("Registering output STAR files.")
+        self.log("Registering output STAR files.", flush=True)
 
         alignedStarFile = self.join('aligned_tilt_series.star')
         failedStarFile = self.join('failed_tilt_series.star')
@@ -991,12 +991,12 @@ class AreTomo3Pipeline(ProcessingPipeline):
         for tsName, result in self._allResults.items():
             tsRow = inputByName.get(tsName, None)
             if tsRow is None:
-                self.log(f"WARNING: Result for unknown tilt series {tsName}, skipping.")
+                self.log(f"WARNING: Result for unknown tilt series {tsName}, skipping.", flush=True)
                 continue
 
             if newTsPs is None:
                 newTsPs = self._registeredTsPs(tsRow)
-                self.log(f"New target tilt series pixel size: {newTsPs:0.3f} Å/px")
+                self.log(f"New target tilt series pixel size: {newTsPs:0.3f} Å/px", flush=True)
 
             if 'error' in result:
                 failedTable.addRowValues(**tsRow._asdict())
@@ -1004,7 +1004,7 @@ class AreTomo3Pipeline(ProcessingPipeline):
 
             tsAligned = result.get('rlnTiltSeriesAligned', None)
             if tsAligned is None or not os.path.exists(tsAligned):
-                self.log(f"Missing aligned tilt series for {tsName}, marking failed.")
+                self.log(f"Missing aligned tilt series for {tsName}, marking failed.", flush=True)
                 failedTable.addRowValues(**tsRow._asdict())
                 continue
 
@@ -1032,6 +1032,7 @@ class AreTomo3Pipeline(ProcessingPipeline):
 
             tomogram = result.get('rlnTomoReconstructedTomogram', None)
             if tomogram and os.path.exists(tomogram):
+                self.log(f"Found reconstructed tomogram for {tsName}: {tomogram}", flush=True)
                 haveTomograms = True
                 tomDimsThis = Image.get_dimensions(tomogram)
                 if tomDims is None:
