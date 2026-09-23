@@ -615,7 +615,7 @@ class DenoisET(ProcessingPipeline):
     def _wait_for_input_table(self):
         table = self._getInputTomTable()
         while table is None:
-            self.log('No input found yet, sleeping 30s')
+            self.log('No input found yet, sleeping 30s', flush=True)
             time.sleep(30)
             table = self._getInputTomTable()
         return table
@@ -784,14 +784,15 @@ class DenoisET(ProcessingPipeline):
                 rows = self._get_qualifying_tomograms(rows)
                 self.log(f"Quality metrics: {len(rows)}/{n} "
                           f"tomograms currently pass the configured "
-                          f"thresholds (need {self.n_training}).")  
+                          f"thresholds (need {self.n_training}).", 
+                          flush=True)
 
             return rows[:self.n_training]
 
         rows = _get_training_rows()
 
         while len(rows) < self.n_training:            
-            self.log(f"Waiting for enough tomograms ({len(rows)}/{self.n_training})")            
+            self.log(f"Waiting for enough tomograms ({len(rows)}/{self.n_training})", flush=True)
             time.sleep(30)
             rows = _get_training_rows()
 
@@ -807,7 +808,7 @@ class DenoisET(ProcessingPipeline):
             return
 
         self.inputTomTable = self._wait_for_input_table()
-        self.log(f"Found input tomograms: {len(self.inputTomTable)}")
+        self.log(f"Found input tomograms: {len(self.inputTomTable)}", flush=True)
 
         do_train = mode in [self.MODE_TRAIN_ONLY, self.MODE_TRAIN_AND_INFER]
         do_infer = mode in [self.MODE_INFER_ONLY, self.MODE_TRAIN_AND_INFER]
@@ -818,11 +819,11 @@ class DenoisET(ProcessingPipeline):
                 raise Exception(f"Metrics file not found: {self.metricsFile}")
 
             trainingSubset = self._wait_for_training_set()
-            self.log(f"Starting training with {len(trainingSubset)} tomograms")
+            self.log(f"Starting training with {len(trainingSubset)} tomograms", flush=True)
 
             self.modelPath = self.launch_training(trainingSubset)
 
-            self.log(f"Training finished. Best model: {self.modelPath}")
+            self.log(f"Training finished. Best model: {self.modelPath}", flush=True)
             self.modelNode = [self.modelPath, 'TomogramGroupMetadata.star.relion.tomo.DenoisETModel']
 
             if not do_infer:
@@ -836,7 +837,7 @@ class DenoisET(ProcessingPipeline):
                 raise Exception(f"Selected model not found: {self.modelPath}")
 
         if do_infer:
-            self.log(f"Using model for inference: {self.modelPath}")
+            self.log(f"Using model for inference: {self.modelPath}", flush=True)
             self.mkdir(self.outputTomDir)
 
             monitor = StarMonitor(inputToms, 'global',

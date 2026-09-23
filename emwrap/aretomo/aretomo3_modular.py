@@ -298,7 +298,7 @@ class Aretomo3ModularBase(AreTomo3Pipeline):
     def prerun(self):
         self.inputTsTable = self._getInputTsTable()
         self.inputTs = self._args['input_tiltseries']
-        print(f"Input tilt-series: {len(self.inputTsTable)}")
+        self.log(f"Input tilt-series: {len(self.inputTsTable)}", flush=True)
 
         if self.registerOnly:
             self._register_existing_final_outputs()

@@ -55,59 +55,248 @@ class WarpBasePipeline(ProcessingPipeline):
         M: M
     }
 
+    FRAME_STATE_KEYS = {'fs', 'fss', FRAMES}
+    TILT_STATE_KEYS = {'ts', 'tss', 'tm'}
+
+    STATE_KEYS = (
+        'fs', 'fss',
+        'ts', 'tss',
+        'tm',
+        FRAMES, MDOCS
+    )
+    WARP_SPECIFIC_STATE_KEYS = {'fs', 'fss', 'ts', 'tss', 'tm'}
+
     @classmethod
-    def copyInputs(cls, inputFolder, outputFolder, keys=None, gain=None, force=False):
-        """ Inspect the input run folder and copy or link input folder/files
-        if necessary.
+    def detectState(cls, folder):
+        """Return Warp state keys found in ``folder``.
+
+        Generic ``frames`` or ``mdocs`` folders alone are not enough to
+        identify a Warp job. At least one Warp-specific state path must be
+        present.
+        """
+        fm = folder if isinstance(folder, FolderManager) else FolderManager(folder)
+        keys = {
+            key
+            for key in cls.STATE_KEYS
+            if os.path.exists(fm.join(cls.INPUTS[key]))
+        }
+        return keys if keys & cls.WARP_SPECIFIC_STATE_KEYS else set()
+
+    @classmethod
+    def validateState(cls, keys):
+        """Return ``(hasFrameState, hasTiltState)`` for detected Warp keys.
+
+        Partial frame- or tilt-series state is treated as invalid because
+        WarpTools would otherwise resolve relative settings paths against an
+        incomplete job structure.
+        """
+        keys = set(keys)
+        framePresent = cls.FRAME_STATE_KEYS & keys
+        tiltPresent = cls.TILT_STATE_KEYS & keys
+
+        if framePresent and not cls.FRAME_STATE_KEYS.issubset(keys):
+            missing = cls.FRAME_STATE_KEYS - keys
+            raise Exception(
+                "Incomplete Warp frame-series state. Missing: "
+                + ', '.join(sorted(missing))
+            )
+
+        if tiltPresent and not cls.TILT_STATE_KEYS.issubset(keys):
+            missing = cls.TILT_STATE_KEYS - keys
+            raise Exception(
+                "Incomplete Warp tilt-series state. Missing: "
+                + ', '.join(sorted(missing))
+            )
+
+        hasFrames = cls.FRAME_STATE_KEYS.issubset(keys)
+        hasTilts = cls.TILT_STATE_KEYS.issubset(keys)
+
+        if not hasFrames and not hasTilts:
+            raise Exception("No usable Warp state was found.")
+
+        return hasFrames, hasTilts
+
+    @classmethod
+    def importInputs(cls, inputFolder, outputFolder, keys=None,
+                     mutable=False, gain=None):
+        """Copy/link Warp inputs from a previous job folder into another one.
+
+        Settings files are copied. ``warp_tiltseries`` and ``warp_tomostar``
+        are shallow-copied: root files are copied, nested directories are
+        linked and ``logs`` folders are recreated empty. ``m`` is rsync-ed
+        (with ``sources`` linked) and every other input is linked.
+        Existing destinations are replaced.
 
         Args:
-            inputFolder: the input folder containing settings and xml files
-            outputFolder: should not exist. It will be created and setup
-                as a proper warp folder to run commands.
-            keys: input keys to import, if None, all inputs will be imported
-            gain: if not None, it will be linked
-            force: if True, the output folder will be clean if exists.
+            inputFolder: previous Warp job folder.
+            outputFolder: destination folder, created if missing.
+            keys: ``INPUTS`` keys to import, by default all except ``m``.
+            mutable: shallow-copy ``warp_frameseries`` too. Required before
+                commands such as ``WarpTools change_selection`` that modify
+                the per-item XML files stored at its root.
+            gain: optional gain file to link into ``outputFolder``.
+
+        Returns:
+            The set of imported keys.
         """
-        keys = cls.INPUTS.keys() if keys is None else keys
+        if keys is None:
+            keys = [k for k in cls.INPUTS if k != cls.M]
 
-        def _getFM(i):
-            return i if isinstance(i, FolderManager) else FolderManager(i)
+        inputFolder = getattr(inputFolder, 'path', inputFolder)
+        outputFolder = getattr(outputFolder, 'path', outputFolder)
 
-        ifm = _getFM(inputFolder)
-        ofm = _getFM(outputFolder)
+        if not os.path.isdir(inputFolder):
+            raise Exception(f"Input Warp folder does not exist: {inputFolder}")
 
-        if ofm.exists() and not force:
-            raise Exception("Output folder already exist.")
+        inputPaths = {k: os.path.join(inputFolder, cls.INPUTS[k]) for k in keys}
+        if missing := [p for p in inputPaths.values() if not os.path.exists(p)]:
+            raise Exception("Missing expected paths: " + str(missing))
 
-        ofm.create()
+        os.makedirs(outputFolder, exist_ok=True)
 
-        inputs = [ifm.join(cls.INPUTS[k]) for k in keys]
-        if m := [fn for fn in inputs if not os.path.exists(fn)]:
-            raise Exception("Missing expected paths: " + str(m))
+        def _replace(dst):
+            if os.path.islink(dst) or os.path.isfile(dst):
+                os.unlink(dst)
+            elif os.path.isdir(dst):
+                shutil.rmtree(dst)
 
-        def _copyFolder(inputFolder):
-            baseFolder = os.path.basename(inputFolder)
-            inputFm = FolderManager(inputFolder)
-            outputFm = FolderManager(ofm.join(baseFolder))
-            outputFm.create()
-            for fn in inputFm.listdir():
-                inputPath = inputFm.join(fn)
-                if os.path.isdir(inputPath):
-                    outputFm.link(inputPath)
+        def _link(src, folder=outputFolder):
+            dst = os.path.join(folder, os.path.basename(src))
+            _replace(dst)
+            os.symlink(os.path.relpath(src, folder), dst)
+
+        def _copyFile(src):
+            _replace(os.path.join(outputFolder, os.path.basename(src)))
+            shutil.copy(src, outputFolder)
+
+        def _copyFolder(src):
+            dst = os.path.join(outputFolder, os.path.basename(src))
+            _replace(dst)
+            os.makedirs(dst)
+            for fn in os.listdir(src):
+                path = os.path.join(src, fn)
+                if not os.path.isdir(path):
+                    shutil.copy(path, dst)
+                elif fn.endswith('logs'):
+                    os.mkdir(os.path.join(dst, fn))
                 else:
-                    outputFm.copy(inputPath)
+                    _link(path, dst)
 
-        for inputPath in inputs:
-            if inputPath.endswith('.settings'):
-                ofm.copy(inputPath)
-            elif inputPath.endswith(cls.TS):
-                _copyFolder(inputPath)
-            else:  # warp_frameseries and warp_tomostar
-                ofm.link(inputPath)
+        def _copyMFolder(src):
+            dst = os.path.join(outputFolder, cls.M)
+            os.makedirs(dst, exist_ok=True)
+            excludes = [arg for name in cls.M_IMPORT_EXCLUDES
+                        for arg in ('--exclude', name)]
+            Path.rsync(src, dst, *excludes)
+            if os.path.exists(sources := os.path.join(src, 'sources')):
+                _link(sources, dst)
 
-        # Link input gain file
+        for key, src in inputPaths.items():
+            if src.endswith('.settings'):
+                _copyFile(src)
+            elif key == cls.M:
+                _copyMFolder(src)
+            elif key in ('ts', 'tm') or (key == 'fs' and mutable):
+                _copyFolder(src)
+            else:
+                _link(src)
+
         if gain:
-            ofm.link(gain)
+            _link(gain)
+
+        return set(keys)
+
+    @classmethod
+    def filterTomostars(cls, folder, tomoNames):
+        """Keep only selected ``*.tomostar`` files in ``warp_tomostar``.
+        ``warp_tomostar`` is already imported as a private shallow copy before
+        this method is called. Filtering it in place keeps downstream WarpTools
+        tilt-series discovery consistent with the requested subset while
+        leaving any other files or linked subdirectories untouched.
+
+        Args:
+            folder: job folder containing ``warp_tomostar``.
+            tomoNames: iterable of ``rlnTomoName`` values to keep.
+
+        Returns:
+            The set of removed tomostar file names.
+        """
+        folder = getattr(folder, 'path', folder)
+        tomostarFolder = os.path.join(folder, cls.TM)
+
+        if not os.path.isdir(tomostarFolder):
+            raise Exception(
+                f"Missing Warp tomostar folder: {tomostarFolder}"
+            )
+
+        keep = {f'{name}.tomostar' for name in tomoNames}
+        existing = {
+            fn for fn in os.listdir(tomostarFolder)
+            if fn.endswith('.tomostar')
+        }
+
+        if missing := sorted(keep - existing):
+            raise Exception(
+                "Missing expected Warp tomostar file(s): "
+                + ', '.join(missing)
+            )
+
+        removed = existing - keep
+        for fileName in sorted(removed):
+            os.unlink(os.path.join(tomostarFolder, fileName))
+
+        return removed
+
+    @classmethod
+    def changeSelectionArgs(cls, settings, inputData,
+                            select=False, deselect=False):
+        """Build arguments for ``WarpTools change_selection``.
+
+        Exactly one of ``select`` and ``deselect`` must be True.
+        ``inputData`` may be a single path or a sequence of paths.
+        """
+        if bool(select) == bool(deselect):
+            raise ValueError(
+                "Exactly one of 'select' or 'deselect' must be True."
+            )
+
+        if isinstance(inputData, str):
+            inputData = [inputData]
+
+        inputData = [
+            str(path).strip()
+            for path in (inputData or [])
+            if str(path).strip()
+        ]
+
+        if not inputData:
+            raise ValueError(
+                "change_selection requires at least one input data path."
+            )
+
+        args = Args({
+            'WarpTools': 'change_selection',
+            '--settings': settings,
+            '--input_data': inputData,
+        })
+        args['--select' if select else '--deselect'] = ''
+        return args
+
+    @classmethod
+    def frameSelectionPath(cls, moviePath):
+        """Return a frame-series --input_data path for change_selection."""
+        return os.path.join(
+            cls.FRAMES,
+            os.path.basename(str(moviePath))
+        )
+
+    @classmethod
+    def tiltSeriesSelectionPath(cls, tomoName):
+        """Return a tilt-series --input_data path for change_selection."""
+        return os.path.join(
+            cls.TM,
+            f'{tomoName}.tomostar'
+        )
 
     def _get_acquisition_input_star(self):
         """Return a Relion STAR file path used to load acquisition metadata."""
@@ -129,86 +318,21 @@ class WarpBasePipeline(ProcessingPipeline):
         else:
             self.gain = None
 
-    def _importInputs(self, inputRunFolder, keys=None, dest=None):
-        """ Inspect the input run folder and copy or link input folder/files
-        if necessary. If gain is present in the acquisition, it will be linked.
-
-        Args:
-            inputRunFolder: the input run folder
-            keys: input keys to import, if None, all inputs will be imported
-            dest: optional destination folder (defaults to the job folder)
+    def _importInputs(self, inputFolder, keys=None, dest=None, mutable=False):
+        """ Import Warp inputs (see ``importInputs``) from a previous job
+        folder into this job folder, or into its ``dest`` subfolder.
+        Paths are resolved from the project root, and the acquisition gain
+        is linked only when importing into the job root.
         """
-        print(f"{self.name}: Import inputs ", self.gain)
-        if keys is None:
-            keys = [k for k in self.INPUTS if k != self.M]  # all keys except m
+        def _abs(path):
+            path = getattr(path, 'path', path)
+            return os.path.join(self.workingDir, self.toProjectPath(path))
 
-        if isinstance(inputRunFolder, FolderManager):
-            ifm = inputRunFolder
-        else:
-            ifm = FolderManager(self.toProjectPath(inputRunFolder))
-
-        if dest is None:
-            destFm = self
-        elif isinstance(dest, FolderManager):
-            destFm = dest
-        else:
-            destFm = FolderManager(self.toProjectPath(dest))
-
-        inputs = [self.toProjectPath(ifm.join(self.INPUTS[k])) for k in keys]
-        if m := [fn for fn in inputs if not self.projectExists(fn)]:
-            raise Exception("Missing expected paths: " + str(m))
-
-        def _copyFolder(inputFolder):
-            inputFolder = self.toProjectPath(inputFolder)
-            baseFolder = os.path.basename(inputFolder)
-            inputFm = FolderManager(inputFolder)
-            output_folder = destFm.join(baseFolder)
-            outputFm = FolderManager(output_folder)
-            outputFm.create()
-            for fn in inputFm.listdir():
-                inputPath = self.toProjectPath(inputFm.join(fn))
-                if os.path.isdir(os.path.join(self.workingDir, inputPath)):
-                    if fn.endswith('logs'):
-                        outputFm.mkdir('logs')  # Don't copy logs
-                    else:
-                        self.linkProjectPath(output_folder, inputPath)
-                else:
-                    outputFm.copy(inputPath)
-
-        def _copyMFolder(inputFolder):
-            if dest is not None:
-                raise Exception("Cannot import 'm' folder into a subfolder.")
-            inputFolder = self.toProjectPath(inputFolder)
-            dst = self.mkdir(self.M)
-            rsync_args = [
-                arg for name in self.M_IMPORT_EXCLUDES
-                for arg in ('--exclude', name)
-            ]
-            Path.rsync(
-                self.toProjectPath(inputFolder),
-                dst,
-                *rsync_args,
-            )
-            sources_src = os.path.join(inputFolder, 'sources')
-            if self.projectExists(sources_src):
-                self.linkProjectPath(self.toProjectPath(dst), sources_src,
-                                     name='sources')
-
-        for inputPath in inputs:
-            inputPath = self.toProjectPath(inputPath)
-            if inputPath.endswith('.settings'):
-                destFm.copy(inputPath)
-            elif inputPath.endswith('/m'):
-                _copyMFolder(inputPath)
-            elif inputPath.endswith(self.TS) or inputPath.endswith(self.TM):
-                _copyFolder(inputPath)
-            else:  # warp_frameseries
-                self.linkProjectPath(destFm.path, inputPath)
-
-        # Link input gain file (only at job root)
-        if dest is None and (gain := self.acq.get('gain', None)):
-            self.log(f"{self.name}: Linking gain gain: {gain}")
-            self.link(gain)
+        gain = None if dest else self.acq.get('gain', None)
+        self.log(f"{self.name}: Importing Warp inputs from {inputFolder}")
+        return self.importInputs(_abs(inputFolder), _abs(dest or self.path),
+                                 keys=keys, mutable=mutable,
+                                 gain=_abs(gain) if gain else None)
 
     def prerunTs(self):
         """ Common operations for tilt-series prerun implementation in subclasses. """

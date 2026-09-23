@@ -142,7 +142,7 @@ class MissAlignment(WarpBasePipeline):
         ]
 
         if all(os.path.exists(path) for path in expected):
-            self.log('Using the existing local Warp project for resume/re-registration.')
+            self.log('Using the existing local Warp project for resume/re-registration.', flush=True)
             return
 
         present = [path for path in expected if os.path.exists(path)]
@@ -188,8 +188,7 @@ class MissAlignment(WarpBasePipeline):
         if glob(os.path.join(output_directory, '*.xml')):
             self.log(
                 'Using the existing relion-warp-convert project for '
-                'resume/re-registration.'
-            )
+                'resume/re-registration.', flush=True)
             return
 
         os.makedirs(output_directory, exist_ok=True)
@@ -220,7 +219,7 @@ class MissAlignment(WarpBasePipeline):
             'Running relion-warp-convert import: '
             f'input_star={self.inputTs}, output_directory={output_directory}, '
             f'tomogram_size=({geometry.volume_x},{geometry.volume_y},{geometry.volume_z}), '
-            f'stack_pixel_size={stack_pixel_size}'
+            f'stack_pixel_size={stack_pixel_size}', flush=True
         )
 
         self.batch_execute(
@@ -297,8 +296,7 @@ class MissAlignment(WarpBasePipeline):
         if (overrides.volume_x is None) != (overrides.volume_y is None):
             self.log(
                 'Only one tomogram X/Y value was supplied; inferring both '
-                'volume dimensions from the input tilt-series stack.'
-            )
+                'volume dimensions from the input tilt-series stack.', flush=True)
 
         return overrides
 
@@ -527,8 +525,7 @@ class MissAlignment(WarpBasePipeline):
             
         self.log(
             f'Prepared Miss-Alignment training set with '
-            f'{len(training_names)} tilt series in: {training_dir}'
-        )
+            f'{len(training_names)} tilt series in: {training_dir}', flush=True)
         return training_dir
 
     # ------------------------------------------------------------------
@@ -1046,7 +1043,7 @@ class MissAlignment(WarpBasePipeline):
         args.update(extra_args)
         try:
             label = f'miss_alignment_{mode}'
-            self.log(f'Running {label}, args: {args}')
+            self.log(f'Running {label}, args: {args}', flush=True)
             self.batch_execute(
                 label,
                 batch,
@@ -1130,7 +1127,7 @@ class MissAlignment(WarpBasePipeline):
     def _wait_for_input_table(self):
         table = self._getInputTsTable()
         while table is None:
-            self.log('No input found yet, sleeping 30s')
+            self.log('No input found yet, sleeping 30s', flush=True)
             time.sleep(30)
             table = self._getInputTsTable()
         return table
@@ -1146,7 +1143,8 @@ class MissAlignment(WarpBasePipeline):
 
             self.log(
                 f'Waiting for enough tilt series '
-                f'({len(rows)}/{self.n_training})'
+                f'({len(rows)}/{self.n_training})', 
+                flush=True
             )
             time.sleep(30)
 
@@ -1189,7 +1187,7 @@ class MissAlignment(WarpBasePipeline):
 
         self.log(
             f'Miss-Alignment training finished. '
-            f'Best model: {trainingBestModel}')
+            f'Best model: {trainingBestModel}', flush=True)
 
         self.updateBatchInfo(batch)
 
@@ -1199,7 +1197,7 @@ class MissAlignment(WarpBasePipeline):
         """Prepare the full Warp dataset and launch Miss-Alignment inference."""
         
         self.log('Launching Miss-Alignment inference with model run: '
-            f'{model_run_directory}')
+            f'{model_run_directory}', flush=True)
 
         batch = Batch(id=self.name, path=self.path)
 
@@ -1225,7 +1223,7 @@ class MissAlignment(WarpBasePipeline):
         self._validate_inference_output(data_directory, n_iter)
         
         self.log('Miss-Alignment inference finished. '
-                f'Aligned snapshots are in: {data_directory}/iterN/')
+                f'Aligned snapshots are in: {data_directory}/iterN/', flush=True)
 
         # Export the refined Warp XML files through relion-warp-convert.
         converter_output_star = self._run_relion_warp_convert_export(
