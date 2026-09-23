@@ -49,11 +49,8 @@ class WarpSubsetTs(WarpBasePipeline):
         return bool(cls.detectState(os.path.dirname(inputSet)))
 
     def apply(self, subsetNames, excludedTiltsMap=None):
-        """ Import the Warp state into this job folder and deselect the
-        frame-series and tilt-series items that are not part of the subset.
-
-        Must be called with the ORIGINAL input metadata, before any
-        per-tomogram tilt-series STAR paths are rewritten.
+        """ Import the Warp state, synchronize its selection state, and
+        restrict downstream tilt-series processing to the selected subset.
         """
         excludedTiltsMap = excludedTiltsMap or {}
 
@@ -65,11 +62,25 @@ class WarpSubsetTs(WarpBasePipeline):
                 "supported by this subset job."
             )
 
-        self._importState(subsetNames)
+        # Import the complete Warp state first so change_selection can access
+        # every frame/tomostar that needs to be deselected.
+        self._importState()
+
         plan = self._buildSelectionPlan(subsetNames, excludedTiltsMap)
         self._applySelectionPlan(plan)
 
-    def _importState(self, subsetNames):
+        # Once Warp's selection metadata has been updated, restrict the
+        # tomostar folder to the actual subset. Downstream tilt-series commands
+        # discover their inputs from this folder.
+        if self.hasTilts:
+            self.filterTomostars(self, subsetNames)
+
+            self.log(
+                f"Filtered Warp tomostars to "
+                f"{Color.green(len(subsetNames))} selected tilt series."
+            )
+
+    def _importState(self):
         """ Import mutable Warp state detected next to the input STAR. """
         sourceKeys = self.detectState(self.inputFolder)
         self.hasFrames, self.hasTilts = self.validateState(sourceKeys)
@@ -79,19 +90,11 @@ class WarpSubsetTs(WarpBasePipeline):
             f"{Color.cyan(self.inputFolder)}", flush=True
         )
 
-        copyKeys = set(sourceKeys)
-
-        # warp_tomostar controls which tilt series WarpTools discovers for
-        # commands such as ts_ctf and ts_reconstruct. Do not copy/link the full
-        # upstream folder; create a private filtered folder instead.
-        hasTomostarState = 'tm' in copyKeys
-        copyKeys.discard('tm')
-
-        if copyKeys:
-            self._importInputs(self.inputFolder, keys=copyKeys, mutable=True)
-
-        if hasTomostarState:
-            self.copyTomostars(self.inputFolder, self, subsetNames)
+        self._importInputs(
+            self.inputFolder,
+            keys=sourceKeys,
+            mutable=True
+        )
 
         self.stateKeys = set(sourceKeys)
 
