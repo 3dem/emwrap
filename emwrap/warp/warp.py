@@ -207,64 +207,45 @@ class WarpBasePipeline(ProcessingPipeline):
         return set(keys)
 
     @classmethod
-    def copyTomostars(cls, inputFolder, outputFolder, tomoNames, force=False):
-        """Copy selected ``*.tomostar`` files into a private Warp folder.
-
-        The file membership of ``warp_tomostar`` is used by several WarpTools
-        tilt-series commands to discover input items. A subset job therefore
-        needs its own filtered folder rather than a link to the complete
-        upstream ``warp_tomostar`` directory.
+    def filterTomostars(cls, folder, tomoNames):
+        """Keep only selected ``*.tomostar`` files in ``warp_tomostar``.
+        ``warp_tomostar`` is already imported as a private shallow copy before
+        this method is called. Filtering it in place keeps downstream WarpTools
+        tilt-series discovery consistent with the requested subset while
+        leaving any other files or linked subdirectories untouched.
 
         Args:
-            inputFolder:
-                Previous Warp job folder containing ``warp_tomostar``.
-            outputFolder:
-                Destination job folder.
-            tomoNames:
-                Iterable of rlnTomoName values to keep.
-            force:
-                Replace an existing destination ``warp_tomostar`` folder.
+            folder: job folder containing ``warp_tomostar``.
+            tomoNames: iterable of ``rlnTomoName`` values to keep.
 
         Returns:
-            The destination ``warp_tomostar`` path.
+            The set of removed tomostar file names.
         """
-        ifm = (inputFolder if isinstance(inputFolder, FolderManager)
-               else FolderManager(inputFolder))
-        ofm = (outputFolder if isinstance(outputFolder, FolderManager)
-               else FolderManager(outputFolder))
+        folder = getattr(folder, 'path', folder)
+        tomostarFolder = os.path.join(folder, cls.TM)
 
-        inputTm = ifm.join(cls.TM)
-        if not os.path.isdir(inputTm):
+        if not os.path.isdir(tomostarFolder):
             raise Exception(
-                f"Missing Warp tomostar folder: {inputTm}"
+                f"Missing Warp tomostar folder: {tomostarFolder}"
             )
 
-        outputTm = ofm.join(cls.TM)
-        if os.path.lexists(outputTm):
-            if not force:
-                raise Exception(
-                    f"Warp tomostar destination already exists: {outputTm}"
-                )
-            if os.path.islink(outputTm) or os.path.isfile(outputTm):
-                os.unlink(outputTm)
-            else:
-                shutil.rmtree(outputTm)
+        keep = {f'{name}.tomostar' for name in tomoNames}
+        existing = {
+            fn for fn in os.listdir(tomostarFolder)
+            if fn.endswith('.tomostar')
+        }
 
-        outputTmFm = FolderManager(outputTm)
-        outputTmFm.create()
+        if missing := sorted(keep - existing):
+            raise Exception(
+                "Missing expected Warp tomostar file(s): "
+                + ', '.join(missing)
+            )
 
-        for tomoName in sorted(set(tomoNames)):
-            fileName = f'{tomoName}.tomostar'
-            src = os.path.join(inputTm, fileName)
+        removed = existing - keep
+        for fileName in sorted(removed):
+            os.unlink(os.path.join(tomostarFolder, fileName))
 
-            if not os.path.isfile(src):
-                raise Exception(
-                    f"Missing Warp tomostar for '{tomoName}': {src}"
-                )
-
-            outputTmFm.copy(src)
-
-        return outputTm
+        return removed
 
     @classmethod
     def changeSelectionArgs(cls, settings, inputData,

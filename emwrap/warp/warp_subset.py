@@ -73,12 +73,7 @@ class WarpSubsetTs(WarpBasePipeline):
         # tomostar folder to the actual subset. Downstream tilt-series commands
         # discover their inputs from this folder.
         if self.hasTilts:
-            self.copyTomostars(
-                self.inputFolder,
-                self,
-                subsetNames,
-                force=True
-            )
+            self.filterTomostars(self, subsetNames)
 
             self.log(
                 f"Filtered Warp tomostars to "
