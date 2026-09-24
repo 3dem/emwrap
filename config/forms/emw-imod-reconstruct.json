@@ -64,10 +64,10 @@
                             "help": "Register output STAR files without running IMOD."
                         },
                         {
-                            "name": "launcher_batchtomo",
-                            "label": "batchruntomo",
+                            "name": "launcher_imod",
+                            "label": "IMOD",
                             "paramClass": "StringParam",
-                            "help": "Launcher to use for IMOD batchruntomo. Leave empty to use EMWRAP_CONFIG default."
+                            "help": "Launcher to use for IMOD programs (batchruntomo is run through it). Leave empty to use EMWRAP_CONFIG default."
                         }
                     ]
                 }

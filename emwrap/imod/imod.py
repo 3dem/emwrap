@@ -31,9 +31,9 @@ class ImodTomoReconstruct:
         self.height = int(kwargs['tomogram_height'])
         self.start_step = float(kwargs.get('starting_step', 8))
         self.end_step = float(kwargs.get('ending_step', 14))
-        self.launcher_batchtomo = (
-            kwargs.get('launcher_batchtomo')
-            or ProcessingPipeline.get_launcher('BATCHTOMO')
+        self.launcher_imod = (
+            kwargs.get('launcher_imod')
+            or ProcessingPipeline.get_launcher('IMOD')
         )
 
     @staticmethod
@@ -84,6 +84,7 @@ class ImodTomoReconstruct:
         logfile = batch.join('batchruntomo.log')
 
         args = [
+            'batchruntomo',
             '-DirectiveFile', edf_file,
             '-CurrentLocation', imod_dir,
             '-RootName', ts_name,
@@ -92,7 +93,7 @@ class ImodTomoReconstruct:
             extra_edf,
         ]
 
-        batch.call(self.launcher_batchtomo, args, logfile=logfile, cwd=False)
+        batch.call(self.launcher_imod, args, logfile=logfile, cwd=False)
 
         aligned_stack = self._find_file(imod_dir, ts_name, self.ALIGNED_PATTERNS)
         tomogram = self._find_file(imod_dir, ts_name, self.TOMO_PATTERNS)
