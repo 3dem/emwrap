@@ -304,6 +304,13 @@ class WarpMtoolsCreate(WarpBasePipeline):
         subargs = self.get_subargs('create_source', '--')
         subargs = {k: v for k, v in subargs.items()
                    if v is not None and str(v).strip() != ''}
+        # Name, population and settings are set per source below and must not
+        # be overridden by leftover create_source.* values in job.star
+        # (e.g. an old single-source 'create_source.name').
+        for key in ('--name', '--population', '--processing_settings'):
+            if key in subargs:
+                self.log(f"Ignoring create_source parameter {key}="
+                         f"{subargs.pop(key)}; it is set per source.")
 
         for source in sources:
             source_name = source['name']
@@ -321,13 +328,13 @@ class WarpMtoolsCreate(WarpBasePipeline):
                 self.toProjectPath(self.join(pop_path)),
                 self.toProjectPath(source_dir),
             )
-            args = Args({
-                'MTools': 'create_source',
+            args = Args({'MTools': 'create_source'})
+            args.update(subargs)
+            args.update({
                 pop_arg: pop_from_source,
                 '--name': source_name,
                 '--processing_settings': self.TSS,
             })
-            args.update(subargs)
             self.batch_execute('create_source', batch, args, call=True,
                                work_dir=source_dir)
             WarpPopulation(self.join(pop_path)).getSource(source_name)
