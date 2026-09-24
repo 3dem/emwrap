@@ -50,6 +50,7 @@ class TestApoFWarp(TestApoF):
         'relion.initialmodel.tomo',
         'relion.refine3d.tomo',
         'emw-relion-mask_create',
+        'emw-warp-mtools_create',
     ]
 
     otf_job_types = [
@@ -92,12 +93,22 @@ class TestApoFWarp(TestApoF):
     def set_args(cls, parser):
         super().set_args(parser)
         parser.add_argument(
-            '--workflow', '-w', choices=['small', 'medium', 'large', 'full', 'otf'],
+            '--workflow', '-w',
+            choices=['small', 'medium', 'large', 'full', 'full-continue', 'otf'],
             default='small',
             help='Workflow size: small (preprocessing), medium (up to particle export), '
-                 'large (medium plus the Relion refinement and mask), '
+                 'large (all of part1: medium plus the Relion refinement, mask '
+                 'and M population), '
                  'full (part1 chained with the part2 M refinements), '
-                 'or otf (preprocessing in OTF mode).')
+                 'full-continue (part2 M refinements only, continuing from the '
+                 'Warp Create Population job of an existing project, by default '
+                 'the current folder), or otf (preprocessing in OTF mode).')
+
+    @classmethod
+    def configure(cls, args):
+        if args.workflow == 'full-continue' and args.project is None:
+            args.project = os.getcwd()
+        super().configure(args)
 
     def _read_template_jobs(self, workflow_name):
         template = self.get_workflow_template(workflow_name)
@@ -105,46 +116,67 @@ class TestApoFWarp(TestApoF):
         with open(template) as f:
             return json.load(f)['jobs']
 
-    def load_full_workflow_jobs(self):
-        """Chain part1 and part2 into a single pipeline.
+    def _load_part2_jobs(self, population_jobid, other_ids=()):
+        """Load part2 with its M refinement starting from population_jobid.
 
-        Part2 refines the M population built by the last job of part1, so its
-        population inputs are re-pointed at that job here rather than relying
-        on both templates keeping the same job ids.
+        Population inputs that do not point inside part2 are its entry points,
+        so they are re-pointed at population_jobid rather than relying on the
+        templates (or an existing project) keeping the same job ids.
         """
-        part1 = self._read_template_jobs('apof-warp-tutorial-part1')
         part2 = self._read_template_jobs('apof-warp-tutorial-part2')
-
-        population_jobs = [j for j in part1
-                           if j['jobtype'] == self.population_job_type]
-        if len(population_jobs) != 1:
-            raise ValueError(f"Expected one {self.population_job_type} job in part1, "
-                             f"found {len(population_jobs)}")
-        population_jobid = population_jobs[0]['jobid']
-
         part2_ids = {j['jobid'] for j in part2}
-        if clashing := {j['jobid'] for j in part1} & part2_ids:
+        if clashing := set(other_ids) & part2_ids:
             raise ValueError(f"part1 and part2 share job ids: {sorted(clashing)}")
 
-        jobs = list(part1)
+        jobs = []
         for job in part2:
             params = dict(job['params'])
             for key, value in params.items():
-                # Population inputs that do not point inside part2 are the entry
-                # points of the M refinement, connect them to part1.
                 if key.endswith('.population') and value:
                     jobid = '/'.join(value.split('/')[:2])
                     if jobid not in part2_ids:
                         params[key] = value.replace(jobid, population_jobid, 1)
             jobs.append({**job, 'params': params})
-
         return jobs
 
+    def load_full_workflow_jobs(self):
+        """Chain part1 and part2 into a single pipeline."""
+        part1 = self._read_template_jobs('apof-warp-tutorial-part1')
+        population_jobs = [j for j in part1
+                           if j['jobtype'] == self.population_job_type]
+        if len(population_jobs) != 1:
+            raise ValueError(f"Expected one {self.population_job_type} job in part1, "
+                             f"found {len(population_jobs)}")
+
+        return part1 + self._load_part2_jobs(population_jobs[0]['jobid'],
+                                             {j['jobid'] for j in part1})
+
+    def load_continue_workflow_jobs(self):
+        """Load part2 connected to the last succeeded population job of the
+        existing project, which is what part1 leaves behind."""
+        pm = ProjectManager(self.project_path)
+        pm.update()
+        population_ids = [job.id for job in pm.get_workflow().jobs()
+                          if job['jobtype'] == self.population_job_type
+                          and job['status'] == 'Succeeded']
+        if not population_ids:
+            raise ValueError(f"No succeeded {self.population_job_type} job found "
+                             f"in project: {self.project_path}")
+
+        population_jobid = population_ids[-1]
+        print(f"Continuing from population job: {Color.bold(population_jobid)}")
+        # Seed the digests, so the first MCore is checked against its input
+        self._check_job_outputs(pm, self.population_job_type, population_jobid)
+        return self._load_part2_jobs(population_jobid)
+
     def load_workflow_jobs(self):
-        if self.args.workflow != 'full':
+        if self.args.workflow == 'full':
+            jobs = self.load_full_workflow_jobs()
+        elif self.args.workflow == 'full-continue':
+            jobs = self.load_continue_workflow_jobs()
+        else:
             return super().load_workflow_jobs()
 
-        jobs = self.load_full_workflow_jobs()
         # The base class pairs job_types with the loaded jobs to check their
         # outputs, and the M refinement repeats job types several times, so
         # job_types has to follow the chained jobs rather than the other way.
