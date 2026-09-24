@@ -16,26 +16,20 @@
 
 import glob
 import os
-import shutil
-import subprocess
+
+from .downloader import BaseDownloader
 
 EMPIAR_FTP_HOST = 'ftp.ebi.ac.uk'
 EMPIAR_FTP_ROOT = '/empiar/world_availability'
 
 
-class EmpiarDownloader:
+class EmpiarDownloader(BaseDownloader):
     """Download a subset of files from an EMPIAR dataset using wget."""
 
     def __init__(self, empiar_id, host=EMPIAR_FTP_HOST):
         self.empiar_id = empiar_id
         self.host = host
         self._base_url = f'ftp://{host}{EMPIAR_FTP_ROOT}/{empiar_id}/data'
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        return False
 
     def download_file(self, relative_path, dest_dir, skip_existing=True):
         """Download one file relative to the dataset data/ folder."""
@@ -59,18 +53,3 @@ class EmpiarDownloader:
             raise FileNotFoundError(
                 f"No files matching {pattern!r} in EMPIAR-{self.empiar_id}:{relative_dir}")
         return downloaded
-
-    def _wget(self, url, dest_dir, skip_existing=True):
-        if shutil.which('wget') is None:
-            raise RuntimeError('wget is required but was not found in PATH')
-
-        # -c resumes partial downloads; with -N, complete up-to-date files are skipped.
-        cmd = ['wget', '--show-progress', '-c']
-        if skip_existing:
-            cmd.append('-N')
-        cmd.extend(['-q', '-nd', '-P', dest_dir, url])
-
-        try:
-            subprocess.run(cmd, check=True)
-        except subprocess.CalledProcessError as err:
-            raise RuntimeError(f'wget failed for {url} (exit code {err.returncode})') from err

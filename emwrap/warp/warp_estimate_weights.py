@@ -49,7 +49,7 @@ class WarpEstimateWeights(WarpBasePopulationPipeline):
             self.log(f"Loading first source from Population: {source_name}")
             args['--source'] = source_name
 
-        self.batch_execute('estimate_weights', batch, args, call=True)
+        self.execute_population_batch('estimate_weights', batch, args, call=True)
         self.updateBatchInfo(batch)
 
 

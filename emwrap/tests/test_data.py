@@ -21,6 +21,7 @@ import unittest
 
 from emtools.utils import Color
 
+from emwrap.tests.emdb_downloader import EmdbDownloader
 from emwrap.tests.empiar_downloader import EmpiarDownloader
 
 
@@ -31,6 +32,8 @@ class TestData(unittest.TestCase):
         'WarpApofTutorial': {
             'empiar_id': 10491,
             'tilt_series': [1, 11, 17, 23, 32],
+            # Apoferritin reference map, used to build the PyTOM template
+            'emdb_id': 15854,
         },
         'RelionTomoTutorial': {
             'empiar_id': 10164,
@@ -90,6 +93,12 @@ class TestData(unittest.TestCase):
                     f'tiltseries/mdoc/TS_{ts}.mrc.mdoc', mdoc_dir)
                 downloader.download_pattern(
                     'tiltseries/data', f'*-{ts}_*.tif', frames_dir)
+
+        # Reference map used by emw-pytom-create_template to build the
+        # template and mask for template matching.
+        print(f"Downloading EMD-{dataset['emdb_id']} map")
+        with EmdbDownloader(dataset['emdb_id']) as downloader:
+            downloader.download_map(path)
 
     @classmethod
     def _download_RelionTomoTutorial(cls, path):

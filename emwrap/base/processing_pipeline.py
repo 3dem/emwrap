@@ -158,10 +158,17 @@ class ProcessingPipeline(Pipeline, FolderManager):
             launcher: launcher to use, by default it will use the internal launcher for this Pipeline instance
             call: if True, the program will be executed, otherwise only logs will be written
             work_dir: optional project-root-relative folder to run the command from
+
+        Returns:
+            The exit code of the program, or None if it was not executed.
+            Note that batch.execute stores exceptions in batch.error instead
+            of raising them, so callers that need to detect a failed run
+            should check both this value and batch.error.
         """
         logfile = logfile or self.join('run.out')
         launcher = launcher or self._get_launcher()
         print(f">>>> Using launcher: {launcher}", flush=True)
+        returncode = None
         with batch.execute(label):
             if logcmd:
                 self.log_cmd(args)
@@ -170,7 +177,8 @@ class ProcessingPipeline(Pipeline, FolderManager):
                 if work_dir is not None:
                     cwd = os.path.join(self.workingDir,
                                        self.toProjectPath(work_dir))
-                batch.call(launcher, args, logfile=logfile, cwd=cwd)
+                returncode = batch.call(launcher, args, logfile=logfile, cwd=cwd)
+        return returncode
 
     def prerun(self):
         """ This method will be called before the run. """

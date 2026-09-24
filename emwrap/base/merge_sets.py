@@ -335,18 +335,46 @@ class MergeSetsPipeline(ProcessingPipeline):
 
         return outputStar, len(merged), skipped
 
+    @staticmethod
+    def _mergeGeneralTables(particlesStars, tablesList):
+        """ Return the 'general' table shared by all particles STAR files (or None).
+
+        The 'general' block holds set-level flags such as rlnTomoSubTomosAre2DStacks,
+        which Relion needs to interpret the particle images correctly, so it must
+        be carried over and be consistent across inputs.
+        """
+        refTable = refValues = refStar = None
+        for particlesStar, tables in zip(particlesStars, tablesList):
+            generalTable = tables.get('general')
+            values = generalTable[0]._asdict() if generalTable else None
+            if refStar is None:
+                refTable, refValues, refStar = generalTable, values, particlesStar
+            elif values != refValues:
+                raise Exception(
+                    f"Incompatible 'general' table in {particlesStar} "
+                    f"({values}) vs {refStar} ({refValues})."
+                )
+        return refTable
+
     def _mergeParticlesTables(self, particlesStars):
-        """Merge particles.star files, remapping optics groups and deduplicating rows."""
+        """Merge particles.star files, renumbering optics groups and deduplicating rows.
+
+        Optics groups are renumbered consecutively per input set. Group names are
+        kept unless they clash with a name already used by a previous input
+        (e.g. every WarpExport job names its groups opticsGroup1..N), in which
+        case the group is renamed to opticsGroup<newId>.
+        """
         mergedParticles = None
         mergedOptics = None
         seenParticleKeys = set()
         skipped = 0
         nextOpticsGroupId = 0
-        opticsNameMap = {}
-        opticsIdMap = {}
+        usedOpticsNames = set()
 
-        for particlesStar in particlesStars:
-            tables = StarFile.getTablesDict(particlesStar)
+        tablesList = [StarFile.getTablesDict(p) for p in particlesStars]
+        generalTable = self._mergeGeneralTables(particlesStars, tablesList)
+
+        for particlesStar, tables in zip(particlesStars, tablesList):
             particlesTable = tables.get('particles')
             if not particlesTable:
                 raise Exception(
@@ -356,33 +384,29 @@ class MergeSetsPipeline(ProcessingPipeline):
             if mergedParticles is None:
                 mergedParticles = Table(particlesTable.getColumnNames())
 
+            # Optics group id mapping for this input only
+            opticsIdMap = {}
             opticsTable = tables.get('optics')
             if opticsTable:
                 if mergedOptics is None:
                     mergedOptics = Table(opticsTable.getColumnNames())
-                    for row in opticsTable:
-                        rowValues = row._asdict()
-                        ogId = int(rowValues['rlnOpticsGroup'])
-                        ogName = rowValues['rlnOpticsGroupName']
-                        nextOpticsGroupId = max(nextOpticsGroupId, ogId)
-                        mergedOptics.addRowValues(**rowValues)
-                        opticsNameMap[ogName] = ogId
-                        opticsIdMap[ogId] = ogId
-                else:
-                    for row in opticsTable:
-                        rowValues = row._asdict()
-                        ogName = rowValues['rlnOpticsGroupName']
-                        ogId = int(rowValues['rlnOpticsGroup'])
-                        if ogName in opticsNameMap:
-                            opticsIdMap[ogId] = opticsNameMap[ogName]
-                            continue
-                        nextOpticsGroupId += 1
-                        newName = ogName
-                        opticsNameMap[ogName] = nextOpticsGroupId
-                        opticsIdMap[ogId] = nextOpticsGroupId
-                        rowValues['rlnOpticsGroup'] = nextOpticsGroupId
-                        rowValues['rlnOpticsGroupName'] = newName
-                        mergedOptics.addRowValues(**rowValues)
+                for row in opticsTable:
+                    rowValues = row._asdict()
+                    ogId = int(rowValues['rlnOpticsGroup'])
+                    ogName = rowValues['rlnOpticsGroupName']
+                    nextOpticsGroupId += 1
+                    newName = ogName
+                    if newName in usedOpticsNames:
+                        newName = f"opticsGroup{nextOpticsGroupId}"
+                        suffix = 1
+                        while newName in usedOpticsNames:
+                            newName = f"opticsGroup{nextOpticsGroupId}_{suffix}"
+                            suffix += 1
+                    usedOpticsNames.add(newName)
+                    opticsIdMap[ogId] = nextOpticsGroupId
+                    rowValues['rlnOpticsGroup'] = nextOpticsGroupId
+                    rowValues['rlnOpticsGroupName'] = newName
+                    mergedOptics.addRowValues(**rowValues)
 
             for row in particlesTable:
                 key = self._particleRowKey(row, particlesTable)
@@ -393,20 +417,28 @@ class MergeSetsPipeline(ProcessingPipeline):
                 rowValues = row._asdict()
                 if mergedOptics and 'rlnOpticsGroup' in rowValues:
                     ogId = int(rowValues['rlnOpticsGroup'])
-                    if ogId in opticsIdMap:
-                        rowValues['rlnOpticsGroup'] = opticsIdMap[ogId]
+                    if ogId not in opticsIdMap:
+                        raise Exception(
+                            f"Particle in {particlesStar} references optics group "
+                            f"{ogId} not defined in its 'optics' table."
+                        )
+                    rowValues['rlnOpticsGroup'] = opticsIdMap[ogId]
                 mergedParticles.addRowValues(**rowValues)
 
         if not len(mergedParticles):
             raise Exception("No particles left after merging the input sets.")
 
         outputStar = self.join('particles.star')
+        nOptics = len(mergedOptics) if mergedOptics else 0
         self.log(f"Writing {Color.green(len(mergedParticles))} particles "
-                 f"({Color.warn(skipped)} duplicate(s) skipped) to "
+                 f"({Color.warn(skipped)} duplicate(s) skipped, "
+                 f"{Color.green(nOptics)} optics group(s)) to "
                  f"{Color.cyan(outputStar)}")
 
         with StarFile(outputStar, 'w') as sfOut:
             sfOut.writeTimeStamp()
+            if generalTable:
+                sfOut.writeTable('general', generalTable, singleRow=True)
             if mergedOptics:
                 sfOut.writeTable('optics', mergedOptics, computeFormat='left')
             sfOut.writeTable('particles', mergedParticles, computeFormat='left')
