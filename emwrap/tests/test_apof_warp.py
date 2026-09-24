@@ -203,6 +203,25 @@ class TestApoFWarp(TestApoF):
                       f"so it did not update it")
         self._population_digests[digest] = job_id
 
+    def _get_run_params(self, pm, job_type, job_id):
+        """Point species inputs at the species of the job's input population.
+
+        Warp names each species folder with a generated suffix (e.g.
+        ApoF_f2ca8cca), so the path saved in the template never matches the
+        one created in a new run.
+        """
+        params = pm._readJobParams(pm._getJob(job_id))
+        fixed = {}
+        for key, value in params.items():
+            population_key = key[:-len('species')] + 'population'
+            if not (key.endswith('.species') and value and params.get(population_key)):
+                continue
+            population = params[population_key]
+            species = WarpPopulation(pm.join(population)).Species[0]['path']
+            fixed[key] = os.path.join(os.path.dirname(population), species)
+            print(f"Setting {key} = {Color.bold(fixed[key])}")
+        return fixed or None
+
     def _run_workflow(self):
         """Select the jobs to run based on the workflow size."""
 

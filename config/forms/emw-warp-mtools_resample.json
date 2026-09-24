@@ -17,7 +17,8 @@
           "label": "Species file:",
           "paramClass": "PathParam",
           "pointerClass": "WarpSpecies",
-          "help": "Required (-s, --species). Path to the .species file or its GUID."
+          "allowsEmpty": true,
+          "help": "(-s, --species). Path to the .species file or its GUID. If empty, the first species of the input population is used."
         },
         {
           "name": "resample_trajectories.samples",

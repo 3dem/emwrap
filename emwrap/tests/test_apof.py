@@ -138,6 +138,11 @@ class TestApoF(unittest.TestCase):
         """Hook for subclasses to check the contents of a job's outputs."""
         pass
 
+    def _get_run_params(self, pm, job_type, job_id):
+        """Hook for subclasses to override job params right before running it,
+        for inputs that are only known once previous jobs have run."""
+        return None
+
     def _run_workflow(self):
         self._validate_environment()
         caller_name = inspect.currentframe().f_back.f_code.co_name
@@ -157,7 +162,8 @@ class TestApoF(unittest.TestCase):
             else:
                 print(Color.cyan(f"\n{label} running..."), flush=True)
                 timer = Timer()
-                pm.runJob(job_id, wait=True)
+                params = self._get_run_params(pm, job_type, job_id)
+                pm.runJob(job_id, params=params, wait=True)
                 elapsed = Pretty.delta(timer.getElapsedTime())
                 pm.update()
                 self._assert_job_succeeded(pm, job_id, self.expected_outputs[job_type])

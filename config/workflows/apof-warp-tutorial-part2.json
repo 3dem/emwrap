@@ -204,7 +204,7 @@
                 "gpus": "1",
                 "extra_resample": "",
                 "resample_trajectories.population": "WarpMCore/job031/m/ApoF.population",
-                "resample_trajectories.species": "WarpMCore/job031/m/species/ApoF_71638b74/ApoF.species",
+                "resample_trajectories.species": "",
                 "do_queue": false
             }
         },
