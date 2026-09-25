@@ -27,6 +27,12 @@ from .processing_pipeline import ProcessingPipeline
 from .project_lock import atomic_write_json
 
 
+# Hidden folder inside the project where EMhub/emwrap keep their own state
+EMHUB_DIR = '.emhub'
+# Project data cache (jobs/outputs info and extended statuses)
+PROJECT_JSON = os.path.join(EMHUB_DIR, 'project.json')
+
+
 class ProjectData(FolderManager):
     """ Class to manage additional information about jobs and outputs of a project. 
 
@@ -34,7 +40,7 @@ class ProjectData(FolderManager):
     that is not part of the Relion pipeline.star file. We will store output's type and info, together
     with extended job information, such as some status that are not supported by Relion. 
 
-    The simplest implementation will use a project.json file to store the additional information,
+    The simplest implementation will use a .emhub/project.json file to store the additional information,
     but later we might want to use a database (e.g. Redis) to store the information.
     """
     STATUS_LAUNCHED = 'Launched'
@@ -71,7 +77,7 @@ class ProjectData(FolderManager):
     def __init__(self, project):
         FolderManager.__init__(self, project.path)
         self._project = project
-        self._project_json_path = self.join('project.json')
+        self._project_json_path = self.join(PROJECT_JSON)
         self._wf = project.get_workflow()  # FIXME: It might be the other way around, i.e. the project has the workflow and the data manager has the project
 
         self._data = {'jobs': {}, 'outputs': {}}
@@ -773,7 +779,7 @@ class ProjectData(FolderManager):
         self._set_info(self._jobs, job_id, job_info)
 
     def _annotationPath(self, jobId):
-        return self.join('.emhub', Path.rmslash(jobId), 'annotation.json')
+        return self.join(EMHUB_DIR, Path.rmslash(jobId), 'annotation.json')
 
     def getJobAnnotation(self, jobId):
         """Return run name and comment stored for a workflow job."""
@@ -849,6 +855,7 @@ class ProjectData(FolderManager):
         self._set_info(self._outputs, output_id, output_info)
 
     def save(self):
+        os.makedirs(os.path.dirname(self._project_json_path), exist_ok=True)
         atomic_write_json(self._project_json_path, self._data)
 
     def isActiveJob(self, job):

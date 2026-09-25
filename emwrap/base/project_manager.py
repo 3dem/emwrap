@@ -33,7 +33,7 @@ from emtools.metadata import Table, StarFile, RelionStar
 from .config import ProcessingConfig
 from .job_form import JobForm, JobValidationError
 from .processing_pipeline import ProcessingPipeline
-from .project_data import ProjectData
+from .project_data import ProjectData, PROJECT_JSON
 from .project_lock import ProjectLock
 
 
@@ -52,7 +52,7 @@ class ProjectManager(FolderManager):
             path: Path to the project directory.
             create: Create a new project if it does not exist.
             verbose: Verbosity level.
-            force: Recompute cached metadata instead of using project.json cache.
+            force: Recompute cached metadata instead of using .emhub/project.json cache.
         """
         path = os.path.abspath(os.path.expanduser(path))
         FolderManager.__init__(self, path)
@@ -125,7 +125,7 @@ class ProjectManager(FolderManager):
                     category_dirs.add(job.id.split('/', 1)[0])
 
         static_paths = ['.gui_projectdir', '.TMP_runfiles', '.relion_lock',
-                        '.Trash', 'default_pipeline.star', 'project.json',
+                        '.Trash', 'default_pipeline.star', PROJECT_JSON,
                         'Import', 'External']
         return job_ids, category_dirs, static_paths
 
@@ -822,7 +822,7 @@ class ProjectManager(FolderManager):
         RelionStar.write_pipeline(self.pipeline_star)
 
     def _persist_workflow(self):
-        """Write project.json and default_pipeline.star (caller must hold project lock)."""
+        """Write .emhub/project.json and default_pipeline.star (caller must hold project lock)."""
         self.log(f"Updating {self.pipeline_star}")
         self._data.save()
         tmp_pipeline = self.join(

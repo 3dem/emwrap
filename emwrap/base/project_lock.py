@@ -2,7 +2,7 @@
 # *
 # * Authors:     J.M. de la Rosa Trevin (delarosatrevin@gmail.com)
 # *
-# * Project-level locking for project.json / default_pipeline.star updates.
+# * Project-level locking for .emhub/project.json / default_pipeline.star updates.
 # *
 # * Default backend uses Relion's .relion_lock layout so emwrap, Relion GUI
 # * and emw CLI coordinate on NFS-friendly directory locks. Additional backends
