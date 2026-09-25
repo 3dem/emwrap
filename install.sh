@@ -155,7 +155,7 @@ CURRENT_STEP="creating source directory"
 run_cmd mkdir ${SOURCE}
 clone emtools devel
 clone emhub devel
-clone emwrap devel
+clone emwrap dev-riggs
 
 CURRENT_STEP="copying templates scripts"
 copy_templates ${SOURCE}/emwrap/config/ ./
