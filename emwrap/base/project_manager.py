@@ -33,7 +33,8 @@ from emtools.metadata import Table, StarFile, RelionStar
 from .config import ProcessingConfig
 from .job_form import JobForm, JobValidationError
 from .processing_pipeline import ProcessingPipeline
-from .project_data import ProjectData, PROJECT_JSON
+from .project_data import ProjectData, PROJECT_JSON, LABELS_JSON, EMHUB_DIR
+from .project_labels import ProjectLabels
 from .project_lock import ProjectLock
 
 
@@ -148,6 +149,15 @@ class ProjectManager(FolderManager):
                 if self.exists(name):
                     Process.system(f"rm -rf '{self.join(name)}'", print=self.log)
 
+            # Job annotations are stored under .emhub/<category>/<job>
+            for name in sorted(category_dirs):
+                annotations_dir = os.path.join(EMHUB_DIR, name)
+                if self.exists(annotations_dir):
+                    Process.system(f"rm -rf '{self.join(annotations_dir)}'", print=self.log)
+
+            # Keep label definitions, but job ids will be reused
+            ProjectLabels(self.join(LABELS_JSON)).clearJobs()
+
             self._wf = Workflow()
             self._data = ProjectData(self)
             self._create()
@@ -178,6 +188,52 @@ class ProjectManager(FolderManager):
 
     def saveJobAnnotation(self, jobId, runName='', comment=''):
         return self._data.saveJobAnnotation(jobId, runName, comment)
+
+    # ---------------------------- Labels -----------------------------------
+    def hasLabels(self):
+        """ Return True if the labels file exists in the project. """
+        return self._data.labels.exists()
+
+    def getLabels(self):
+        """ Return the list of label definitions. """
+        return self._data.labels.getLabels()
+
+    def getJobLabels(self, jobId=None):
+        """ Return label ids of a job, or the job -> label ids map. """
+        return self._data.labels.getJobLabels(jobId)
+
+    def saveLabel(self, label):
+        """ Create or update a label definition. """
+        with ProjectLock(self.path, message='save label'):
+            return self._data.labels.saveLabel(label)
+
+    def deleteLabel(self, labelId):
+        """ Delete a label definition and unassign it from all jobs. """
+        with ProjectLock(self.path, message='delete label'):
+            return self._data.labels.deleteLabel(labelId)
+
+    def setJobLabels(self, jobId, labelIds):
+        """ Set the labels assigned to a job. """
+        jobId = Path.rmslash(str(jobId))
+        with ProjectLock(self.path, message='set job labels'):
+            if not self._jobExistsOnDisk(jobId):
+                raise Exception(f"There is not job with id: '{jobId}'")
+            return self._data.labels.setJobLabels(jobId, labelIds)
+
+    def importLabels(self, labels, jobs):
+        """ Create the labels file from existing data if it does not exist. """
+        with ProjectLock(self.path, message='import labels'):
+            validJobIds = {job.id for job in self._readPipelineWorkflow().jobs()}
+            return self._data.labels.importLabels(labels, jobs, validJobIds)
+
+    def _readPipelineWorkflow(self):
+        """ Read the workflow from default_pipeline.star (fresh from disk). """
+        if self.exists(self.pipeline_star):
+            return RelionStar.pipeline_to_workflow(self.pipeline_star)
+        return self._wf
+
+    def _jobExistsOnDisk(self, jobId):
+        return self._readPipelineWorkflow().hasJob(jobId)
 
     def update(self):
         """ Update status of the running jobs. """

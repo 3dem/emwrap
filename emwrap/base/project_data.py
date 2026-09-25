@@ -25,12 +25,15 @@ from emtools.image import Image
 from .config import ProcessingConfig
 from .processing_pipeline import ProcessingPipeline
 from .project_lock import atomic_write_json
+from .project_labels import ProjectLabels
 
 
 # Hidden folder inside the project where EMhub/emwrap keep their own state
 EMHUB_DIR = '.emhub'
 # Project data cache (jobs/outputs info and extended statuses)
 PROJECT_JSON = os.path.join(EMHUB_DIR, 'project.json')
+# Project labels (tags) and their assignment to jobs
+LABELS_JSON = os.path.join(EMHUB_DIR, 'labels.json')
 
 
 class ProjectData(FolderManager):
@@ -78,6 +81,7 @@ class ProjectData(FolderManager):
         FolderManager.__init__(self, project.path)
         self._project = project
         self._project_json_path = self.join(PROJECT_JSON)
+        self._labels = ProjectLabels(self.join(LABELS_JSON))
         self._wf = project.get_workflow()  # FIXME: It might be the other way around, i.e. the project has the workflow and the data manager has the project
 
         self._data = {'jobs': {}, 'outputs': {}}
@@ -204,6 +208,8 @@ class ProjectData(FolderManager):
         for output_id in list(self._outputs.keys()):
             if output_id == job_id or output_id.startswith(job_prefix):
                 del self._outputs[output_id]
+
+        self._labels.removeJobs([job_id])
 
         return True
 
@@ -777,6 +783,11 @@ class ProjectData(FolderManager):
 
     def setJobInfo(self, job_id, job_info):
         self._set_info(self._jobs, job_id, job_info)
+
+    @property
+    def labels(self):
+        """ ProjectLabels instance (.emhub/labels.json). """
+        return self._labels
 
     def _annotationPath(self, jobId):
         return self.join(EMHUB_DIR, Path.rmslash(jobId), 'annotation.json')
