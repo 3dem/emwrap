@@ -1,7 +1,7 @@
 {
     "name": "emw-warp-tsalign",
     "label": "Warp - TS Align",
-    "help": "Warp wrapper for tilt-series alignment using AreTomo2 or Etomo patch tracking. \n\n*REFERENCES*:\n[[https://warpem.github.io/warp/reference/warptools/api/tilt_series/?h=ts_aretomo#ts_aretomo][ts_aretomo]]\n[[https://warpem.github.io/warp/reference/warptools/api/tilt_series/?h=ts_etomo_patches#ts_etomo_patches][ts_etomo_patches]]",
+    "help": "Warp wrapper for tilt-series alignment using AreTomo2, AreTomo3, Etomo patch tracking or Etomo fiducial (gold bead) tracking. \n\n*REFERENCES*:\n[[https://warpem.github.io/warp/reference/warptools/api/tilt_series/?h=ts_aretomo#ts_aretomo][ts_aretomo]]\n[[https://warpem.github.io/warp/reference/warptools/api/tilt_series/?h=ts_etomo_patches#ts_etomo_patches][ts_etomo_patches]]\n[[https://warpem.github.io/warp/reference/warptools/api/tilt_series/?h=ts_etomo_fiducials#ts_etomo_fiducials][ts_etomo_fiducials]]",
     "sections": [
         {
             "label": "Import",
@@ -57,7 +57,8 @@
                     "choices": {
                         "0": "aretomo2",
                         "1": "aretomo3",
-                        "2": "etomo - patches"
+                        "2": "etomo - patches",
+                        "3": "etomo - fiducials"
                     },
                     "default": "0",
                     "help": "Select the tilt-series alignment method."
@@ -135,6 +136,47 @@
                             "help": "Fit a new tilt axis angle for the whole dataset"
                         }
                     ]
+                },
+                {
+                    "label": "Etomo fiducials",
+                    "paramClass": "Group",
+                    "condition": "method == 3",
+                    "params": [
+                        {
+                            "name": "ts_etomo_fiducials.angpix",
+                            "label": "Output pixel size (A/pix)",
+                            "paramClass": "FloatParam",
+                            "help": "Rescale tilt images to this pixel size; normally 10\u201315 A for cryo data; leave out to keep the original pixel size.",
+                            "allowsEmpty": true
+                        },
+                        {
+                            "name": "ts_etomo_fiducials.fiducial_size",
+                            "label": "Fiducial size (nm)",
+                            "default": 10,
+                            "paramClass": "FloatParam",
+                            "help": "Size of gold fiducials in nanometers."
+                        },
+                        {
+                            "name": "ts_etomo_fiducials.n_beads_target",
+                            "label": "Target number of beads",
+                            "default": 50,
+                            "paramClass": "IntParam",
+                            "help": "Default: 50. Target number of beads to find in IMOD."
+                        },
+                        {
+                            "name": "ts_etomo_fiducials.initial_axis",
+                            "label": "Initial axis",
+                            "paramClass": "FloatParam",
+                            "help": "Override initial tilt axis angle with this value",
+                            "allowsEmpty": true
+                        },
+                        {
+                            "name": "ts_etomo_fiducials.do_axis_search",
+                            "label": "Do axis search",
+                            "paramClass": "BooleanParam",
+                            "help": "Fit a new tilt axis angle for the whole dataset"
+                        }
+                    ]
                 }
             ]
         },
@@ -151,7 +193,7 @@
                     "label": "Processes per device",
                     "default": 2,
                     "paramClass": "IntParam",
-                    "help": "(--perdevice in ts_aretomo or ts_etomo_patches)"
+                    "help": "(--perdevice in ts_aretomo, ts_aretomo3, ts_etomo_patches or ts_etomo_fiducials)"
                 },
                 {
                     "label": "Launchers",
@@ -177,7 +219,7 @@
                             "name": "launcher_imod",
                             "label": "IMOD",
                             "paramClass": "StringParam",
-                            "condition": "method == 2",
+                            "condition": "method >= 2",
                             "help": "Launcher to use for IMOD etomo"
                         }
                     ]

@@ -54,7 +54,8 @@ def parse_patches(val):
 class WarpTsAlign(WarpBaseTsAlign):
     """ Warp wrapper for tilt-series alignment.
 
-    Supports AreTomo2 (ts_aretomo) and Etomo patches (ts_etomo_patches).
+    Supports AreTomo2 (ts_aretomo), AreTomo3 (ts_aretomo3),
+    Etomo patches (ts_etomo_patches) and Etomo fiducials (ts_etomo_fiducials).
     It will run:
         - ts_import -> mdocs
         - create_settings -> warp_tiltseries.settings
@@ -62,12 +63,27 @@ class WarpTsAlign(WarpBaseTsAlign):
     """
     name = 'emw-warp-tsalign'
 
+    # Alignment methods (values of the 'method' form parameter)
+    ARETOMO2 = 0
+    ARETOMO3 = 1
+    ETOMO_PATCHES = 2
+    ETOMO_FIDUCIALS = 3
+
+    # Map Etomo-based methods to their WarpTools program (also args prefix)
+    ETOMO_PROGRAMS = {
+        ETOMO_PATCHES: 'ts_etomo_patches',
+        ETOMO_FIDUCIALS: 'ts_etomo_fiducials'
+    }
+
     def _method(self):
         return int(self._args.get('method', 0))
 
+    def _isEtomo(self):
+        return self._method() in self.ETOMO_PROGRAMS
+
     def alignmentPs(self):
-        if self._method() == 2:
-            key = 'ts_etomo_patches.angpix'
+        if self._isEtomo():
+            key = f'{self.ETOMO_PROGRAMS[self._method()]}.angpix'
         else:
             key = 'ts_aretomo.angpix'
         v = (self._args.get(key, '') or 0)        
@@ -77,7 +93,7 @@ class WarpTsAlign(WarpBaseTsAlign):
         return self._args.get('perdevice', None)
 
     def alignmentFiles(self, tsName):
-        if self._method() == 2:
+        if self._isEtomo():
             tsDir = self.join(self.TS, 'tiltstack', tsName)
             return (
                 os.path.join(tsDir, f'{tsName}.xf'),
@@ -113,8 +129,8 @@ class WarpTsAlign(WarpBaseTsAlign):
             self._runAlignmentAretomo2(batch)
         elif method == 1:
             self._runAlignmentAretomo3(batch)
-        elif method == 2:
-            self._runAlignmentEtomoPatches(batch)
+        elif method in self.ETOMO_PROGRAMS:
+            self._runAlignmentEtomo(batch, self.ETOMO_PROGRAMS[method])
         else:
             raise Exception(f"Unknown alignment method: {method}")
 
@@ -170,15 +186,18 @@ class WarpTsAlign(WarpBaseTsAlign):
         args.update(subargs)
         self.batch_execute('ts_aretomo3', batch, args)
 
-    def _runAlignmentEtomoPatches(self, batch):
+    def _runAlignmentEtomo(self, batch, program):
+        """ Run Etomo-based alignment (ts_etomo_patches or ts_etomo_fiducials)
+        and then generate the aligned stacks with IMOD newstack.
+        """
         args = Args({
-            'WarpTools': 'ts_etomo_patches',
+            'WarpTools': program,
             '--settings': self.TSS
         })
         if self.gpuList:
             args['--device_list'] = self.gpuList
 
-        subargs = self._args.subset('ts_etomo_patches', '--',
+        subargs = self._args.subset(program, '--',
                                     filters=['remove_false', 'remove_empty'])
         commargs = self._args.subset('ts_align', '--',
                                     filters=['remove_false', 'remove_empty'])
@@ -187,7 +206,7 @@ class WarpTsAlign(WarpBaseTsAlign):
         if perdevice := self._alignmentPerdevice():
             subargs['--perdevice'] = perdevice
         args.update(subargs)
-        self.batch_execute('ts_etomo_patches', batch, args)
+        self.batch_execute(program, batch, args)
 
         imod_launcher = self.get_launcher_arg('launcher_imod', 'IMOD')
         tsAllTable = StarFile.getTableFromFile('global', self.inputTs)
