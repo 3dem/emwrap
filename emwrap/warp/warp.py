@@ -330,7 +330,8 @@ class WarpBasePipeline(ProcessingPipeline):
             return os.path.join(self.workingDir, self.toProjectPath(path))
 
         gain = None if dest else self.acq.get('gain', None)
-        self.log(f"{self.name}: Importing Warp inputs from {inputFolder}")
+        self.log(f"{self.name}: Importing Warp inputs from "
+                 f"{getattr(inputFolder, 'path', inputFolder)}")
         return self.importInputs(_abs(inputFolder), _abs(dest or self.path),
                                  keys=keys, mutable=mutable,
                                  gain=_abs(gain) if gain else None)
@@ -839,6 +840,44 @@ class WarpBaseTsAlign(WarpBasePipeline):
         """ Abstract method that should be implemented in subclasses. """
         raise Exception("Missing implementation in base class.")
 
+    def _importMdocs(self, inputFolder, tsAllTable):
+        """ Create the ``mdocs`` folder with links to the mdoc files of the
+        tilt series in the input STAR only.
+
+        The input ``mdocs`` folder may contain more tilt series than the
+        input STAR (e.g. after a subset job). ts_import would then parse
+        every mdoc, including those whose frames were deselected, which
+        can leave WarpTools stuck.
+        """
+        def _abs(path):
+            return os.path.join(self.workingDir, self.toProjectPath(path))
+
+        srcFolder = _abs(inputFolder.join(self.MDOCS))
+        dstFolder = _abs(self.join(self.MDOCS))
+        if os.path.islink(dstFolder) or os.path.isfile(dstFolder):
+            os.unlink(dstFolder)
+        elif os.path.isdir(dstFolder):
+            shutil.rmtree(dstFolder)
+        os.makedirs(dstFolder)
+
+        missing = []
+        for tsRow in tsAllTable:
+            mdocFile = getattr(tsRow, 'rlnTomoMdocFile', None)
+            mdocName = (os.path.basename(mdocFile) if mdocFile
+                        else f'{tsRow.rlnTomoName}.mdoc')
+            src = os.path.join(srcFolder, mdocName)
+            if not os.path.exists(src):
+                missing.append(src)
+                continue
+            os.symlink(os.path.relpath(src, dstFolder),
+                       os.path.join(dstFolder, mdocName))
+
+        if missing:
+            raise Exception("Missing expected mdoc file(s): " + ', '.join(missing))
+
+        self.log(f"Linked {len(tsAllTable)} mdoc file(s) from "
+                 f"{inputFolder.join(self.MDOCS)}")
+
     def runBatch(self, batch, importInputs=True, **kwargs):
         # Input run folder from the Motion correction and CTF job
         inputTs = kwargs['inputTs']
@@ -854,7 +893,8 @@ class WarpBaseTsAlign(WarpBasePipeline):
 
         # Link input frameseries folder, settings and gain reference
         if importInputs:
-            self._importInputs(inputFolder, keys=['fs', 'fss', 'frames', 'mdocs'])
+            self._importInputs(inputFolder, keys=['fs', 'fss', 'frames'])
+            self._importMdocs(inputFolder, tsAllTable)
 
         # Run ts_import
         args = Args({
