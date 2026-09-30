@@ -163,13 +163,28 @@
                             "name": "register_output_only",
                             "label": "Register output only",
                             "paramClass": "BooleanParam",
-                            "help": "Register output only, without running the job. Output files (e.g. STAR files) will be re-generated, but the the underlying programs will not be executed."
+                            "help": "Register output only, without running the job. Output files (e.g. STAR files) will be re-generated, but the underlying programs will not be executed."
                         },
                         {
                             "name": "launcher_warp",
                             "label": "WARP",
                             "paramClass": "StringParam",
+                            "condition": "method < 2",
                             "help": "Launcher to use for Warp"
+                        },
+                        {
+                            "name": "launcher_aretomo",
+                            "label": "ARETOMO",
+                            "paramClass": "StringParam",
+                            "condition": "method < 2",
+                            "help": "Launcher to use for Aretomo"
+                        },
+                        {
+                            "name": "launcher_imod",
+                            "label": "IMOD",
+                            "paramClass": "StringParam",
+                            "condition": "method == 2",
+                            "help": "Launcher to use for IMOD etomo"
                         }
                     ]
                 }
