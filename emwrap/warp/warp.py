@@ -124,8 +124,9 @@ class WarpBasePipeline(ProcessingPipeline):
 
         Settings files are copied. ``warp_tiltseries`` and ``warp_tomostar``
         are shallow-copied: root files are copied, nested directories are
-        linked and ``logs`` folders are recreated empty. ``m`` is rsync-ed
-        (with ``sources`` linked) and every other input is linked.
+        linked and ``logs`` folders are recreated empty. ``mdocs`` is copied
+        so it can be edited without touching the previous job. ``m`` is
+        rsync-ed (with ``sources`` linked) and every other input is linked.
         Existing destinations are replaced.
 
         Args:
@@ -197,6 +198,10 @@ class WarpBasePipeline(ProcessingPipeline):
                 _copyFile(src)
             elif key == cls.M:
                 _copyMFolder(src)
+            elif key == cls.MDOCS:
+                dst = os.path.join(outputFolder, cls.MDOCS)
+                _replace(dst)
+                shutil.copytree(src, dst)
             elif key in ('ts', 'tm') or (key == 'fs' and mutable):
                 _copyFolder(src)
             else:
@@ -841,8 +846,9 @@ class WarpBaseTsAlign(WarpBasePipeline):
         raise Exception("Missing implementation in base class.")
 
     def _importMdocs(self, inputFolder, tsAllTable):
-        """ Create the ``mdocs`` folder with links to the mdoc files of the
-        tilt series in the input STAR only.
+        """ Create the ``mdocs`` folder with copies of the mdoc files of the
+        tilt series in the input STAR only. Files are copied, not linked,
+        so they can be edited without touching the previous job.
 
         The input ``mdocs`` folder may contain more tilt series than the
         input STAR (e.g. after a subset job). ts_import would then parse
@@ -869,13 +875,12 @@ class WarpBaseTsAlign(WarpBasePipeline):
             if not os.path.exists(src):
                 missing.append(src)
                 continue
-            os.symlink(os.path.relpath(src, dstFolder),
-                       os.path.join(dstFolder, mdocName))
+            shutil.copy(src, os.path.join(dstFolder, mdocName))
 
         if missing:
             raise Exception("Missing expected mdoc file(s): " + ', '.join(missing))
 
-        self.log(f"Linked {len(tsAllTable)} mdoc file(s) from "
+        self.log(f"Copied {len(tsAllTable)} mdoc file(s) from "
                  f"{inputFolder.join(self.MDOCS)}")
 
     def runBatch(self, batch, importInputs=True, **kwargs):
