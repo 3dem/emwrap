@@ -15,6 +15,7 @@
 # **************************************************************************
 
 import os
+import json
 import shutil
 import numpy as np
 from collections import defaultdict
@@ -24,8 +25,124 @@ from emtools.utils import FolderManager, Path
 from emtools.metadata import (StarFile, Table, RelionStar, WarpXml, Imod,
                               WarpPopulation)
 from emtools.jobs import Batch, Args
-from emtools.image import Image
+from PIL import Image as PILImage
+from emtools.image import Image, Thumbnail
 from emwrap.base import ProcessingPipeline
+
+
+def _bilinear(a, y, x):
+    """ Sample 2D array a at fractional (y, x), clamped to the edges. """
+    y0 = np.clip(np.floor(y).astype(int), 0, a.shape[0] - 2)
+    x0 = np.clip(np.floor(x).astype(int), 0, a.shape[1] - 2)
+    fy, fx = np.clip(y - y0, 0, 1), np.clip(x - x0, 0, 1)
+    return (a[y0, x0] * (1 - fy) * (1 - fx) + a[y0 + 1, x0] * fy * (1 - fx)
+            + a[y0, x0 + 1] * (1 - fy) * fx + a[y0 + 1, x0 + 1] * fy * fx)
+
+
+def _zscore_detrended(k, v, degree=3):
+    """ v minus a low order polynomial in k, scaled to unit spread: removes
+    the smooth background under the Thon rings. """
+    v = v - np.polyval(np.polyfit(k, v, degree), k)
+    return v / (v.std() or 1.0)
+
+
+def warpCtfView(ps, ctf, opts, sigma=25.0):
+    """ Diagnostic view of a Warp CTF fit: an image and a radial profile.
+
+    ps is Warp's half-plane power spectrum as stored (kx across, ky up to
+    the bottom row), ctf and opts the Movie CTF and OptionsCTF params of the
+    movie xml.  Only the fitted frequency range is used.
+
+    Image (uint8): the measured half plane on top, exactly as Warp stored
+    it, and the CTF^2 simulated from the fit mirrored below, so rings that
+    run straight across the divider mean the fit matches.  Tilts are too low
+    dose to show rings pixel by pixel, so the measured half is averaged
+    along each ring with a Gaussian of sigma degrees: narrower leaves arcs
+    of noise that read as structure, wider hides astigmatism.
+
+    Profile (dict): the rotational average of the measured spectrum and of
+    the simulated CTF^2, background removed, against spatial frequency, and
+    their correlation.  At this dose this is the more reliable check.
+    """
+    ps = ps.astype(np.float64)
+    h, w = ps.shape
+    oy, ox = h - 1, w // 2
+    # Detector artifacts put a bright line along kx = 0; bridge over it
+    ps[:, ox - 1:ox + 2] = 0.5 * (ps[:, ox - 2:ox - 1] + ps[:, ox + 2:ox + 3])
+    window, pix = int(opts['Window']), float(opts['PixelSize'])
+    # Warp's range is a fraction of Nyquist
+    rmin = float(opts['RangeMin']) * window / 2
+    rmax = float(opts['RangeMax']) * window / 2
+    R = int(min(np.ceil(rmax * 1.1), oy, ox - 1))
+
+    top = ps[oy - R:oy + 1, ox - R:ox + R + 1]          # ky = R..0 as stored
+    yy, xx = np.mgrid[R:-1:-1, -R:R + 1]
+    rr = np.hypot(xx, yy)
+    ri = rr.astype(int)
+    band = (rr >= rmin) & (rr <= rmax)
+
+    exp = top.copy()
+    for r in range(R + 1):          # remove the radial background
+        m = ri == r
+        if m.any():
+            exp[m] = (exp[m] - exp[m].mean()) / (exp[m].std() or 1.0)
+
+    # Gaussian along each ring, over the half plane (reflected at its edges)
+    nt = 180
+    pr, pt = np.meshgrid(np.arange(R + 1, dtype=float),
+                         np.linspace(0, np.pi, nt), indexing='ij')
+    polar = _bilinear(exp, R - pr * np.sin(pt), pr * np.cos(pt) + R)
+    ext = np.concatenate([polar[:, ::-1], polar, polar[:, ::-1]], axis=1)
+    n = ext.shape[1]
+    g = np.exp(-0.5 * ((np.arange(n) - n // 2) / (sigma * nt / 180.0)) ** 2)
+    g = np.fft.ifftshift(g / g.sum())
+    ext = np.real(np.fft.ifft(np.fft.fft(ext, axis=1) * np.fft.fft(g)[None, :], axis=1))
+    exp = _bilinear(ext[:, nt:2 * nt], rr, np.arctan2(yy, xx) / np.pi * (nt - 1))
+
+    # CTF^2 from the fit: Warp's defocus is D + dD cos(2 (theta - angle))
+    volt = float(ctf['Voltage']) * 1e3
+    lam = 12.2643247 / np.sqrt(volt * (1 + volt * 0.978466e-6))    # Å
+    cs = float(ctf['Cs']) * 1e7                                     # mm -> Å
+    D, dD = float(ctf['Defocus']) * 1e4, float(ctf['DefocusDelta']) * 1e4
+    ang = np.radians(float(ctf['DefocusAngle']))
+
+    def ctf2(rad, theta):
+        k = rad / (window * pix)
+        dz = D + dD * np.cos(2 * (theta - ang))
+        chi = np.pi * lam * dz * k ** 2 - 0.5 * np.pi * cs * lam ** 3 * k ** 4
+        return np.sin(chi + np.arcsin(float(ctf['Amplitude']))) ** 2
+
+    sim = ctf2(rr, np.arctan2(yy, xx))
+
+    def stretch(a):
+        lo, hi = np.percentile(a[band], [2, 98])
+        v = np.clip((a - lo) / ((hi - lo) or 1), 0, 1)
+        v[~band] = 0.5
+        return v
+
+    img = np.vstack([stretch(exp), (0.15 + 0.7 * stretch(sim))[::-1][1:]])
+    out = (img * 255).astype(np.uint8)
+    out[R, :] = 255   # divider: measured above, simulated below
+
+    # Radial profiles in half pixel bins over the fitted range
+    full_rr = np.hypot(np.arange(w)[None, :] - ox, oy - np.arange(h)[:, None])
+    bins = (full_rr * 2).astype(int)
+    b = np.arange(int(np.ceil(rmin * 2)), int(rmax * 2))
+    radius = b / 2.0 + 0.25
+    counts = np.bincount(bins.ravel(), minlength=b[-1] + 1)
+    sums = np.bincount(bins.ravel(), weights=ps.ravel(), minlength=b[-1] + 1)
+    measured = sums[b] / np.maximum(counts[b], 1)
+    thetas = np.linspace(0, np.pi, 90)
+    simulated = ctf2(radius[:, None], thetas[None, :]).mean(axis=1)
+    k = radius / (window * pix)
+    measured, simulated = _zscore_detrended(k, measured), _zscore_detrended(k, simulated)
+    profile = {
+        'k': np.round(k, 5).tolist(),                 # 1/Å
+        'measured': np.round(measured, 3).tolist(),
+        'simulated': np.round(simulated, 3).tolist(),
+        'correlation': round(float(np.corrcoef(measured, simulated)[0, 1]), 3),
+    }
+    return out, profile
 
 
 class WarpBasePipeline(ProcessingPipeline):
@@ -44,6 +161,10 @@ class WarpBasePipeline(ProcessingPipeline):
     M_IMPORT_EXCLUDES = ('versions', 'sources')
     WARP_PARTICLES_STAR = 'warp_particles.star'
     WARP_FOLDERS = [FS, TS, TM]
+    # Per tilt jpegs next to FS/average, read by the emhub OTF dashboard
+    THUMBNAILS = 'thumbnails'
+    THUMBNAIL_SIZE = 512
+    PS_THUMBNAIL_SIZE = 384
 
     INPUTS = {
         'fs': FS,
@@ -382,6 +503,67 @@ class WarpBasePipeline(ProcessingPipeline):
              self._args.get('mctf.create_settings.bin_angpix', '') or 0)
         return float(v) or inputPs
 
+    def _writeJpeg(self, srcPath, suffix, makeImage):
+        """ Write FS/thumbnails/<src name><suffix>.jpg from makeImage().
+
+        Made in the job, right after Warp wrote srcPath, so a dashboard
+        never has to read the MRC while acquisition is using the disk.
+        Skipped when the jpeg is newer than srcPath. A failure only logs: a
+        missing thumbnail must not fail the job.
+        """
+        name = Path.removeBaseExt(srcPath) + suffix + '.jpg'
+        thumbPath = self.join(self.FS, self.THUMBNAILS, name)
+        try:
+            if (os.path.exists(thumbPath) and
+                    os.path.getmtime(thumbPath) >= os.path.getmtime(srcPath)):
+                return
+            img = makeImage()
+            os.makedirs(os.path.dirname(thumbPath), exist_ok=True)
+            # Write then rename, so a reader never gets a partial file
+            tmpPath = thumbPath + '.tmp'
+            img.save(tmpPath, format='JPEG', quality=80)
+            os.replace(tmpPath, thumbPath)
+        except Exception as e:
+            self.log(f"WARNING: could not write thumbnail for {srcPath}: {e}")
+
+    def writeTiltThumbnail(self, avgMrcPath):
+        """ Small jpeg of a tilt average, into FS/thumbnails. """
+        def _make():
+            data = Image.get_array(avgMrcPath)
+            # Block-average down to about twice the output size; this is the
+            # cheap part that also removes most of the shot noise.
+            f = max(1, max(data.shape) // (2 * self.THUMBNAIL_SIZE))
+            h, w = (data.shape[0] // f) * f, (data.shape[1] // f) * f
+            binned = (data[:h, :w].astype(np.float32)
+                      .reshape(h // f, f, w // f, f).mean(axis=(1, 3)))
+            # A light blur reads better at this size and halves the jpeg
+            size = (self.THUMBNAIL_SIZE, self.THUMBNAIL_SIZE)
+            return Thumbnail(output_format=None, max_size=size, std_threshold=2,
+                             contrast_factor=0.5, gaussian_radius=1.0).from_array(binned)
+        self._writeJpeg(avgMrcPath, '', _make)
+
+    def writePsThumbnail(self, psMrcPath, warpXml):
+        """ CTF fit view of a tilt (see warpCtfView), into FS/thumbnails:
+        <movie>_ps.jpg with the image and <movie>_ctf.json with the radial
+        profiles, for the dashboard to plot. """
+        jsonPath = self.join(self.FS, self.THUMBNAILS,
+                             Path.removeBaseExt(psMrcPath) + '_ctf.json')
+
+        def _make():
+            arr, profile = warpCtfView(Image.get_array(psMrcPath),
+                                       warpXml.getDict('Movie', 'CTF', 'Param'),
+                                       warpXml.getDict('Movie', 'OptionsCTF', 'Param'))
+            res = warpXml.get('Movie', '@CTFResolutionEstimate')
+            profile['fitResolution'] = float(res) if res else None
+            os.makedirs(os.path.dirname(jsonPath), exist_ok=True)
+            tmpPath = jsonPath + '.tmp'
+            with open(tmpPath, 'w') as f:
+                json.dump(profile, f)
+            os.replace(tmpPath, jsonPath)
+            return PILImage.fromarray(arr).resize(
+                (self.PS_THUMBNAIL_SIZE, self.PS_THUMBNAIL_SIZE), PILImage.BICUBIC)
+        self._writeJpeg(psMrcPath, '_ps', _make)
+
     def updateMctfTsDict(self, tsDict, mdocFile, mdocsFm):
         """ Update tsDict with MCTF Relion labels and build the enriched TS table.
 
@@ -474,6 +656,8 @@ class WarpBasePipeline(ProcessingPipeline):
             avgMrcPath = frameDict['rlnMicrographName']
             if dims is None and os.path.exists(avgMrcPath):
                 dims = Image.get_dimensions(avgMrcPath)
+            if avgMrcPath:
+                self.writeTiltThumbnail(avgMrcPath)
 
             movieXml = self.join(self.FS, moviePrefix + '.xml')
             defocusDict = defaultdict(lambda: 0)
@@ -481,6 +665,8 @@ class WarpBasePipeline(ProcessingPipeline):
             # xml and average mrc already validated for whole TS above
             warpXml = WarpXml(movieXml)
             ctf = warpXml.getDict('Movie', 'CTF', 'Param')
+            if frameDict['rlnCtfPowerSpectrum']:
+                self.writePsThumbnail(frameDict['rlnCtfPowerSpectrum'], warpXml)
 
             defocusDict['rlnDefocusU'] = _float(float(ctf['Defocus']) * 10000)  # Convert to Angstroms
             defocusDict['rlnCtfAstigmatism'] = _float(float(ctf['DefocusDelta']) * 10000)  # Convert to Angstroms
