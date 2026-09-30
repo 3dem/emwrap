@@ -173,10 +173,17 @@
                         },
                         {
                             "name": "launcher_aretomo",
-                            "label": "ARETOMO",
+                            "label": "ARETOMO2",
                             "paramClass": "StringParam",
-                            "condition": "method < 2",
-                            "help": "Launcher to use for Aretomo"
+                            "condition": "method == 0",
+                            "help": "Launcher to use for Aretomo2"
+                        },
+                        {
+                            "name": "launcher_aretomo3",
+                            "label": "ARETOMO3",
+                            "paramClass": "StringParam",
+                            "condition": "method == 1",
+                            "help": "Launcher to use for Aretomo3"
                         },
                         {
                             "name": "launcher_imod",
