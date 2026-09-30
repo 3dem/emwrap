@@ -479,17 +479,23 @@ class WarpBasePipeline(ProcessingPipeline):
             defocusDict = defaultdict(lambda: 0)
 
             # xml and average mrc already validated for whole TS above
-            ctf = WarpXml(movieXml).getDict('Movie', 'CTF', 'Param')
+            warpXml = WarpXml(movieXml)
+            ctf = warpXml.getDict('Movie', 'CTF', 'Param')
 
             defocusDict['rlnDefocusU'] = _float(float(ctf['Defocus']) * 10000)  # Convert to Angstroms
             defocusDict['rlnCtfAstigmatism'] = _float(float(ctf['DefocusDelta']) * 10000)  # Convert to Angstroms
             defocusDict['rlnDefocusV'] = _float(defocusDict['rlnDefocusU'] + defocusDict['rlnCtfAstigmatism'])
             defocusDict['rlnDefocusAngle'] = _float(ctf['DefocusAngle'])
+            # Warp has no figure of merit or ice ring density; those stay 0
+            if ctfRes := warpXml.get('Movie', '@CTFResolutionEstimate'):
+                defocusDict['rlnCtfMaxResolution'] = _float(ctfRes)
+
+            motion = warpXml.getMovieMotion()
 
             for k in extra_cols:
                 if k.startswith('rlnAccumMotion'):
-                    # FIXME: Parse the movie values
-                    frameDict[k] = 0
+                    # rlnAccumMotionTotal -> 'total', etc
+                    frameDict[k] = _float(motion[k[len('rlnAccumMotion'):].lower()])
                 elif k.startswith('rlnDefocus') or k.startswith('rlnCtf') and k not in frameDict:
                     frameDict[k] = defocusDict[k]
 
