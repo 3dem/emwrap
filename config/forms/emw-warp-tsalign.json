@@ -169,7 +169,6 @@
                             "name": "launcher_warp",
                             "label": "WARP",
                             "paramClass": "StringParam",
-                            "condition": "method < 2",
                             "help": "Launcher to use for Warp"
                         },
                         {
