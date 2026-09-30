@@ -90,17 +90,20 @@ class WarpTsAlign(WarpBaseTsAlign):
         """Format patches according to the selected alignment method.
 
         AreTomo2 uses ``XxY`` while AreTomo3 uses ``X,Y``.
+        WarpTools ts_aretomo3 defaults to ``4,4`` when --patches is not
+        given, so global-only alignment is passed explicitly as ``0,0``.
         """
-        parsed = parse_patches(val)
+        parsed = (1, 1) if val is None else parse_patches(val)
         if parsed is None:
-            return None
+            raise Exception(f"Invalid patches value: {val!r}. "
+                            "Expected e.g. '4x4', '4,4', '4 4' or '4'.")
+
+        aretomo3 = self._method() == 1
         if parsed == (1, 1):
-            return ""
+            return "0,0" if aretomo3 else ""
 
         x, y = parsed
-        if self._method() == 0:
-            return f"{x}x{y}"
-        return f"{x},{y}"
+        return f"{x},{y}" if aretomo3 else f"{x}x{y}"
     
     def alignedTS(self, tsName):
         if self._method() == 1:
