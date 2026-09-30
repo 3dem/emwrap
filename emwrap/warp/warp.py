@@ -30,15 +30,6 @@ from emtools.image import Image, Thumbnail
 from emwrap.base import ProcessingPipeline
 
 
-def _bilinear(a, y, x):
-    """ Sample 2D array a at fractional (y, x), clamped to the edges. """
-    y0 = np.clip(np.floor(y).astype(int), 0, a.shape[0] - 2)
-    x0 = np.clip(np.floor(x).astype(int), 0, a.shape[1] - 2)
-    fy, fx = np.clip(y - y0, 0, 1), np.clip(x - x0, 0, 1)
-    return (a[y0, x0] * (1 - fy) * (1 - fx) + a[y0 + 1, x0] * fy * (1 - fx)
-            + a[y0, x0 + 1] * (1 - fy) * fx + a[y0 + 1, x0 + 1] * fy * fx)
-
-
 def _zscore_detrended(k, v, degree=3):
     """ v minus a low order polynomial in k, scaled to unit spread: removes
     the smooth background under the Thon rings. """
@@ -46,19 +37,19 @@ def _zscore_detrended(k, v, degree=3):
     return v / (v.std() or 1.0)
 
 
-def warpCtfView(ps, ctf, opts, sigma=25.0):
+def warpCtfView(ps, ctf, opts):
     """ Diagnostic view of a Warp CTF fit: an image and a radial profile.
 
     ps is Warp's half-plane power spectrum as stored (kx across, ky up to
     the bottom row), ctf and opts the Movie CTF and OptionsCTF params of the
-    movie xml.  Only the fitted frequency range is used.
+    movie xml.  Only the fitted frequency range is shown.
 
-    Image (uint8): the measured half plane on top, exactly as Warp stored
-    it, and the CTF^2 simulated from the fit mirrored below, so rings that
-    run straight across the divider mean the fit matches.  Tilts are too low
-    dose to show rings pixel by pixel, so the measured half is averaged
-    along each ring with a Gaussian of sigma degrees: narrower leaves arcs
-    of noise that read as structure, wider hides astigmatism.
+    Image (uint8): the measured half plane on top and the CTF^2 simulated
+    from the fit mirrored below, so rings that run straight across the
+    divider mean the fit matches.  The measured half is Warp's values as
+    stored, with only a linear grey level window: no filtering, averaging
+    or normalisation, which on a low dose tilt would turn noise into ring
+    like structure.  Faint rings are what the data has.
 
     Profile (dict): the rotational average of the measured spectrum and of
     the simulated CTF^2, background removed, against spatial frequency, and
@@ -67,8 +58,6 @@ def warpCtfView(ps, ctf, opts, sigma=25.0):
     ps = ps.astype(np.float64)
     h, w = ps.shape
     oy, ox = h - 1, w // 2
-    # Detector artifacts put a bright line along kx = 0; bridge over it
-    ps[:, ox - 1:ox + 2] = 0.5 * (ps[:, ox - 2:ox - 1] + ps[:, ox + 2:ox + 3])
     window, pix = int(opts['Window']), float(opts['PixelSize'])
     # Warp's range is a fraction of Nyquist
     rmin = float(opts['RangeMin']) * window / 2
@@ -78,26 +67,10 @@ def warpCtfView(ps, ctf, opts, sigma=25.0):
     top = ps[oy - R:oy + 1, ox - R:ox + R + 1]          # ky = R..0 as stored
     yy, xx = np.mgrid[R:-1:-1, -R:R + 1]
     rr = np.hypot(xx, yy)
-    ri = rr.astype(int)
     band = (rr >= rmin) & (rr <= rmax)
-
-    exp = top.copy()
-    for r in range(R + 1):          # remove the radial background
-        m = ri == r
-        if m.any():
-            exp[m] = (exp[m] - exp[m].mean()) / (exp[m].std() or 1.0)
-
-    # Gaussian along each ring, over the half plane (reflected at its edges)
-    nt = 180
-    pr, pt = np.meshgrid(np.arange(R + 1, dtype=float),
-                         np.linspace(0, np.pi, nt), indexing='ij')
-    polar = _bilinear(exp, R - pr * np.sin(pt), pr * np.cos(pt) + R)
-    ext = np.concatenate([polar[:, ::-1], polar, polar[:, ::-1]], axis=1)
-    n = ext.shape[1]
-    g = np.exp(-0.5 * ((np.arange(n) - n // 2) / (sigma * nt / 180.0)) ** 2)
-    g = np.fft.ifftshift(g / g.sum())
-    ext = np.real(np.fft.ifft(np.fft.fft(ext, axis=1) * np.fft.fft(g)[None, :], axis=1))
-    exp = _bilinear(ext[:, nt:2 * nt], rr, np.arctan2(yy, xx) / np.pi * (nt - 1))
+    # Detector artifacts put a bright line along kx = 0.  It is shown as it
+    # is, but left out of the grey level window and of the profile.
+    offLine = np.abs(xx) > 1
 
     # CTF^2 from the fit: Warp's defocus is D + dD cos(2 (theta - angle))
     volt = float(ctf['Voltage']) * 1e3
@@ -114,23 +87,26 @@ def warpCtfView(ps, ctf, opts, sigma=25.0):
 
     sim = ctf2(rr, np.arctan2(yy, xx))
 
-    def stretch(a):
-        lo, hi = np.percentile(a[band], [2, 98])
+    def stretch(a, mask):
+        lo, hi = np.percentile(a[mask], [2, 98])
         v = np.clip((a - lo) / ((hi - lo) or 1), 0, 1)
         v[~band] = 0.5
         return v
 
-    img = np.vstack([stretch(exp), (0.15 + 0.7 * stretch(sim))[::-1][1:]])
+    img = np.vstack([stretch(top, band & offLine),
+                     (0.15 + 0.7 * stretch(sim, band))[::-1][1:]])
     out = (img * 255).astype(np.uint8)
     out[R, :] = 255   # divider: measured above, simulated below
 
     # Radial profiles in half pixel bins over the fitted range
-    full_rr = np.hypot(np.arange(w)[None, :] - ox, oy - np.arange(h)[:, None])
-    bins = (full_rr * 2).astype(int)
+    cols = np.arange(w)[None, :] - ox
+    full_rr = np.hypot(cols, oy - np.arange(h)[:, None])
+    valid = np.broadcast_to(np.abs(cols) > 1, ps.shape)
+    bins = (full_rr[valid] * 2).astype(int)
     b = np.arange(int(np.ceil(rmin * 2)), int(rmax * 2))
     radius = b / 2.0 + 0.25
-    counts = np.bincount(bins.ravel(), minlength=b[-1] + 1)
-    sums = np.bincount(bins.ravel(), weights=ps.ravel(), minlength=b[-1] + 1)
+    counts = np.bincount(bins, minlength=b[-1] + 1)
+    sums = np.bincount(bins, weights=ps[valid], minlength=b[-1] + 1)
     measured = sums[b] / np.maximum(counts[b], 1)
     thetas = np.linspace(0, np.pi, 90)
     simulated = ctf2(radius[:, None], thetas[None, :]).mean(axis=1)
