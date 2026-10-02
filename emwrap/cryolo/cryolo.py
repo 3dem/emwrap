@@ -46,13 +46,29 @@ from emtools.utils import Color, Timer, Path, Process
 from emtools.jobs import Args
 from emtools.metadata import Table, Column, StarFile, StarMonitor, TextFile
 
+from emwrap.base import ProcessingPipeline, ProcessingConfig
+
 
 class CryoloPredict:
+    """ Wrapper to cryolo_predict.py. The launcher and the models are taken
+    from EMWRAP_CONFIG['programs']['CRYOLO'] (keys: launcher, model and
+    janni_model), unless given in kwargs. The launcher receives the
+    cryolo_predict.py arguments. """
+    PROGRAM = 'CRYOLO'
+
     def __init__(self, **kwargs):
-        # Denoise with JANNI model
-        self.model = '/usr/local/em/cryolo/cryolo_model-202005_nn_N63_c17/gmodel_phosnet_202005_nn_N63_c17.h5'
-        self.janni_model = '/usr/local/em/cryolo/janni_model-20190703/gmodel_janni_20190703.h5'
-        self.path = '/usr/local/em/miniconda/envs/cryolo/bin/cryolo_predict.py'
+        conf = ProcessingConfig.get_program(self.PROGRAM)
+
+        def _get(key):
+            if value := kwargs.get(key) or conf.get(key):
+                return value
+            raise Exception(f"Missing Cryolo '{key}', define it in "
+                            f"EMWRAP_CONFIG['programs']['{self.PROGRAM}']")
+
+        self.path = kwargs.get('launcher') or ProcessingPipeline.get_launcher(self.PROGRAM)
+        self.model = _get('model')
+        self.janni_model = _get('janni_model')  # Denoise with JANNI model
+        self.threshold = float(kwargs.get('threshold') or 0.05)
         self.args = kwargs
 
     def process_batch(self, batch, **kwargs):
@@ -84,7 +100,7 @@ class CryoloPredict:
             '-c': 'config.json',
             '-w': self.model,
             '-i': 'Micrographs/',
-            '-t': 0.05,
+            '-t': self.threshold,
             '-nc': cpu,
             '-g': gpu,
             '-o': 'cryolo_boxfiles/'

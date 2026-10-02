@@ -21,15 +21,20 @@ from emtools.jobs import Args
 from emtools.metadata import Table, StarFile, TextFile, Acquisition
 from emtools.image import Image
 
+from emwrap.base import ProcessingPipeline, ProcessingConfig
+
 
 class Motioncor:
     """ Motioncor wrapper to run in a batch folder. """
+    PROGRAM = 'MOTIONCOR3'
+
     def __init__(self, acq, **kwargs):
-        if path := kwargs.get('path', None):
-            self.path = path
-            self.version = int(kwargs['version'])
-        else:
-            self.path, self.version = Motioncor.__get_environ()
+        """ The launcher is taken from EMWRAP_CONFIG['programs'][PROGRAM],
+        unless kwargs 'launcher' is given (and similar for 'version'). """
+        program = kwargs.get('program') or self.PROGRAM
+        self.path = kwargs.get('launcher') or ProcessingPipeline.get_launcher(program)
+        self.version = int(kwargs.get('version')
+                           or ProcessingConfig.get_program(program).get('version', 3))
         self.ctf = kwargs.get('ctf', False)
         self.acq = Acquisition(acq)
         self.args = self.argsFromAcq(acq)
@@ -38,7 +43,7 @@ class Motioncor:
 
     @property
     def bin(self):
-        return self.args.get('-FtBin', 1.0)
+        return float(self.args.get('-FtBin', 1.0))
 
     @property
     def local_alignment(self):
@@ -178,24 +183,6 @@ class Motioncor:
                     parts = line.split()
                     t.addRowValues(*parts[:5])
                 sf.writeTable('local_shift', t)
-
-    @staticmethod
-    def __get_environ():
-        varPath = 'MOTIONCOR_PATH'
-        varVersion = 'MOTIONCOR_VERSION'
-
-        if program := os.environ.get(varPath, None):
-            if not os.path.exists(program):
-                raise Exception(f"Motioncor path ({varPath}={program}) does not exists.")
-        else:
-            raise Exception(f"Motioncor path variable {varPath} is not defined.")
-
-        if version := int(os.getenv(varVersion, 3)):
-            pass
-        else:
-            raise Exception(f"Motioncor version variable {varVersion} is not defined.")
-
-        return program, version
 
     @staticmethod
     def __parse_dimensions(logFile):

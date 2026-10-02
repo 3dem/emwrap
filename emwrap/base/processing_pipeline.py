@@ -250,7 +250,7 @@ class ProcessingPipeline(Pipeline, FolderManager):
             raise Exception(f"Expecting packageName or cls.PROGRAM defined")
 
     def _get_launcher(self):
-        ProcessingPipeline.get_launcher(self.PROGRAM)
+        return ProcessingPipeline.get_launcher(self.PROGRAM)
 
     def _register_output_only(self):
         """ This will be used mainly for development, when we don't want to 
@@ -352,6 +352,19 @@ class ProcessingPipeline(Pipeline, FolderManager):
 
         return self.addGenerator(batchMgr.generate,
                                  queueMaxSize=queueMaxSize)
+
+    def inputTsStreaming(self):
+        """ Return the 'input_timeout' param (in seconds). If greater than 0,
+        the input tilt series should be monitored with inputTsMonitor. """
+        return int(self._args.get('input_timeout', 0) or 0)
+
+    def inputTsMonitor(self, inputStar, **kwargs):
+        """ Return a StarMonitor of the tilt series ('global' table) of the
+        input STAR file (e.g. from an import job running on-the-fly), that
+        times out after 'input_timeout' seconds without new tilt series.
+        kwargs are passed to the StarMonitor (e.g. tableKwargs). """
+        return StarMonitor(inputStar, 'global', lambda row: row.rlnTomoName,
+                           timeout=self.inputTsStreaming(), **kwargs)
 
     def addGpuProcessors(self, generator, getProcessingFunc, outputFunc):
         """ Add processors that will process the batches in parallel using the GPUs. """

@@ -98,7 +98,8 @@ class Preprocessing:
 
         # Where the temporary batch folder will be created
         # This is a local, fast storage in the worker process
-        tmpFolder = '/scr/'  # FIXME
+        # (the job scratch_dir or EMWRAP_CONFIG['scratch'], see ProcessingPipeline)
+        tmpFolder = kwargs.get('scratchDir') or tempfile.gettempdir()
         tmpPrefix = os.path.join(tmpFolder, f'emwrap_{batch.id}')
 
         # The batch will be created in the temporary local storage for
@@ -141,7 +142,7 @@ class Preprocessing:
         # Calculate new pixel size based on the motioncor binning option
         acq = Acquisition(self.acq)
         origPs = self.acq.pixel_size
-        acq.pixel_size = origPs * mc.args['-FtBin']
+        acq.pixel_size = origPs * mc.bin
 
         batch.log("Running Ctffind", flush=True)
         ctf = Ctffind(acq, **self.args['ctf'])

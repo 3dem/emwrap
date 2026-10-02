@@ -25,7 +25,7 @@ from datetime import timedelta, datetime
 from glob import glob
 
 from emtools.utils import Color, Timer, Path, Process, FolderManager, Pretty
-from emtools.jobs import Batch
+from emtools.jobs import Batch, Args
 from emtools.metadata import Mdoc, StarFile
 
 from emwrap.base import ProcessingPipeline
@@ -147,12 +147,19 @@ class StarBatchManager(FolderManager):
 
 
 class Relion2DPipeline(ProcessingPipeline):
-    """ Pipeline specific to AreTomo processing. """
+    """ Run Relion 2D classification in batches of the input particles. """
     name = 'emw-rln2d'
 
     def __init__(self, input_args, output):
         ProcessingPipeline.__init__(self, input_args, output)
-        self.gpuList = self._args['gpu'].split()
+        # One processing thread per entry, each entry with Relion's --gpu
+        # syntax, e.g. "0,1 2,3" (two threads using two GPUs each)
+        self.gpuList = str(self._args.get('gpus', '0')).split()
+        # Launcher empty means using EMWRAP_CONFIG['programs']['RELION']
+        self._rln2d_args = {
+            'launcher': self._args.get('launcher_relion') or None,
+            'extra_args': Args.fromString(self._args.get('extra_args') or '')
+        }
 
     def get_rln2d_proc(self, gpu):
         def _rln2d(batch):
@@ -160,7 +167,7 @@ class Relion2DPipeline(ProcessingPipeline):
                 batch.log(f"{Color.warn('Running 2D classification')}. "
                           f"Items: {batch['items']} "
                           f"GPU = {gpu}", flush=True)
-                rln2d = RelionClassify2D(**self._args)
+                rln2d = RelionClassify2D(**self._rln2d_args)
                 rln2d.process_batch(batch, gpu=gpu)
                 rln2d.clean_iter_files(batch)
             except Exception as e:
@@ -172,7 +179,7 @@ class Relion2DPipeline(ProcessingPipeline):
     def _output(self, batch):
         iterFiles = {}
         if not batch.error:
-            iterFiles = next(iter(RelionClassify2D(**self._args).get_iter_files(batch).values()), {})
+            iterFiles = next(iter(RelionClassify2D.get_iter_files(batch).values()), {})
             if iterFiles is None:
                 batch.error = f"No output files."
                 batch.log(Color.red(f"ERROR: {batch['error']}"))
@@ -206,9 +213,10 @@ class Relion2DPipeline(ProcessingPipeline):
         """ Use a StarBatchManager to generate processing batches from the input
         StarFile. If a given batch was already processed, we will skip it. """
         batchMgr = StarBatchManager(self.tmpDir, self._args['in_particles'],
-                                    self._args.get('group_column', None),
+                                    self._args.get('group_column') or None,
                                     minSize=self._minSize,
                                     timeout=self._timeout,
+                                    sleep=self._sleep,
                                     log=self.log)
 
         batches = {b for b in self.info.get('batches', {})}
@@ -224,8 +232,10 @@ class Relion2DPipeline(ProcessingPipeline):
                 yield batch
 
     def prerun(self):
-        self._minSize = self._args['batch_size']
-        self._timeout = self._args.get('timeout', 3600)
+        self._minSize = int(self._args['batch_size'])
+        # Wait times in seconds
+        self._timeout = int(self._args.get('wait.timeout', 3600))
+        self._sleep = int(self._args.get('wait.sleep', 60))
         self.log(f"Batch size: {Color.cyan(str(self._minSize))}")
         self.log(f"Input timeout (s): {Color.cyan(str(self._timeout))}")
         self.log(f"Using GPUs: {Color.cyan(str(self.gpuList))}", flush=True)
@@ -249,10 +259,6 @@ class Relion2DPipeline(ProcessingPipeline):
 
         self.log(f"Adding output processor")
         self.addProcessor(outputQueue, self._output)
-
-
-def main():
-    Relion2DPipeline.main()
 
 
 def create_subset():
@@ -330,4 +336,4 @@ if __name__ == '__main__':
     elif '--register_outputs' in sys.argv:
         register_outputs()
     else:
-        main()
+        Relion2DPipeline.main()

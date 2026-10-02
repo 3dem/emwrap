@@ -1,0 +1,233 @@
+{
+    "sections": [
+        {
+            "label": "Input",
+            "params": [
+                {
+                    "name": "in_movies",
+                    "label": "Input movies",
+                    "paramClass": "PathParam",
+                    "pointerClass": "Movies",
+                    "help": "movies.star file (e.g. from an Import Movies job). Acquisition, gain and dose per frame are read from its optics table."
+                },
+                {
+                    "label": "Motion correction",
+                    "paramClass": "Group",
+                    "params": [
+                        {
+                            "name": "motioncor.bin",
+                            "label": "Binning factor",
+                            "default": 1,
+                            "paramClass": "FloatParam",
+                            "help": "(-FtBin) Binning performed in Fourier space."
+                        },
+                        {
+                            "name": "motioncor.patch",
+                            "label": "Patches",
+                            "default": "5 5",
+                            "paramClass": "StringParam",
+                            "help": "(-Patch) Number of patches in X and Y for local alignment."
+                        },
+                        {
+                            "name": "motioncor.dose_weighting",
+                            "label": "Dose weighting",
+                            "default": true,
+                            "paramClass": "BooleanParam",
+                            "help": "(-FmDose) Use the dose per frame from the input movies for dose weighting."
+                        },
+                        {
+                            "name": "motioncor.extra_args",
+                            "label": "Extra arguments",
+                            "paramClass": "StringParam",
+                            "allowsEmpty": true,
+                            "help": "Additional MotionCor arguments, e.g. -FlipGain 1 -FmIntFile fmint.txt"
+                        }
+                    ]
+                },
+                {
+                    "label": "CTF estimation (ctffind)",
+                    "paramClass": "Group",
+                    "params": [
+                        {
+                            "name": "ctf.window",
+                            "label": "Window size (px)",
+                            "default": 512,
+                            "paramClass": "IntParam",
+                            "help": ""
+                        },
+                        {
+                            "name": "ctf.min_res",
+                            "label": "Min resolution (Å)",
+                            "default": 30.0,
+                            "paramClass": "FloatParam",
+                            "help": ""
+                        },
+                        {
+                            "name": "ctf.max_res",
+                            "label": "Max resolution (Å)",
+                            "default": 5.0,
+                            "paramClass": "FloatParam",
+                            "help": ""
+                        },
+                        {
+                            "name": "ctf.min_def",
+                            "label": "Min defocus (Å)",
+                            "default": 5000.0,
+                            "paramClass": "FloatParam",
+                            "help": ""
+                        },
+                        {
+                            "name": "ctf.max_def",
+                            "label": "Max defocus (Å)",
+                            "default": 50000.0,
+                            "paramClass": "FloatParam",
+                            "help": ""
+                        },
+                        {
+                            "name": "ctf.step_def",
+                            "label": "Defocus step (Å)",
+                            "default": 100.0,
+                            "paramClass": "FloatParam",
+                            "help": ""
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "label": "Picking & Extraction",
+            "params": [
+                {
+                    "label": "Picking (crYOLO)",
+                    "paramClass": "Group",
+                    "params": [
+                        {
+                            "name": "picking.particle_size",
+                            "label": "Particle size (Å)",
+                            "paramClass": "FloatParam",
+                            "allowsEmpty": true,
+                            "help": "If empty, it will be estimated from the picking of the first batch."
+                        },
+                        {
+                            "name": "picking.threshold",
+                            "label": "Threshold",
+                            "default": 0.05,
+                            "paramClass": "FloatParam",
+                            "help": "(-t) crYOLO confidence threshold."
+                        },
+                        {
+                            "name": "picking.model",
+                            "label": "Model",
+                            "paramClass": "PathParam",
+                            "allowsEmpty": true,
+                            "help": "crYOLO model, if empty EMWRAP_CONFIG['programs']['CRYOLO']['model'] is used."
+                        },
+                        {
+                            "name": "picking.janni_model",
+                            "label": "JANNI model",
+                            "paramClass": "PathParam",
+                            "allowsEmpty": true,
+                            "help": "JANNI denoising model, if empty EMWRAP_CONFIG['programs']['CRYOLO']['janni_model'] is used."
+                        }
+                    ]
+                },
+                {
+                    "label": "Extraction (Relion)",
+                    "paramClass": "Group",
+                    "params": [
+                        {
+                            "name": "extract.scale",
+                            "label": "Rescaled box size (px)",
+                            "paramClass": "IntParam",
+                            "allowsEmpty": true,
+                            "help": "(--scale) If empty, particles are not rescaled. The box size is estimated from the particle size."
+                        },
+                        {
+                            "name": "extract.extra_args",
+                            "label": "Extra arguments",
+                            "paramClass": "StringParam",
+                            "allowsEmpty": true,
+                            "help": "Additional relion_preprocess arguments."
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "label": "Compute",
+            "params": [
+                {
+                    "name": "gpus",
+                    "label": "GPUs",
+                    "default": "0",
+                    "paramClass": "StringParam",
+                    "help": "One processing thread will be created for each value, e.g. '0 0 1 1' runs two threads in each of GPUs 0 and 1."
+                },
+                {
+                    "name": "batch_size",
+                    "label": "Batch size",
+                    "default": 32,
+                    "paramClass": "IntParam",
+                    "help": "Number of movies processed together in each batch."
+                },
+                {
+                    "name": "input_timeout",
+                    "label": "Input timeout (s)",
+                    "default": 3600,
+                    "paramClass": "IntParam",
+                    "help": "Stop after this time (in seconds) without new input movies."
+                },
+                {
+                    "name": "scratch_dir",
+                    "label": "Scratch folder",
+                    "paramClass": "PathParam",
+                    "allowsEmpty": true,
+                    "help": "Local fast storage for the batches, if empty EMWRAP_CONFIG['scratch'] (or the system temporary folder) is used."
+                },
+                {
+                    "label": "Launchers",
+                    "paramClass": "Group",
+                    "help": "Launchers to use for the different programs. If empty, the ones from EMWRAP_CONFIG['programs'] are used.",
+                    "collapsed": true,
+                    "params": [
+                        {
+                            "name": "launcher_batch",
+                            "label": "Batch",
+                            "paramClass": "StringParam",
+                            "allowsEmpty": true,
+                            "help": "Optional launcher to process each batch in a separate process (e.g. submitting to a cluster). It receives the project folder and the batch JSON file and should run: emh-tomo --launch emwrap.mix.preprocessing \"$@\""
+                        },
+                        {
+                            "name": "launcher_motioncor",
+                            "label": "MOTIONCOR3",
+                            "paramClass": "StringParam",
+                            "allowsEmpty": true,
+                            "help": "Launcher to use for MotionCor"
+                        },
+                        {
+                            "name": "launcher_ctffind",
+                            "label": "CTFFIND",
+                            "paramClass": "StringParam",
+                            "allowsEmpty": true,
+                            "help": "Launcher to use for ctffind"
+                        },
+                        {
+                            "name": "launcher_cryolo",
+                            "label": "CRYOLO",
+                            "paramClass": "StringParam",
+                            "allowsEmpty": true,
+                            "help": "Launcher to use for cryolo_predict.py"
+                        },
+                        {
+                            "name": "launcher_relion",
+                            "label": "RELION",
+                            "paramClass": "StringParam",
+                            "allowsEmpty": true,
+                            "help": "Launcher to use for Relion (receives the program name as first argument)"
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}

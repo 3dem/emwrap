@@ -186,13 +186,34 @@ class ProcessingConfig:
         }
     }
 
+    # AVAILABLE SINGLE-PARTICLE (SPA) JOBS, kept apart from the tomography ones.
+    # They are used by the SPA OTF workflow (see config/workflows/spa-otf.json)
+    _spa_jobs = {
+        "emw-import-movies": {
+            "launcher": "emwrap.base.import_movies",
+            "label": "Import Movies",
+            "output": "Import"
+        },
+        "emw-preprocessing": {
+            "launcher": "emwrap.mix.preprocessing_pipeline",
+            "label": "SPA Preprocessing",
+            "output": "Preprocess"
+        },
+        "emw-rln2d": {
+            "launcher": "emwrap.relion.classify2d_pipeline",
+            "label": "Relion 2D Classification (batches)",
+            "output": "Class2D"
+        }
+    }
+
     # PACKAGES to group the jobs depending on their prefixes
     _packages = [
         { "name": "emwrap"},
         { "name": "warp", "prefixes": ["emw-warp"] },
         { "name": "relion", "prefixes": ["emw-relion", "relion."] },
         { "name": "pytom", "prefixes": ["emw-pytom"] },
-        { "name": "aretomo", "prefixes": ["emw-aretomo", "emw-denoiset"] }
+        { "name": "aretomo", "prefixes": ["emw-aretomo", "emw-denoiset"] },
+        { "name": "spa", "prefixes": ["emw-import-movies", "emw-preprocessing", "emw-rln2d"] }
     ]
 
     @classmethod
@@ -204,11 +225,17 @@ class ProcessingConfig:
 
     @classmethod
     def get_jobs(cls):
-        return cls._jobs
+        return {**cls._jobs, **cls._spa_jobs}
 
     @classmethod
     def get_programs(cls):
         return cls._get_config('programs')
+
+    @classmethod
+    def get_program(cls, name):
+        """ Return the configuration of a program from EMWRAP_CONFIG['programs'],
+        e.g. {'launcher': '...', 'version': 5} (empty dict if not defined). """
+        return cls.get_programs().get(name, {})
 
     @classmethod
     def get_scratch_dir(cls):

@@ -25,7 +25,7 @@ from pprint import pprint
 
 from emtools.utils import Color, Timer, Path, Process
 from emtools.metadata import Acquisition, StarFile, RelionStar
-from emtools.jobs import Batch
+from emtools.jobs import Batch, Args
 
 from emwrap.base import ProcessingPipeline
 from .preprocessing import Preprocessing
@@ -38,20 +38,62 @@ class PreprocessingPipeline(ProcessingPipeline):
     def __init__(self, input_args, output):
         ProcessingPipeline.__init__(self, input_args, output)
         args = self._args
-        self.gpuList = args['gpu'].split()
+        # One processing thread per entry, e.g. "0 0 1 1" (two threads per GPU)
+        self.gpuList = str(args.get('gpus', '0')).split()
         self.outputDirs = {}
         self.inputStar = args['in_movies']
-        self.batchSize = args.get('batch_size', 32)
-        self.inputTimeOut = args.get('input_timeout', 3600)
+        self.batchSize = int(args.get('batch_size', 32))
+        self.inputTimeOut = int(args.get('input_timeout', 3600))
+        # Acquisition (including gain and dose per frame) from the input movies
         self.acq = self.loadAcquisition(self.inputStar)
         self._totalInput = self._totalOutput = 0
-        self._pp_args = args
-        self._pp_args['acquisition'] = Acquisition(self.acq)
+        self._pp_args = self._preprocessingArgs()
 
         # Create a lock to estimate the extraction args only once,
         # for the first batch processed
-        self._particle_size = self._pp_args['picking'].get('particle_size', None)
         self._particle_size_lock = threading.Lock()
+
+    def _preprocessingArgs(self):
+        """ Convert the (flat) job params into the args of each
+        Preprocessing step (motioncor, ctf, picking and extract). """
+        args = self._args
+
+        def _launcher(name):  # empty means using EMWRAP_CONFIG['programs']
+            return args.get(f'launcher_{name}') or None
+
+        def _float(key):
+            value = args.get(key, '')
+            return None if value in (None, '') else float(value)
+
+        mc_args = {'-FtBin': args.get('motioncor.bin', 1),
+                   '-Patch': args.get('motioncor.patch', '5 5')}
+        if args.get('motioncor.dose_weighting', True) and self.acq.total_dose:
+            # rlnMicrographDoseRate from the input movies (dose per frame)
+            mc_args['-FmDose'] = self.acq.total_dose
+        mc_args.update(Args.fromString(args.get('motioncor.extra_args') or ''))
+
+        ctf_args = {k: v for k, v in args.subset('ctf').items() if v not in (None, '')}
+        ctf_args['launcher'] = _launcher('ctffind')
+
+        extract_args = Args.fromString(args.get('extract.extra_args') or '')
+        if scale := args.get('extract.scale'):
+            extract_args['--scale'] = int(scale)
+
+        return {
+            'acquisition': Acquisition(self.acq),
+            # Optional launcher to process each batch (e.g. in a cluster)
+            'launcher': _launcher('batch'),
+            'motioncor': {'launcher': _launcher('motioncor'), 'extra_args': mc_args},
+            'ctf': ctf_args,
+            'picking': {
+                'particle_size': _float('picking.particle_size'),
+                'threshold': _float('picking.threshold'),
+                'model': args.get('picking.model') or None,
+                'janni_model': args.get('picking.janni_model') or None,
+                'launcher': _launcher('cryolo')
+            },
+            'extract': {'launcher': _launcher('relion'), 'extra_args': extract_args}
+        }
 
     @property
     def particle_size(self):
@@ -112,7 +154,8 @@ class PreprocessingPipeline(ProcessingPipeline):
                 pp = Preprocessing(self._pp_args)
                 return pp, pp.process_batch(batch, gpu=gpu,
                                             outputFolder=self.path,
-                                            tmpFolder=self.tmpDir)
+                                            tmpFolder=self.tmpDir,
+                                            scratchDir=self.scratchDir)
             with self._particle_size_lock:
                 if self.particle_size is None:
                     batch.log(f"{Color.warn('Estimating the boxSize.')} "
@@ -212,6 +255,8 @@ class PreprocessingPipeline(ProcessingPipeline):
                                       [partStar, 'ParticleGroupMetadata.star']]
                                   },
                 })
+                self.writeRelionOutputNodes(
+                    [f for o in self.outputs.values() for f in o['files']])
                 self.updateBatchInfo(Batch(batch))
 
                 with StarFile(self.inputStar) as sf:
@@ -245,9 +290,5 @@ class PreprocessingPipeline(ProcessingPipeline):
                 self._output(batch)
 
 
-def main():
-    PreprocessingPipeline.main()
-
-
 if __name__ == '__main__':
-    main()
+    PreprocessingPipeline.main()

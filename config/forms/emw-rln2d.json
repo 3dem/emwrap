@@ -1,0 +1,79 @@
+{
+    "sections": [
+        {
+            "label": "Input",
+            "params": [
+                {
+                    "name": "in_particles",
+                    "label": "Input particles",
+                    "paramClass": "PathParam",
+                    "pointerClass": "Particles",
+                    "help": "particles.star file (e.g. from a SPA Preprocessing job). New particles are classified in batches while the file grows."
+                },
+                {
+                    "name": "batch_size",
+                    "label": "Batch size",
+                    "default": 100000,
+                    "paramClass": "IntParam",
+                    "help": "Minimum number of particles to create a new batch for 2D classification."
+                },
+                {
+                    "name": "group_column",
+                    "label": "Group column",
+                    "paramClass": "StringParam",
+                    "allowsEmpty": true,
+                    "help": "Optional column used to avoid splitting groups between batches (e.g. rlnMicrographName)."
+                },
+                {
+                    "name": "extra_args",
+                    "label": "Extra arguments",
+                    "default": "--K 50",
+                    "paramClass": "StringParam",
+                    "allowsEmpty": true,
+                    "help": "Additional relion_refine arguments, e.g. --K 50 --particle_diameter 180"
+                }
+            ]
+        },
+        {
+            "label": "Streaming & Compute",
+            "params": [
+                {
+                    "name": "wait.timeout",
+                    "label": "Input timeout (s)",
+                    "default": 3600,
+                    "paramClass": "IntParam",
+                    "help": "Stop after this time (in seconds) without new input particles, classifying the remaining ones."
+                },
+                {
+                    "name": "wait.sleep",
+                    "label": "Sleep time between checks (s)",
+                    "default": 60,
+                    "paramClass": "IntParam",
+                    "help": ""
+                },
+                {
+                    "name": "gpus",
+                    "label": "GPUs",
+                    "default": "0",
+                    "paramClass": "StringParam",
+                    "help": "One processing thread will be created for each value, using Relion's --gpu syntax, e.g. '0,1 2,3' runs two threads with two GPUs each."
+                },
+                {
+                    "label": "Launchers",
+                    "paramClass": "Group",
+                    "help": "Launchers to use for the different programs. If empty, the ones from EMWRAP_CONFIG['programs'] are used.",
+                    "collapsed": true,
+                    "params": [
+                        {
+                            "name": "launcher_relion",
+                            "label": "RELION",
+                            "paramClass": "StringParam",
+                            "allowsEmpty": true,
+                            "help": "Launcher to use for Relion (receives the program name as first argument)"
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}

@@ -28,18 +28,20 @@ from pprint import pprint
 
 from emtools.utils import Color, Timer, Path, Process
 from emtools.metadata import Table, Acquisition
-from emtools.jobs import Vars
 
-CTFFIND_PATH = 'CTFFIND_PATH'
-CTFFIND_VERSION = 'CTFFIND_VERSION'
+from emwrap.base import ProcessingPipeline, ProcessingConfig
 
 
 class Ctffind:
+    PROGRAM = 'CTFFIND'
+
     def __init__(self, *args, **kwargs):
+        """ The launcher is taken from EMWRAP_CONFIG['programs']['CTFFIND'],
+        unless kwargs 'launcher' is given (and similar for 'version'). """
         acq = Acquisition(args[0])
-        vars = Vars(kwargs.get('vars', {}))
-        self.path = vars.get(CTFFIND_PATH, is_path=True)
-        self.version = int(vars.get(CTFFIND_VERSION))
+        self.path = kwargs.get('launcher') or ProcessingPipeline.get_launcher(self.PROGRAM)
+        self.version = int(kwargs.get('version')
+                           or ProcessingConfig.get_program(self.PROGRAM).get('version', 5))
         _get = kwargs.get  # shortcut
         self.args = [acq.pixel_size, acq.voltage, acq.cs, acq.amplitude_contrast,
                      _get('window', 512), _get('min_res', 30.0), _get('max_res', 5.0),

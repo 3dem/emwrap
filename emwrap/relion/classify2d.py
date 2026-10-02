@@ -25,10 +25,15 @@ from emtools.utils import Color, Timer, Path, Process
 from emtools.jobs import Args, Batch
 from emtools.metadata import Table, Column, StarFile, StarMonitor, TextFile
 
+from emwrap.base import ProcessingPipeline
+
 
 class RelionClassify2D:
     def __init__(self, **kwargs):
-        self.path = kwargs['launcher']  # '/usr/local/em/scripts/relion_refine.sh'
+        """ Run relion_refine through the RELION launcher
+        (EMWRAP_CONFIG['programs']['RELION']), unless kwargs 'launcher' is given.
+        The launcher receives the Relion program name as first argument. """
+        self.path = kwargs.get('launcher') or ProcessingPipeline.get_launcher('RELION')
         self.args = Args(kwargs.get('extra_args', {}))
 
     def process_batch(self, batch, **kwargs):
@@ -51,6 +56,7 @@ class RelionClassify2D:
         # --offset_step 2 --norm --scale  --j 32 --gpu ""  --pipeline_control Class2D/job005/
 
         args = Args({
+            'relion_refine': '',
             '--i': batch.join('particles.star'),
             '--o': batch.join('run'),
             '--particle_diameter': 209,

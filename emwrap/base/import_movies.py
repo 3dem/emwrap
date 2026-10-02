@@ -35,13 +35,14 @@ class ImportMoviesPipeline(ProcessingPipeline):
 
     def __init__(self, input_args, output):
         ProcessingPipeline.__init__(self, input_args, output)
-        self.acq = self.loadAcquisition()
+        self.acq = self.loadAcquisition()  # from acq.* params
         args = self._args
 
+        # All wait times are in seconds
         self.wait = {
-            'timeout': args.get('timeout', 120),  # 2 hour
-            'file_change': args.get('file_change', 60),  # 1 min
-            'sleep': args.get('sleep', 60),
+            'timeout': int(args.get('wait.timeout', 7200)),
+            'file_change': int(args.get('wait.file_change', 60)),
+            'sleep': int(args.get('wait.sleep', 60)),
         }
         self.outputStar = self.join('movies.star')
         self.pattern = args[self.input_name]
@@ -108,7 +109,7 @@ class ImportMoviesPipeline(ProcessingPipeline):
                 with StarFile(self.outputStar, 'a') as sf:
                     if moviesTable is None:
                         sf.writeTimeStamp()
-                        sf.writeTable('optics', RelionStar.optics_table(self.acq))
+                        sf.writeTable('optics', self._opticsTable())
                         moviesTable = Table(['rlnImageId',
                                              'rlnMicrographMovieName',
                                              'rlnMicrographOriginalMovieName',
@@ -150,18 +151,35 @@ class ImportMoviesPipeline(ProcessingPipeline):
                                     shutil.copy(gsFn, gsSubFolder)
                                 copiedGs.add(gs)
 
+                if not self.outputs:
+                    self._registerOutput()
                 now = lastUpdate = datetime.now()
             time.sleep(self.wait['sleep'])
 
         self.log(f"Exiting, no new files detected in: "
                  f"{Color.warn(Pretty.delta(now - lastUpdate))}", flush=True)
 
+    def _opticsTable(self):
+        """ Optics table with gain and dose per frame, so they are
+        available for the preprocessing of these movies. """
+        row = RelionStar.optics_table(self.acq)[0]._asdict()
+        if gain := self.acq.get('gain'):
+            row['rlnMicrographGainName'] = gain
+        if self.acq.dose:
+            row['rlnMicrographDoseRate'] = self.acq.dose
+        return Table.fromDict(row)
 
-def main():
-    ImportMoviesPipeline.main()
+    def _registerOutput(self):
+        self.outputs['Movies'] = {
+            'label': 'Movies',
+            'files': [[self.outputStar, 'MicrographMovieGroupMetadata.star.relion']]
+        }
+        self.writeRelionOutputNodes(self.outputs['Movies']['files'])
+        self.writeInfo()
+
 
 if __name__ == '__main__':
-    main()
+    ImportMoviesPipeline.main()
 
 
 
