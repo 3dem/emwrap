@@ -98,7 +98,7 @@
                         {
                             "name": "ts_aretomo.patches",
                             "label": "Patches",
-                            "help": "Number of patches for local alignments in X, Y. Flexible formats accepted: '4x4', '4 x 4', '4 4', '4,4', or single '4'. The value will be adapted to the underlying Aretomo implementation (Aretomo2 expects 'XxY', Aretomo3 expects 'X Y'). By default (empty, or 0x0 or 1x1) only global alignment is performed. More patches increase the processing time."
+                            "help": "Number of patches for local alignments in X, Y. Flexible formats accepted: '4x4', '4 x 4', '4 4', '4,4', or single '4'. The value will be adapted to the underlying Aretomo implementation (Aretomo2 expects 'XxY', Aretomo3 expects 'X,Y'). By default (empty, or 0x0 or 1x1) only global alignment is performed. More patches increase the processing time."
                         }
                     ]
                 },
@@ -160,18 +160,30 @@
                     "collapsed": true,
                     "params": [
                         {
+                            "name": "register_output_only",
+                            "label": "Register output only",
+                            "paramClass": "BooleanParam",
+                            "help": "Register output only, without running the job. Output files (e.g. STAR files) will be re-generated, but the underlying programs will not be executed."
+                        },
+                        {
                             "name": "launcher_warp",
                             "label": "WARP",
                             "paramClass": "StringParam",
-                            "condition": "method == 0",
                             "help": "Launcher to use for Warp"
                         },
                         {
                             "name": "launcher_aretomo",
-                            "label": "ARETOMO",
+                            "label": "ARETOMO2",
                             "paramClass": "StringParam",
                             "condition": "method == 0",
-                            "help": "Launcher to use for Aretomo"
+                            "help": "Launcher to use for Aretomo2"
+                        },
+                        {
+                            "name": "launcher_aretomo3",
+                            "label": "ARETOMO3",
+                            "paramClass": "StringParam",
+                            "condition": "method == 1",
+                            "help": "Launcher to use for Aretomo3"
                         },
                         {
                             "name": "launcher_imod",
