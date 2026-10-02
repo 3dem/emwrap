@@ -216,7 +216,7 @@
                             "label": "CRYOLO",
                             "paramClass": "StringParam",
                             "allowsEmpty": true,
-                            "help": "Launcher to use for cryolo_predict.py"
+                            "help": "Launcher to use for crYOLO, it receives the program (cryolo_predict.py) as first argument, followed by its arguments"
                         },
                         {
                             "name": "launcher_relion",

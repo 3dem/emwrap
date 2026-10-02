@@ -257,7 +257,8 @@ class WarpOTF(WarpBasePipeline):
         return batch
 
     def prerun(self):
-        self.inputTs = StarFile.getTableFromFile('global', self._args['input_tiltseries'])
+        inputStar = self._args['input_tiltseries']
+        self.inputTs = StarFile.getTableFromFile('global', inputStar)
 
         if self._register_output_only():
             return self._output_all()
@@ -267,7 +268,12 @@ class WarpOTF(WarpBasePipeline):
             self.mkdir(d)
         
         self.gain = self.acq.get('gain', None)
-        batchMgr = TsStarBatchManager(self.inputTs, self.tmpDir)
+        # Monitor the input for new tilt series when running on-the-fly
+        if self.inputTsStreaming():
+            tsItems = self.inputTsMonitor(inputStar).newItems()
+        else:
+            tsItems = self.inputTs
+        batchMgr = TsStarBatchManager(tsItems, self.tmpDir)
         g = self.addGenerator(batchMgr.generate, queueMaxSize=len(self.gpuList))
 
 

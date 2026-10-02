@@ -1,0 +1,68 @@
+{
+    "title": "SPA On-The-Fly",
+    "description": "Single-particle on-the-fly processing: import of movies, preprocessing in batches (MotionCor, ctffind, crYOLO picking and Relion extraction) and Relion 2D classification in batches. Session specific values (movies pattern, acquisition, gain) are filled when the OTF project is created (see emwrap.mix.otf).",
+    "jobs": [
+        {
+            "jobid": "Import/job001",
+            "jobtype": "emw-import-movies",
+            "params": {
+                "in_movies": "data/Images-Disc*/GridSquare_*/Data/Foil*fractions.tiff",
+                "acq.gain": "",
+                "acq.pixel_size": "",
+                "acq.voltage": "300",
+                "acq.cs": "2.7",
+                "acq.amplitude_contrast": "0.1",
+                "acq.dose": "",
+                "wait.timeout": "28800",
+                "wait.file_change": "60",
+                "wait.sleep": "300"
+            }
+        },
+        {
+            "jobid": "Preprocess/job002",
+            "jobtype": "emw-preprocessing",
+            "params": {
+                "in_movies": "Import/job001/movies.star",
+                "motioncor.bin": "2",
+                "motioncor.patch": "7 5",
+                "motioncor.dose_weighting": true,
+                "motioncor.extra_args": "-FlipGain 1",
+                "ctf.window": "512",
+                "ctf.min_res": "30.0",
+                "ctf.max_res": "5.0",
+                "ctf.min_def": "5000.0",
+                "ctf.max_def": "50000.0",
+                "ctf.step_def": "100.0",
+                "picking.particle_size": "",
+                "picking.threshold": "0.05",
+                "picking.model": "",
+                "picking.janni_model": "",
+                "extract.scale": "100",
+                "extract.extra_args": "",
+                "gpus": "0 0 0 0 0 0 0 0",
+                "batch_size": "8",
+                "input_timeout": "28800",
+                "scratch_dir": "",
+                "launcher_batch": "",
+                "launcher_motioncor": "",
+                "launcher_ctffind": "",
+                "launcher_cryolo": "",
+                "launcher_relion": ""
+            }
+        },
+        {
+            "jobid": "Class2D/job003",
+            "jobtype": "emw-rln2d",
+            "params": {
+                "in_particles": "Preprocess/job002/particles.star",
+                "batch_size": "100000",
+                "group_column": "",
+                "extra_args": "--K 50",
+                "wait.timeout": "28800",
+                "wait.sleep": "300",
+                "gpus": "0,1 0,1",
+                "launcher_relion": ""
+            }
+        }
+    ]
+}

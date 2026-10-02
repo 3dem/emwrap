@@ -1203,6 +1203,19 @@ class AreTomo3Pipeline(ProcessingPipeline):
         return batch
 
 
+    def _iterNewInputTs(self):
+        """ Yield the input tilt series while monitoring the input STAR file.
+        New ones are added to inputTsTable, used to register the outputs. """
+        known = {row.rlnTomoName for row in self.inputTsTable}
+        monitor = self.inputTsMonitor(self.inputTs,
+                                      tableKwargs={'guessType': False})
+        for row in monitor.newItems():
+            if row.rlnTomoName not in known:
+                known.add(row.rlnTomoName)
+                self.inputTsTable.addRow(row)
+                self.inputLen = len(self.inputTsTable)
+            yield row
+
     # -------- Pipeline lifecycle ---------- 
     def prerun(self):
         self.inputTsTable = self._getInputTsTable()
@@ -1216,7 +1229,12 @@ class AreTomo3Pipeline(ProcessingPipeline):
         self.mkdir(self.outputTsDir)
         self.mkdir(self.outputTomDir)
         
-        batchMgr = TsStarBatchManager(self.inputTsTable, self.tmpDir)
+        # Monitor the input for new tilt series when running on-the-fly
+        if self.inputTsStreaming():
+            tsItems = self._iterNewInputTs()
+        else:
+            tsItems = self.inputTsTable
+        batchMgr = TsStarBatchManager(tsItems, self.tmpDir)
         g = self.addGenerator(batchMgr.generate)
         
         self.addGpuProcessors(g, self.get_aretomo3_proc, self._output)

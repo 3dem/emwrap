@@ -1,0 +1,7 @@
+#!/bin/bash
+
+# Launcher for ctffind (parameters are passed through the standard input)
+
+. /programs/sbgrid.shrc
+
+ctffind5 "$@"

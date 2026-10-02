@@ -297,6 +297,13 @@
                     "collapsed": true,
                     "params": [
                         {
+                            "name": "input_timeout",
+                            "label": "Input timeout (s)",
+                            "default": 0,
+                            "paramClass": "IntParam",
+                            "help": "If greater than 0, the input tilt-series STAR file is monitored for new tilt series (e.g. during on-the-fly processing) and the job stops after this time (in seconds) without new input. With 0, the input is read only once."
+                        },
+                        {
                             "name": "register_output_only",
                             "label": "Register output only",
                             "paramClass": "BooleanParam",
