@@ -1,0 +1,8 @@
+#!/bin/bash
+
+# Launcher for crYOLO, receives the program (e.g. cryolo_predict.py)
+# as first argument, followed by its arguments
+
+. /programs/sbgrid.shrc
+
+"$@"

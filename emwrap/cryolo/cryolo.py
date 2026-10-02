@@ -53,8 +53,9 @@ class CryoloPredict:
     """ Wrapper to cryolo_predict.py. The launcher and the models are taken
     from EMWRAP_CONFIG['programs']['CRYOLO'] (keys: launcher, model and
     janni_model), unless given in kwargs. The launcher receives the
-    cryolo_predict.py arguments. """
+    program (cryolo_predict.py) as first argument, followed by its arguments. """
     PROGRAM = 'CRYOLO'
+    PREDICT = 'cryolo_predict.py'
 
     def __init__(self, **kwargs):
         conf = ProcessingConfig.get_program(self.PROGRAM)
@@ -106,7 +107,7 @@ class CryoloPredict:
             '-o': 'cryolo_boxfiles/'
         }
 
-        batch.call(self.path, kwargs)
+        batch.call(self.path, [self.PREDICT] + Args(kwargs).toList())
 
         batch.info.update({
             'cryolo_elapsed': str(t.getElapsedTime())
