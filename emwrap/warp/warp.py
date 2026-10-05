@@ -140,10 +140,10 @@ class WarpBasePipeline(ProcessingPipeline):
     # Per tilt jpegs next to FS/average, read by the emhub OTF dashboard
     THUMBNAILS = 'thumbnails'
     THUMBNAIL_SIZE = 512
-    # Larger tilt jpegs: suffix -> (size, least block average, blur radius).
-    # Full resolution pixels of a low dose tilt are mostly shot noise, so even
-    # the large one is averaged 2x2 first and blurred a little more.
-    TILT_JPEGS = {'_medium': (1024, 1, 1.0), '_large': (2048, 2, 1.5)}
+    # For a closer look at a tilt.  Larger is not better: each jpeg's
+    # contrast is set from its own pixels, and beyond this size those of a
+    # low dose tilt are mostly shot noise.
+    MEDIUM_THUMBNAIL_SIZE = 1024
     PS_THUMBNAIL_SIZE = 384
 
     INPUTS = {
@@ -508,31 +508,30 @@ class WarpBasePipeline(ProcessingPipeline):
 
     def writeTiltThumbnail(self, avgMrcPath):
         """ Jpegs of a tilt average, into FS/thumbnails: <movie>.jpg for the
-        filmstrip, <movie>_medium.jpg for a closer look beside the plots and
-        <movie>_large.jpg for a larger view.  The MRC is read once, and only
-        if one of them is out of date. """
+        filmstrip and <movie>_medium.jpg for a closer look.  The MRC is read
+        once, and only if one of them is out of date. """
         cache = []
 
-        def _make(size, minBin=1, blur=1.0):
+        def _make(size):
             def make():
                 if not cache:
                     cache.append(Image.get_array(avgMrcPath))
                 data = cache[0]
                 # Block-average down to about twice the output size; this is
                 # the cheap part that also removes most of the shot noise.
-                f = max(minBin, max(data.shape) // (2 * size))
+                f = max(1, max(data.shape) // (2 * size))
                 h, w = (data.shape[0] // f) * f, (data.shape[1] // f) * f
                 binned = (data[:h, :w].astype(np.float32)
                           .reshape(h // f, f, w // f, f).mean(axis=(1, 3)))
                 # A light blur reads better and halves the jpeg
                 return Thumbnail(output_format=None, max_size=(size, size),
                                  std_threshold=2, contrast_factor=0.5,
-                                 gaussian_radius=blur).from_array(binned)
+                                 gaussian_radius=1.0).from_array(binned)
             return make
 
-        self._writeJpeg(avgMrcPath, '', _make(self.THUMBNAIL_SIZE))
-        for suffix, (size, minBin, blur) in self.TILT_JPEGS.items():
-            self._writeJpeg(avgMrcPath, suffix, _make(size, minBin, blur))
+        for suffix, size in (('', self.THUMBNAIL_SIZE),
+                             ('_medium', self.MEDIUM_THUMBNAIL_SIZE)):
+            self._writeJpeg(avgMrcPath, suffix, _make(size))
 
     def writePsThumbnail(self, psMrcPath, warpXml):
         """ CTF fit view of a tilt (see warpCtfView), into FS/thumbnails:
