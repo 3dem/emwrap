@@ -26,6 +26,18 @@
                     "help": "(--eer_ngroups) EER grouping."
                 },
                 {
+                    "name": "eerSampling",
+                    "label": "EER upsampling factor",
+                    "paramClass": "EnumParam",
+                    "choices": {
+                            "1": "Native (4k \u00d7 4k)",
+                            "2": "Super-Res (8k \u00d7 8k)",
+                            "4": "Ultra-Res (16k \u00d7 16k)"
+                            },
+                    "default": "1",
+                    "help": "Render EER movies in super-resolution (EER only, ignored for other formats). Directly determines the maximum achievable resolution.\n\nHow it works: Warp decides the rendering size from the size of the gain reference, so the wrapper upsamples the 4k gain by pixel replication into the job folder (e.g. <gain>_eer2x.gain) and runs create_settings with --angpix = input pixel size / factor. A gain that already matches the upsampled size is used as is. A gain reference is required.\n\n'Target pixel size' (binning) is applied after upsampling, e.g. with an input of 4k at 1.19 A/px:\n- Upsample 2x, no target -> 8k at 0.595 A/px\n- Upsample 2x, target 1.19 -> 8k at 0.595 A/px, binned to 4k at 1.19 A/px\n- Upsample 4x, target 0.595 -> 16k at 0.2975 A/px, binned to 8k at 0.595 A/px\n\nThe output STAR files contain the final tilt image pixel size (rlnTomoTiltSeriesPixelSize) and point to the upsampled gain, so downstream Warp jobs use the same gain. rlnMicrographOriginalPixelSize keeps the input pixel size.\n\nDownstream tilt series alignment and reconstruction:\n- The Warp tilt series settings always use the input (physical) pixel size as --angpix, because Warp reads the image size from the EER header (always 4k). Give --tomo_dimensions in input pixels whatever the upsampling, e.g. 4096x4096x2000 at 1.19 A/px.\n- Alignment and reconstruction pixel sizes are absolute, so the binning is relative to the tilt images: 4.76 A/px is bin 8 for 0.595 A/px tilt images and bin 4 for 1.19 A/px ones.\n\nIMPORTANT: Use Warp version 2.0.0dev33 for motion correction with upsampling (set the WARP launcher to warp_launcher_vdev33.sh). Newer development versions (e.g. 2.0.0dev40) have a bug that randomly writes about half of the averages as a 4k image packed into the top quarter of the 8k frame."
+                },
+                {
                     "paramClass": "Line",
                     "label": "Resolution range:",
                     "params": [

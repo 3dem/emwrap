@@ -81,6 +81,7 @@ class WarpMotionCtf(WarpBasePipeline):
         batch.mkdir(self.FS)
 
         ext = None
+        movieFn = None
         ps = None
         dims = None
         N = None
@@ -101,13 +102,17 @@ class WarpMotionCtf(WarpBasePipeline):
                 # Calculate extension only once
                 if ext is None:
                     ext = Path.getExt(frameBase)
-                    dims = Image.get_dimensions(frameRow.rlnMicrographMovieName)
+                    movieFn = frameRow.rlnMicrographMovieName
+                    dims = Image.get_dimensions(movieFn)
 
         x, y, n = dims
 
-        if gain := self.acq.get('gain', None):
-            self.log(f"{self.name}: Linking gain file: {gain}")
-            self.link(gain)
+        # EER upsampling needs a gain upsampled into this folder
+        if gain := self.eerGain(self.acq.get('gain', None), movieFn):
+            self.gain = os.path.basename(gain)
+            if gain != self.join(self.gain):
+                self.log(f"{self.name}: Linking gain file: {gain}")
+                self.link(gain)
 
         cs = 'create_settings'  # shortcut
 
@@ -120,6 +125,17 @@ class WarpMotionCtf(WarpBasePipeline):
             eer = True
         else:
             ngroups = n
+            if self.eerUpsampling() > 1:
+                self.log(f"{self.name}: EER upsampling ignored for {ext} movies.")
+
+        # Upsampled (EER only) and binned pixel sizes
+        angpix, binAngpix = self.mctfPs(ps, movieFn)
+        self.log(f"{self.name}: Pixel size: input {ps}, "
+                 f"unbinned {angpix}, output {binAngpix}")
+        if self.targetPs(angpix) < angpix:
+            self.log(f"{self.name}: WARNING: Target pixel size "
+                     f"{self.targetPs(angpix)} is smaller than {angpix}, "
+                     f"no binning will be applied.")
 
         # Run create_settings
         args = Args({
@@ -128,13 +144,12 @@ class WarpMotionCtf(WarpBasePipeline):
             '--extension': f"*{ext}",
             '--folder_processing': self.FS,
             '--output': self.FSS,
-            '--angpix': ps,
+            '--angpix': angpix,
             '--exposure': self.acq['total_dose']
-        })  
-        tPs = self.targetPs(ps)
+        })
 
-        if tPs > ps:
-            args['--bin_angpix'] = tPs
+        if binAngpix > angpix:
+            args['--bin_angpix'] = binAngpix
 
         if self.gain:
             args['--gain_path'] = self.gain
@@ -209,6 +224,8 @@ class WarpMotionCtf(WarpBasePipeline):
         new_cols = ['rlnTomoTiltSeriesPixelSize']
         if not tsAllTable.hasColumn('rlnTomoMdocFile'):
             new_cols.append('rlnTomoMdocFile')
+        if self.eerGainOutput() and not tsAllTable.hasColumn('rlnMicrographGainName'):
+            new_cols.append('rlnMicrographGainName')
         newTsAllTable = Table(tsAllTable.getColumnNames() + new_cols)
         failedTable = Table(newTsAllTable.getColumnNames())
 
