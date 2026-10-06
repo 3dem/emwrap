@@ -85,12 +85,17 @@ class WarpOTF(WarpBasePipeline):
 
             rowDict['rlnTomoTiltSeriesStarFile'] = localTsStarFn
             rowDict['rlnTomoMdocFile'] = mdocFn
+            if self.gain:  # Possibly the upsampled EER gain
+                rowDict['rlnMicrographGainName'] = self.gain
             # Use the actual Mctf target pixel size (accounts for
             # create_settings.bin_angpix / mctf.create_settings.bin_angpix),
             # not just the raw/original one, so that WarpTsAlign's
             # create_settings call later gets the correct --bin_angpix
             # and produces correct Image/Volume dimensions when Mctf bins.
-            rowDict['rlnTomoTiltSeriesPixelSize'] = self.targetPs(rowDict['rlnMicrographOriginalPixelSize'])
+            # It also accounts for EER upsampling (mctf.eerSampling).
+            _, rowDict['rlnTomoTiltSeriesPixelSize'] = self.mctfPs(
+                rowDict['rlnMicrographOriginalPixelSize'],
+                tsTable[0].rlnMicrographMovieName)
             table = Table.fromDict(rowDict)
             inputTs = batch.join('tilt_series.star')
             with StarFile(inputTs, 'w') as sf:
@@ -273,7 +278,11 @@ class WarpOTF(WarpBasePipeline):
         for d in self.WARP_FOLDERS:
             self.mkdir(d)
         
-        self.gain = self.acq.get('gain', None)
+        # Upsample the EER gain only once, it is passed to every batch
+        first = self.inputTs[0]
+        tsTable = StarFile.getTableFromFile(first.rlnTomoName, first.rlnTomoTiltSeriesStarFile)
+        self.gain = self.eerGain(self.acq.get('gain', None),
+                                 tsTable[0].rlnMicrographMovieName)
         batchMgr = TsStarBatchManager(self.inputTs, self.tmpDir)
         g = self.addGenerator(batchMgr.generate, queueMaxSize=len(self.gpuList))
 
