@@ -193,6 +193,16 @@ class AreTomo3Pipeline(ProcessingPipeline):
 
     def newTargetTomBinning(self):
         return self._get_first_binning_value(self._args.get('aretomo3.AtBin', ''))
+
+    def unbinnedTomSize(self, tomDims):
+        """ Return rlnTomoSizeX/Y/Z from the reconstructed tomogram dimensions.
+        Relion expects them in unbinned voxels (rlnTomoTiltSeriesPixelSize),
+        while AreTomo3 tomograms are binned by AtBin, so that
+        rlnTomoSize / rlnTomoTomogramBinning gives back the tomogram grid.
+        """
+        binning = self.newTargetTomBinning()
+        return {f'rlnTomoSize{axis}': int(round(float(d) * binning))
+                for axis, d in zip('XYZ', tomDims[:3])}
     
     # ----- Input/output folder helpers --------
     def _getInputTsTable(self):
@@ -787,9 +797,7 @@ class AreTomo3Pipeline(ProcessingPipeline):
             'rlnEtomoDirectiveFile': edfFile or '',
             'rlnTomoReconstructedTomogram': result.get('rlnTomoReconstructedTomogram', ''),
             'rlnTomoTomogramBinning': self.newTargetTomBinning(),
-            'rlnTomoSizeX': tomDims[0],
-            'rlnTomoSizeY': tomDims[1],
-            'rlnTomoSizeZ': tomDims[2],
+            **self.unbinnedTomSize(tomDims),
             # In your result dict these are currently named rlnTomoNameOdd/Evn,
             # but the tomograms.star columns you chose are Half1/Half2.
             'rlnTomoReconstructedTomogramHalf1': result.get('rlnTomoNameEvn', ''),

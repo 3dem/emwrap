@@ -109,7 +109,7 @@ class AreTomo3ReconstructPipeline(Aretomo3ModularBase):
             values.update({
                 'rlnTomoReconstructedTomogram': tomo,
                 'rlnTomoTomogramBinning': self.newTargetTomBinning(),
-                'rlnTomoSizeX': dims[0], 'rlnTomoSizeY': dims[1], 'rlnTomoSizeZ': dims[2],
+                **self.unbinnedTomSize(dims),
                 'rlnEtomoDirectiveFile': create_dummy_edf_file(os.path.dirname(tomo), ts_name),
                 'rlnTomoReconstructedTomogramHalf1': result.get('rlnTomoNameEvn', ''),
                 'rlnTomoReconstructedTomogramHalf2': result.get('rlnTomoNameOdd', ''),
