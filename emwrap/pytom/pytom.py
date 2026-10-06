@@ -69,7 +69,7 @@ class PyTom:
         args.update(self.argsFromAcq(self.acq))
         extraArgs = {
             '--destination': 'output',
-            '--tomogram': batch.link(batch['tomogram']),
+            '--tomogram': batch.link(batch['tomogram'], absolute=True),
             '--tilt-angles': _write_list('tilt_angles', 'rawtlt'),
             '--dose-accumulation': _write_list('dose_accumulation', 'txt')
         }
@@ -83,9 +83,10 @@ class PyTom:
         for k, v in self.args['pytom'].items():
             if k == 'extra_args':
                 continue  # handled separately below, once all other args are set
-            # Let's create some relative symbolic links and update arguments
+            # Absolute links: the batch folder may live in a scratch tmp/ (symlink)
+            # where relative links would not resolve
             if k in ['template', 'mask']:
-                args[f'--{k}'] = batch.link(v)
+                args[f'--{k}'] = batch.link(v, absolute=True)
             elif k in ['s', 'g']:
                 args[f'--{k}'] = v.split()
             elif isinstance(v, bool):
