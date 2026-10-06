@@ -761,8 +761,17 @@ class WarpBasePipeline(ProcessingPipeline):
             return False, None
 
         # For Relion tomogram.star, we need the original tomogram dimensions
-        d = WarpXml(tssFile).getDict('Settings', 'Tomo', 'Param')
+        tssXml = WarpXml(tssFile)
+        d = tssXml.getDict('Settings', 'Tomo', 'Param')
         # {'DimensionsX': '4400', 'DimensionsY': '6000', 'DimensionsZ': '1000'}
+        # Warp dimensions are in pixels of the TS settings --angpix (the
+        # original pixel size), Relion expects them in rlnTomoTiltSeriesPixelSize
+        # pixels, they differ when Mctf binned or upsampled (EER) the movies.
+        tssPs = float(tssXml.getDict('Settings', 'Import', 'Param')['PixelSize'])
+        scale = tssPs / float(tsDict['rlnTomoTiltSeriesPixelSize'])
+
+        def _size(axis):
+            return int(round(float(d[f'Dimensions{axis}']) * scale))
 
         if not ok:
             self.log(f"ERROR: Missing reconstructed tomogram for TS {tsName} in {recpath}")
@@ -772,9 +781,9 @@ class WarpBasePipeline(ProcessingPipeline):
             'rlnTomoReconstructedTomogram': t,
             'rlnTomoTomogramBinning': binning,
             'rlnDefocus': defocus,
-            'rlnTomoSizeX': d['DimensionsX'],
-            'rlnTomoSizeY': d['DimensionsY'],
-            'rlnTomoSizeZ': d['DimensionsZ'],
+            'rlnTomoSizeX': _size('X'),
+            'rlnTomoSizeY': _size('Y'),
+            'rlnTomoSizeZ': _size('Z'),
             'rlnTomoReconstructedTomogramHalf1': te,
             'rlnTomoReconstructedTomogramHalf2': to,
             'wrpTomostar': tomostar
