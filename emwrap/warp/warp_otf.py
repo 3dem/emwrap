@@ -100,9 +100,14 @@ class WarpOTF(WarpBasePipeline):
                 """ Special subargs to remove the first prefix only. """ 
                 return self._args.subset(key, '')
 
+            # Use the job Warp launcher in all steps (e.g. 2.0.0dev33 for EER upsampling)
+            launcher = self._args.get('launcher_warp')
+
             # 1. Run Motion Correction and CTF Estimation
             mctf_args = _subargs('mctf')
-            
+            if launcher:
+                mctf_args.setdefault('launcher_warp', launcher)
+
             # mctf_args['input_tiltseries'] = inputTs
 
             self.log(f"OTF - MCTF arguments: {mctf_args}")
@@ -120,6 +125,8 @@ class WarpOTF(WarpBasePipeline):
             # 3. Run CTF Reconstruction
             # Update some CTF parameters from MCTF
             ctf_args = _subargs('ctfrec')
+            if launcher:
+                ctf_args.setdefault('launcher_warp', launcher)
             key_map_exceptions = {
                 'range_low': 'range_min',
                 'range_high': 'range_max',
