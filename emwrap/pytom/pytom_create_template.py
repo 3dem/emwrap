@@ -14,6 +14,9 @@
 # *
 # **************************************************************************
 
+import os
+import shutil
+
 from emtools.utils import Path
 from emtools.jobs import Batch
 from emwrap.base import ProcessingPipeline
@@ -33,9 +36,17 @@ class PyTomCreateTemplate(ProcessingPipeline):
                 subargs[a] = ''
             else:
                 del subargs[a]
-        inputMap = batch.link(subargs['--input-map'])
+        # Copy (not link) the input map into the job folder, so the template
+        # can never be written back through a link onto the original file,
+        # and both are kept side by side for comparison
+        inputMap = os.path.basename(subargs['--input-map'])
+        inputCopy = batch.join(inputMap)
+        
+        if not (os.path.exists(inputCopy) and
+                os.path.samefile(subargs['--input-map'], inputCopy)):
+            shutil.copy(subargs['--input-map'], inputCopy)
         subargs['--input-map'] = inputMap
-        outputVol = Path.replaceBaseExt(inputMap, '.mrc')
+        outputVol = Path.replaceBaseExt(inputMap, '_template.mrc')
         subargs['--output-file'] = outputVol
 
         # Create the template
