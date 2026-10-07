@@ -15,6 +15,29 @@
                     "pointerClass": "TiltSeriesMovies"
                 },
                 {
+                    "name": "mctf.create_settings.bin_angpix",
+                    "label": "Target pixel size",
+                    "help": "(--bin_angpix in create_settings) Pixel size in Angstrom of the motion corrected tilt images. Warp chooses the binning automatically to match it. Leave empty or 0 for no binning. With EER upsampling, binning is applied after upsampling (see EER upsampling factor).",
+                    "default": 0
+                },
+                {
+                    "name": "mctf.create_settings.eer_ngroups",
+                    "label": "EER groups",
+                    "help": "(--eer_ngroups) EER grouping. Required for EER movies."
+                },
+                {
+                    "name": "mctf.eerSampling",
+                    "label": "EER upsampling factor",
+                    "paramClass": "EnumParam",
+                    "choices": {
+                            "1": "Native (4k \u00d7 4k)",
+                            "2": "Super-Res (8k \u00d7 8k)",
+                            "4": "Ultra-Res (16k \u00d7 16k)"
+                            },
+                    "default": "1",
+                    "help": "Render EER movies in super-resolution (EER only, ignored for other formats). Same behaviour as in emw-warp-mctf, see its help for details.\n\nThe 4k gain is upsampled once by pixel replication into the job folder and used by all tilt series. 'Target pixel size' is applied after upsampling, e.g. with an input of 4k at 1.19 A/px:\n- Upsample 2x, no target -> 8k at 0.595 A/px\n- Upsample 2x, target 1.19 -> 4k at 1.19 A/px\n- Upsample 4x, target 0.595 -> 8k at 0.595 A/px\n\nGive the Tomogram dimensions in input (physical) pixels whatever the upsampling, e.g. 4096x4096x2000 at 1.19 A/px. Alignment and reconstruction pixel sizes are absolute, so the binning is relative to the tilt images.\n\nIMPORTANT: Use Warp version 2.0.0dev33 for upsampling (set the WARP launcher to warp_launcher_vdev33.sh; it is used by all OTF steps). Newer development versions (e.g. 2.0.0dev40) have a bug that randomly writes about half of the averages as a 4k image packed into the top quarter of the 8k frame."
+                },
+                {
                     "paramClass": "Line",
                     "label": "Resolution range:",
                     "params": [
