@@ -19,6 +19,8 @@ import shutil
 import numpy as np
 from collections import defaultdict
 from glob import glob
+import mrcfile
+import tifffile
 
 from emtools.utils import FolderManager, Path
 from emtools.metadata import (StarFile, Table, RelionStar, WarpXml, Imod,
@@ -457,11 +459,9 @@ class WarpBasePipeline(ProcessingPipeline):
         # Write to a temporary file first, to not reuse a partial gain
         tmpFn = outFn + '.tmp'
         if Path.getExt(outFn) in ('.mrc', '.mrcs'):
-            import mrcfile
             with mrcfile.new(tmpFn, data=data, overwrite=True):
                 pass
         else:  # .gain or .tif(f), written as TIFF with the same compression
-            import tifffile
             with tifffile.TiffFile(gainFile) as tif:
                 compression = tif.pages[0].compression
             tifffile.imwrite(tmpFn, data, compression=compression)
