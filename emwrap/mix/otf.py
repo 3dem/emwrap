@@ -89,7 +89,7 @@ class OTF(FolderManager):
                 workflow id or a JSON file (default: cls.WORKFLOW).
                 Instance specific params for each job type (e.g. launchers
                 or GPUs) can be defined in the config (see module doc), e.g.:
-                {"emw-preprocessing": {"launcher_batch": "/path/to/script.sh"}}
+                {"emw-preprocessing": {"launcher_preprocessing": "/path/to/script.sh"}}
             resources: EMhub resources, to find the microscope of the session
         """
         project = ProjectManager(self.path, create=True)

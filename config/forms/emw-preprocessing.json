@@ -159,9 +159,9 @@
                 {
                     "name": "gpus",
                     "label": "GPUs",
-                    "default": "0",
+                    "default": "1",
                     "paramClass": "StringParam",
-                    "help": "One processing thread will be created for each value, e.g. '0 0 1 1' runs two threads in each of GPUs 0 and 1."
+                    "help": "If it is a single number (N), it will represent the total number of GPUs (0..N-1). If there are multiple values (or a quoted single value, e.g. \"2\"), they are specific GPU ids, and one processing thread will be created for each value (they can be repeated, e.g. '0 0 0 0' runs four threads using GPU 0). Values separated by commas are used by the same thread, e.g. '0,1 2,3' runs two threads with two GPUs each."
                 },
                 {
                     "name": "batch_size",
@@ -187,43 +187,14 @@
                 {
                     "label": "Launchers",
                     "paramClass": "Group",
-                    "help": "Launchers to use for the different programs. If empty, the ones from EMWRAP_CONFIG['programs'] are used.",
                     "collapsed": true,
                     "params": [
                         {
-                            "name": "launcher_batch",
-                            "label": "Batch",
+                            "name": "launcher_preprocessing",
+                            "label": "PREPROCESSING",
                             "paramClass": "StringParam",
                             "allowsEmpty": true,
-                            "help": "Optional launcher to process each batch in a separate process (e.g. submitting to a cluster). It receives the project folder and the batch JSON file and should run: emh-tomo --launch emwrap.mix.preprocessing \"$@\""
-                        },
-                        {
-                            "name": "launcher_motioncor",
-                            "label": "MOTIONCOR3",
-                            "paramClass": "StringParam",
-                            "allowsEmpty": true,
-                            "help": "Launcher to use for MotionCor"
-                        },
-                        {
-                            "name": "launcher_ctffind",
-                            "label": "CTFFIND",
-                            "paramClass": "StringParam",
-                            "allowsEmpty": true,
-                            "help": "Launcher to use for ctffind"
-                        },
-                        {
-                            "name": "launcher_cryolo",
-                            "label": "CRYOLO",
-                            "paramClass": "StringParam",
-                            "allowsEmpty": true,
-                            "help": "Launcher to use for crYOLO, it receives the program (cryolo_predict.py) as first argument, followed by its arguments"
-                        },
-                        {
-                            "name": "launcher_relion",
-                            "label": "RELION",
-                            "paramClass": "StringParam",
-                            "allowsEmpty": true,
-                            "help": "Launcher to use for Relion (receives the program name as first argument)"
+                            "help": "Optional launcher to process each batch in a separate process (e.g. submitting to a cluster). It receives the project folder and the batch JSON file, it should setup the environment for the programs (EMWRAP_CONFIG launchers of MOTIONCOR3, CTFFIND, CRYOLO and RELION) and run: python -m emwrap.mix.preprocessing \"$@\". If empty, batches are processed in the job process."
                         }
                     ]
                 }

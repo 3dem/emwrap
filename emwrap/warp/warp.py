@@ -19,6 +19,8 @@ import shutil
 import numpy as np
 from collections import defaultdict
 from glob import glob
+import mrcfile
+import tifffile
 
 from emtools.utils import FolderManager, Path
 from emtools.metadata import (StarFile, Table, RelionStar, WarpXml, Imod,
@@ -388,6 +390,92 @@ class WarpBasePipeline(ProcessingPipeline):
              self._args.get('mctf.create_settings.bin_angpix', '') or 0)
         return float(v) or inputPs
 
+    def eerUpsampling(self):
+        """ Return the EER upsampling factor (1, 2 or 4) from eerSampling. """
+        v = (self._args.get('eerSampling', '') or
+             self._args.get('mctf.eerSampling', '') or 1)
+        return int(v)
+
+    def mctfPs(self, inputPs, movieFn):
+        """ Return (angpix, binAngpix) used by Mctf create_settings.
+
+        EER movies upsampled by a factor U are processed at inputPs / U
+        (Warp renders them in super-resolution when the gain is U times
+        larger than the movies, see eerGain). Binning to the target pixel size
+        (create_settings.bin_angpix) is applied after upsampling, e.g.
+            4k @ 1 A/px -> upsample 2x -> 8k @ 0.5 A/px -> bin 2x -> 4k @ 1 A/px
+            4k @ 1 A/px -> upsample 4x -> 16k @ 0.25 A/px -> bin 2x -> 8k @ 0.5 A/px
+        binAngpix is the pixel size of the output averages; it is equal to
+        angpix when no binning is applied (Warp can not bin below 1x).
+        """
+        up = self.eerUpsampling() if Path.getExt(movieFn) == '.eer' else 1
+        angpix = float(inputPs) / up
+        binAngpix = max(self.targetPs(angpix), angpix)
+        return angpix, binAngpix
+
+    def eerGainName(self, gainFile):
+        """ Name of the upsampled EER gain created in the job folder. """
+        base, ext = os.path.splitext(os.path.basename(gainFile))
+        return f"{base}_eer{self.eerUpsampling()}x{ext}"
+
+    def eerGain(self, gainFile, movieFn):
+        """ Return the gain to use with movieFn, upsampling it for EER.
+
+        Warp renders EER frames at the size of the gain reference
+        (4k: native, 8k: 2x and 16k: 4x super-resolution), so the gain
+        must match the eerSampling factor. A gain with the physical size
+        of the movies is upsampled by pixel replication into the job
+        folder (keeping its format); a gain that already matches is
+        returned as is.
+        """
+        up = self.eerUpsampling()
+        if Path.getExt(movieFn) != '.eer':
+            return gainFile
+        if not gainFile:
+            if up > 1:
+                raise Exception("EER upsampling requires a gain reference.")
+            return gainFile
+
+        mx, my = Image.get_dimensions(movieFn)[:2]
+        gx, gy = Image.get_dimensions(gainFile)[:2]
+        if (gx, gy) == (mx * up, my * up):
+            return gainFile
+        if up == 1 or (gx, gy) != (mx, my):
+            expected = {f"{mx}x{my}", f"{mx * up}x{my * up}"}
+            raise Exception(f"Gain size {gx}x{gy} does not match EER movies "
+                            f"{mx}x{my} with upsampling {up}x "
+                            f"(expected {' or '.join(sorted(expected))}).")
+
+        outFn = self.join(self.eerGainName(gainFile))
+        if os.path.exists(outFn):  # Created in a previous run
+            return outFn
+
+        self.log(f"{self.name}: Upsampling gain {gainFile} ({gx}x{gy}) "
+                 f"{up}x -> {outFn}")
+        # EPU .gain files are LZW compressed TIFFs, decoded by tifffile
+        # through imagecodecs
+        data = np.asarray(Image.get_array(gainFile), dtype=np.float32).squeeze()
+        data = np.repeat(np.repeat(data, up, axis=0), up, axis=1)
+        # Write to a temporary file first, to not reuse a partial gain
+        tmpFn = outFn + '.tmp'
+        if Path.getExt(outFn) in ('.mrc', '.mrcs'):
+            with mrcfile.new(tmpFn, data=data, overwrite=True):
+                pass
+        else:  # .gain or .tif(f), written as TIFF with the same compression
+            with tifffile.TiffFile(gainFile) as tif:
+                compression = tif.pages[0].compression
+            tifffile.imwrite(tmpFn, data, compression=compression)
+        os.replace(tmpFn, outFn)
+        return outFn
+
+    def eerGainOutput(self):
+        """ Upsampled EER gain created in this job folder, or None. """
+        if gain := self.acq.get('gain', None):
+            gainFn = self.join(self.eerGainName(gain))
+            if os.path.exists(gainFn):
+                return gainFn
+        return None
+
     def updateMctfTsDict(self, tsDict, mdocFile, mdocsFm):
         """ Update tsDict with MCTF Relion labels and build the enriched TS table.
 
@@ -406,13 +494,14 @@ class WarpBasePipeline(ProcessingPipeline):
 
         tsName = tsDict['rlnTomoName']
         tsStarFile = self.join('tilt_series', tsName + '.star')
-        newPs = self.targetPs(tsDict['rlnMicrographOriginalPixelSize'])
 
         if not mdocFile or not os.path.exists(mdocFile):
             self.log(f"Mdoc {mdocFile} not found for TS {tsName}, skipping...")
             return False, None, None
 
         tsTable = StarFile.getTableFromFile(tsName, tsDict['rlnTomoTiltSeriesStarFile'], guessType=False)
+        _, newPs = self.mctfPs(tsDict['rlnMicrographOriginalPixelSize'],
+                               tsTable[0].rlnMicrographMovieName)
 
         # Each input movie must have xml + average mrc (same idea as WarpAreTomo
         # requiring aligned stack per TS). Collect missing before building output.
@@ -431,6 +520,9 @@ class WarpBasePipeline(ProcessingPipeline):
             'rlnTomoTiltSeriesPixelSize': newPs,
             'rlnTomoTiltSeriesStarFile': tsStarFile
         })
+        # Downstream jobs must use the same (upsampled) gain
+        if gain := self.eerGainOutput():
+            tsDict['rlnMicrographGainName'] = gain
         dstMdocFile = mdocsFm.join(f'{tsName}.mdoc')
         shutil.copy(mdocFile, dstMdocFile)
         tsDict['rlnTomoMdocFile'] = dstMdocFile
@@ -669,8 +761,17 @@ class WarpBasePipeline(ProcessingPipeline):
             return False, None
 
         # For Relion tomogram.star, we need the original tomogram dimensions
-        d = WarpXml(tssFile).getDict('Settings', 'Tomo', 'Param')
+        tssXml = WarpXml(tssFile)
+        d = tssXml.getDict('Settings', 'Tomo', 'Param')
         # {'DimensionsX': '4400', 'DimensionsY': '6000', 'DimensionsZ': '1000'}
+        # Warp dimensions are in pixels of the TS settings --angpix (the
+        # original pixel size), Relion expects them in rlnTomoTiltSeriesPixelSize
+        # pixels, they differ when Mctf binned or upsampled (EER) the movies.
+        tssPs = float(tssXml.getDict('Settings', 'Import', 'Param')['PixelSize'])
+        scale = tssPs / float(tsDict['rlnTomoTiltSeriesPixelSize'])
+
+        def _size(axis):
+            return int(round(float(d[f'Dimensions{axis}']) * scale))
 
         if not ok:
             self.log(f"ERROR: Missing reconstructed tomogram for TS {tsName} in {recpath}")
@@ -680,9 +781,9 @@ class WarpBasePipeline(ProcessingPipeline):
             'rlnTomoReconstructedTomogram': t,
             'rlnTomoTomogramBinning': binning,
             'rlnDefocus': defocus,
-            'rlnTomoSizeX': d['DimensionsX'],
-            'rlnTomoSizeY': d['DimensionsY'],
-            'rlnTomoSizeZ': d['DimensionsZ'],
+            'rlnTomoSizeX': _size('X'),
+            'rlnTomoSizeY': _size('Y'),
+            'rlnTomoSizeZ': _size('Z'),
             'rlnTomoReconstructedTomogramHalf1': te,
             'rlnTomoReconstructedTomogramHalf2': to,
             'wrpTomostar': tomostar
@@ -829,6 +930,10 @@ class WarpBaseTsAlign(WarpBasePipeline):
         # --bin_angpix the (possibly binned) processing pixel size; the
         # --tomo_dimensions value is always given in raw/unbinned pixels.
         # Falls back to ps if the original pixel size column is missing.
+        # NOTE: Keep the original pixel size even when EER upsampling makes
+        # the tilt images finer (e.g. 8k @ 0.595 from 4k @ 1.19): Warp takes
+        # the image size from the movie header (always 4k for EER) times
+        # --angpix, so a finer --angpix shrinks the field of view.
         rawPs = getattr(first, 'rlnMicrographOriginalPixelSize', None) or ps
         tsTable = StarFile.getTableFromFile(first.rlnTomoName, first.rlnTomoTiltSeriesStarFile, guessType=False)
         N = len(tsAllTable)

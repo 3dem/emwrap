@@ -85,12 +85,17 @@ class WarpOTF(WarpBasePipeline):
 
             rowDict['rlnTomoTiltSeriesStarFile'] = localTsStarFn
             rowDict['rlnTomoMdocFile'] = mdocFn
+            if self.gain:  # Possibly the upsampled EER gain
+                rowDict['rlnMicrographGainName'] = self.gain
             # Use the actual Mctf target pixel size (accounts for
             # create_settings.bin_angpix / mctf.create_settings.bin_angpix),
             # not just the raw/original one, so that WarpTsAlign's
             # create_settings call later gets the correct --bin_angpix
             # and produces correct Image/Volume dimensions when Mctf bins.
-            rowDict['rlnTomoTiltSeriesPixelSize'] = self.targetPs(rowDict['rlnMicrographOriginalPixelSize'])
+            # It also accounts for EER upsampling (mctf.eerSampling).
+            _, rowDict['rlnTomoTiltSeriesPixelSize'] = self.mctfPs(
+                rowDict['rlnMicrographOriginalPixelSize'],
+                tsTable[0].rlnMicrographMovieName)
             table = Table.fromDict(rowDict)
             inputTs = batch.join('tilt_series.star')
             with StarFile(inputTs, 'w') as sf:
@@ -100,9 +105,14 @@ class WarpOTF(WarpBasePipeline):
                 """ Special subargs to remove the first prefix only. """ 
                 return self._args.subset(key, '')
 
+            # Use the job Warp launcher in all steps (e.g. 2.0.0dev33 for EER upsampling)
+            launcher = self._args.get('launcher_warp')
+
             # 1. Run Motion Correction and CTF Estimation
             mctf_args = _subargs('mctf')
-            
+            if launcher:
+                mctf_args.setdefault('launcher_warp', launcher)
+
             # mctf_args['input_tiltseries'] = inputTs
 
             self.log(f"OTF - MCTF arguments: {mctf_args}")
@@ -120,6 +130,8 @@ class WarpOTF(WarpBasePipeline):
             # 3. Run CTF Reconstruction
             # Update some CTF parameters from MCTF
             ctf_args = _subargs('ctfrec')
+            if launcher:
+                ctf_args.setdefault('launcher_warp', launcher)
             key_map_exceptions = {
                 'range_low': 'range_min',
                 'range_high': 'range_max',
@@ -267,7 +279,11 @@ class WarpOTF(WarpBasePipeline):
         for d in self.WARP_FOLDERS:
             self.mkdir(d)
         
-        self.gain = self.acq.get('gain', None)
+        # Upsample the EER gain only once, it is passed to every batch
+        first = self.inputTs[0]
+        tsTable = StarFile.getTableFromFile(first.rlnTomoName, first.rlnTomoTiltSeriesStarFile)
+        self.gain = self.eerGain(self.acq.get('gain', None),
+                                 tsTable[0].rlnMicrographMovieName)
         # Monitor the input for new tilt series when running on-the-fly
         if self.inputTsStreaming():
             tsItems = self.inputTsMonitor(inputStar).newItems()

@@ -152,9 +152,12 @@ class Relion2DPipeline(ProcessingPipeline):
 
     def __init__(self, input_args, output):
         ProcessingPipeline.__init__(self, input_args, output)
-        # One processing thread per entry, each entry with Relion's --gpu
-        # syntax, e.g. "0,1 2,3" (two threads using two GPUs each)
-        self.gpuList = str(self._args.get('gpus', '0')).split()
+        # One processing thread per GPU group (see get_gpu_groups), with
+        # Relion's --gpu syntax, e.g. "0,1 2,3" (two threads with two GPUs each)
+        self.gpuList = [','.join(str(g) for g in group)
+                        for group in self.get_gpu_groups(self._args.get('gpus', '1'))]
+        if not self.gpuList:
+            raise Exception("Relion 2D classification requires at least one GPU (gpus param)")
         # Launcher empty means using EMWRAP_CONFIG['programs']['RELION']
         self._rln2d_args = {
             'launcher': self._args.get('launcher_relion') or None,
@@ -169,7 +172,8 @@ class Relion2DPipeline(ProcessingPipeline):
                           f"GPU = {gpu}", flush=True)
                 rln2d = RelionClassify2D(**self._rln2d_args)
                 rln2d.process_batch(batch, gpu=gpu)
-                rln2d.clean_iter_files(batch)
+                if self.do_clean():
+                    rln2d.clean_iter_files(batch)
             except Exception as e:
                 batch['error'] = str(e)
             return batch
@@ -179,28 +183,38 @@ class Relion2DPipeline(ProcessingPipeline):
     def _output(self, batch):
         iterFiles = {}
         if not batch.error:
-            iterFiles = next(iter(RelionClassify2D.get_iter_files(batch).values()), {})
-            if iterFiles is None:
+            # Files of the last iteration (others might be kept if EMWRAP_CLEAN=0)
+            allIterFiles = RelionClassify2D.get_iter_files(batch)
+            iterFiles = allIterFiles[max(allIterFiles)] if allIterFiles else {}
+            if not iterFiles:
                 batch.error = f"No output files."
-                batch.log(Color.red(f"ERROR: {batch['error']}"))
-            else:
-                if missing := [fn for fn in iterFiles.values() if not batch.exists(fn)]:
-                    batch.error = f"Missing files: {missing}"
+            elif missing := [k for k in ['optimiser', 'data'] if k not in iterFiles]:
+                batch.error = f"Missing output files: {missing}"
+            elif missing := [fn for fn in iterFiles.values() if not batch.exists(fn)]:
+                batch.error = f"Missing files: {missing}"
 
         if batch.error:
             batch.log(Color.red(f"ERROR: {batch.error}"))
         else:
-            Process.system(f"rm {batch.join('*moment.mrcs')}", print=batch.log)
+            if self.do_clean():
+                Process.system(f"rm {batch.join('*moment.mrcs')}", print=batch.log)
             Process.system(f"mv {batch.path} {self.join('Classes2D')}", print=batch.log)
-            classesId = f'Classes2D_{batch.id}'
-            self.info['outputs'][classesId] = {
-                'label': classesId,
-                'files': [
-                    [iterFiles.get('data', batch.join('data:None')), 'ParticleGroupMetadata.star.relion.class2d'],
-                    [iterFiles.get('optimiser', 'optimiser:None'), 'ProcessData.star.relion.optimiser.class2d']
-                ]}
+            # Batch files are now in the Classes2D folder
+            classesDir = self.join('Classes2D', os.path.basename(batch.path))
 
             with self.outputLock:
+                classesId = f'Classes2D_{batch.id}'
+                self.outputs[classesId] = {
+                    'label': classesId,
+                    'files': [
+                        [os.path.join(classesDir, iterFiles['optimiser']),
+                         'OptimiserData.star.relion.class2d.Classes2D'],
+                        [os.path.join(classesDir, iterFiles['data']),
+                         'ParticleGroupMetadata.star.relion.class2d.Particles']
+                    ]}
+                self.writeRelionOutputNodes(
+                    [f for o in self.outputs.values() for f in o['files']])
+
                 batch.info['index'] = batch['index']
                 batch.info['items'] = batch['items']
                 batch.info['path'] = self.join('Classes2D', os.path.basename(batch['path']))

@@ -86,6 +86,19 @@ class Preprocessing:
         return batch
 
     def _process_batch(self, batch, kwargs):
+        """ Process the batch and copy its log (with the executed commands)
+        to the output Logs folder, since the batch folder (in the scratch)
+        might be removed. """
+        outputFolder = FolderManager(kwargs['outputFolder'])
+        try:
+            return self._run_batch(batch, kwargs)
+        finally:
+            if batch.exists('batch.log'):
+                logFile = outputFolder.join('Logs', f'{batch.id}_batch.log')
+                shutil.copy(batch.join('batch.log'), logFile)
+                print(f"Batch log (commands): {logFile}", flush=True)
+
+    def _run_batch(self, batch, kwargs):
         """ Real processing work is done here. This function is called either
         directly from the Pipeline process or through an external 'launcher'
         script. The launcher script is the way to submit this job to a cluster.

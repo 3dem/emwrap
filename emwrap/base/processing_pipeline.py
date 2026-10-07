@@ -211,22 +211,43 @@ class ProcessingPipeline(Pipeline, FolderManager):
         return int(os.environ.get('EMWRAP_CLEAN', 1)) > 0
 
     @staticmethod
-    def get_gpu_list(gpus, as_string=False):
-        """ Get the list of GPUs base on the following options:
-        1. If a single number N
-            List will be [0, 1..., N-1]
-        2. If there is a space-separated list
-            List will be gpus.split()
-        3. Single specific gpu should be specified with "GPU_NUMBER"
+    def get_gpu_groups(gpus):
+        """ Parse the emwrap 'gpus' param into GPU groups (lists of GPU ids),
+        one group for each processing thread:
+        1. A single number N: N GPUs, e.g. "2" -> [[0], [1]]
+        2. A quoted number: a specific GPU id, e.g. '"2"' -> [[2]]
+        3. Several values separated by spaces: specific GPU ids, one thread
+           for each value (even if repeated, e.g. one cluster job each),
+           e.g. "0 0 1" -> [[0], [0], [1]]
+        4. Values separated by commas: GPU ids used by the same thread,
+           e.g. "0,1 2,3" -> [[0, 1], [2, 3]]
         """
-        if not gpus:
-            return '' if as_string else []
+        gpus = str(gpus or '').strip()
+        quoted = len(gpus) > 1 and gpus[0] == gpus[-1] and gpus[0] in '"\''
+        if quoted:
+            gpus = gpus[1:-1].strip()
 
         parts = gpus.split()
-        if len(parts) > 1:
-            gpu_list = [int(g) for g in parts]
-        else:
-            gpu_list = list(range(int(gpus)))
+        if len(parts) == 1 and not quoted and ',' not in parts[0]:
+            return [[i] for i in range(int(parts[0]))]
+
+        return [[int(g) for g in p.split(',') if g.strip()] for p in parts]
+
+    @staticmethod
+    def count_gpus(gpus):
+        """ Number of different GPU ids in the 'gpus' param (see get_gpu_groups),
+        e.g. "0 0 0 0" -> 1, "0,1 0,1" -> 2, "4" -> 4. """
+        groups = ProcessingPipeline.get_gpu_groups(gpus)
+        return len({g for group in groups for g in group})
+
+    @staticmethod
+    def get_gpu_list(gpus, as_string=False):
+        """ Get the list of GPUs from the 'gpus' param (all GPU ids of
+        the groups from get_gpu_groups), e.g. "2" -> [0, 1], '"2"' -> [2]
+        or "0 1" -> [0, 1].
+        """
+        gpu_list = [g for group in ProcessingPipeline.get_gpu_groups(gpus)
+                    for g in group]
 
         if as_string:
             return ' '.join(str(g) for g in gpu_list)

@@ -1,0 +1,43 @@
+#!/bin/bash
+
+# Launcher to process one batch of emw-preprocessing in a separate process
+# (set it in the 'launcher_preprocessing' param of the job).
+# It receives the project folder and the batch JSON file, setups the
+# environment for the programs (MotionCor, ctffind, crYOLO and Relion)
+# and runs the batch processing.
+#
+# To process the batches in a cluster, this script can be submitted from
+# another launcher, e.g. with Slurm:
+#   sbatch --wait <<EOT
+#   #!/bin/bash
+#   #SBATCH --partition=gpu
+#   #SBATCH --nodes=1
+#   #SBATCH --gres=gpu:1
+#   #SBATCH --mem=20G
+#   #SBATCH --output=.slurm/%j.out
+#   #SBATCH --error=.slurm/%j.err
+#   /path/to/preprocessing.sh $@
+#   EOT
+
+# Python environment with emwrap installed
+. /path/to/emwrap.bashrc
+
+# Launchers of the programs used by the preprocessing
+export EMWRAP_CONFIG=$(cat <<EOF
+{
+    "programs": {
+        "MOTIONCOR3": {"launcher": "/path/to/motioncor3.sh", "version": 3},
+        "CTFFIND": {"launcher": "/path/to/ctffind5.sh", "version": 5},
+        "CRYOLO": {
+            "launcher": "/path/to/cryolo_launcher.sh",
+            "model": "/path/to/cryolo/gmodel_phosnet_202005_nn_N63_c17.h5",
+            "janni_model": "/path/to/cryolo/gmodel_janni_20190703.h5"
+        },
+        "RELION": {"launcher": "/path/to/relion_launcher.sh"}
+    }
+}
+EOF
+)
+
+set -x
+python -m emwrap.mix.preprocessing "$@"

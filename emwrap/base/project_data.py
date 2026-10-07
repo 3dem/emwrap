@@ -438,6 +438,8 @@ class ProjectData(FolderManager):
                         'type': datatype,
                         'info': f'{ptsInfo["size"]} items, Tomograms: {info["rlnTomoTomogramsFile"]["size"]}'
                     }
+                elif spaInfo := self._spaStarInfo(output_id, filepath):
+                    return spaInfo
             except Exception as e:
                 self._debug(
                     f"Error computing {Color.warn('OUTPUT')} info for "
@@ -492,6 +494,73 @@ class ProjectData(FolderManager):
             'type': 'File',
             'info': info
         }
+
+    # SPA STAR files: table with the items -> datatype
+    SPA_TABLES = {
+        'movies': 'Movies',
+        'micrographs': 'Micrographs',
+        'particles': 'Particles'
+    }
+
+    @staticmethod
+    def _spaPixelSize(sf, tableName):
+        """ Current pixel size of the items from the optics table, i.e. the
+        particles' one for particles and the (binned) micrographs' one for
+        micrographs and movies. """
+        if 'optics' not in sf.getTableNames():
+            return None
+        optics = sf.getTable('optics')
+        labels = ['rlnMicrographPixelSize', 'rlnMicrographOriginalPixelSize']
+        if tableName == 'particles':
+            labels.insert(0, 'rlnImagePixelSize')
+        for label in labels:
+            if optics.hasColumn(label):
+                return float(getattr(optics[0], label))
+        return None
+
+    def _spaStarInfo(self, output_id, filepath):
+        """ Return output info of SPA STAR files (Movies, Micrographs,
+        Particles and Classes2D from Relion optimiser files), with the
+        number of items and the current pixel size, or None.
+        The datatype declared in RELION_OUTPUT_NODES.star is used if it is
+        an emwrap datatype (capitalized, e.g. 'Particles'), not a lowercase
+        Relion keyword (e.g. 'relion' in 'ParticleGroupMetadata.star.relion'). """
+        if filepath.endswith('_optimiser.star'):
+            return self._classes2dInfo(filepath)
+
+        nodeType = self._outputTypeFromRelionNodes(output_id) or ''
+
+        with StarFile(filepath) as sf:
+            tables = sf.getTableNames()
+            for tableName, datatype in self.SPA_TABLES.items():
+                if tableName in tables:
+                    n = sf.getTableSize(tableName)
+                    ps = self._spaPixelSize(sf, tableName)
+                    info = f'{n} items'
+                    if ps:
+                        info += f', {ps:0.3f} Å/px'
+                    if (tableName == 'micrographs'
+                            and sf.getTableInfo(tableName).hasColumn('rlnDefocusU')):
+                        info += ', CTF'
+                    if nodeType[:1].isupper():
+                        datatype = nodeType
+                    return {'type': datatype, 'info': info}
+        return None
+
+    def _classes2dInfo(self, optimiserStar):
+        """ Info of 2D classes from a Relion optimiser STAR file, with the
+        model and data STAR files of the same iteration (in the same folder). """
+        modelStar = optimiserStar.replace('_optimiser.star', '_model.star')
+        dataStar = optimiserStar.replace('_optimiser.star', '_data.star')
+
+        with StarFile(modelStar) as sf:
+            n = sf.getTableSize('model_classes')
+            ps = float(sf.getTable('model_general')[0].rlnPixelSize)
+        info = f'{n} classes'
+        if os.path.exists(dataStar):
+            with StarFile(dataStar) as sf:
+                info += f', {sf.getTableSize("particles")} particles'
+        return {'type': 'Classes2D', 'info': f'{info}, {ps:0.3f} Å/px'}
 
     def _collectJobOutputIds(self, job_id, job=None):
         """Gather output node ids from the workflow graph, RELION star, and cache."""

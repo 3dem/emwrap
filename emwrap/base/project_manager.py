@@ -920,19 +920,25 @@ class ProjectManager(FolderManager):
         return self.join(output_folder)
 
     @staticmethod
-    def _count_gpus_from_relion_params(job_params):
-        """Return GPU count from Relion gpu_ids or the generic gpus param."""
+    def _count_job_gpus(job_params):
+        """Return the number of GPUs of a job, from Relion's native gpu_ids
+        param or from the emwrap gpus param."""
         gpu_ids = job_params.get('gpu_ids')
         if gpu_ids is not None and str(gpu_ids).strip():
-            ids = set()
-            for mpi_part in str(gpu_ids).split(':'):
-                for token in mpi_part.split(','):
-                    if t := token.strip():
-                        ids.add(int(t))
-            if ids:
-                return len(ids)
+            return ProjectManager._count_relion_gpus(gpu_ids)
 
-        return int(job_params.get('gpus', 0))
+        return ProcessingPipeline.count_gpus(job_params.get('gpus', ''))
+
+    @staticmethod
+    def _count_relion_gpus(gpu_ids):
+        """Return the number of different GPU ids in Relion's --gpu syntax,
+        where ':' separates MPI processes and ',' threads (e.g. "0,1:0,1" -> 2)."""
+        ids = set()
+        for mpi_part in str(gpu_ids).split(':'):
+            for token in mpi_part.split(','):
+                if t := token.strip():
+                    ids.add(int(t))
+        return len(ids)
 
     @staticmethod
     def _relionJobIsContinue(job_dir):
@@ -1015,7 +1021,7 @@ class ProjectManager(FolderManager):
 
         script_file = os.path.join(folder_path, 'job.script')
         script_log = os.path.join(folder_path, 'job.log')
-        gpus = self._count_gpus_from_relion_params(job_params)
+        gpus = self._count_job_gpus(job_params)
 
         def _load_cpus(gpus):
             mpi, threads = 1, 1

@@ -54,9 +54,9 @@
                 {
                     "name": "gpus",
                     "label": "GPUs",
-                    "default": "0",
+                    "default": "1",
                     "paramClass": "StringParam",
-                    "help": "One processing thread will be created for each value, using Relion's --gpu syntax, e.g. '0,1 2,3' runs two threads with two GPUs each."
+                    "help": "If it is a single number (N), it will represent the total number of GPUs (0..N-1). If there are multiple values (or a quoted single value, e.g. \"2\"), they are specific GPU ids, and one processing thread will be created for each value (they can be repeated, e.g. '0 0 0 0' runs four threads using GPU 0). Values separated by commas are used by the same thread, e.g. '0,1 2,3' runs two threads with two GPUs each."
                 },
                 {
                     "label": "Launchers",

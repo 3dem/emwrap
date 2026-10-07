@@ -32,14 +32,26 @@ from .preprocessing import Preprocessing
 
 
 class PreprocessingPipeline(ProcessingPipeline):
-    """ Pipeline to run Preprocessing in batches. """
+    """ Pipeline to run Preprocessing in batches.
+
+    Each batch can be processed in a separate process (e.g. submitted to a
+    cluster) through the 'launcher_preprocessing' script. It receives the
+    project folder and the batch JSON file, and it should setup the
+    environment (EMWRAP_CONFIG with the launchers of MOTIONCOR3, CTFFIND,
+    CRYOLO and RELION) and run: python -m emwrap.mix.preprocessing "$@"
+    """
     name = 'emw-preprocessing'
 
     def __init__(self, input_args, output):
         ProcessingPipeline.__init__(self, input_args, output)
         args = self._args
-        # One processing thread per entry, e.g. "0 0 1 1" (two threads per GPU)
-        self.gpuList = str(args.get('gpus', '0')).split()
+        # One processing thread per GPU group (see get_gpu_groups),
+        # e.g. "0 0 1 1" (two threads per GPU), with the GPU ids
+        # separated by spaces (MotionCor and crYOLO syntax)
+        self.gpuList = [' '.join(str(g) for g in group)
+                        for group in self.get_gpu_groups(args.get('gpus', '1'))]
+        if not self.gpuList:
+            raise Exception("Preprocessing requires at least one GPU (gpus param)")
         self.outputDirs = {}
         self.inputStar = args['in_movies']
         self.batchSize = int(args.get('batch_size', 32))
@@ -58,9 +70,6 @@ class PreprocessingPipeline(ProcessingPipeline):
         Preprocessing step (motioncor, ctf, picking and extract). """
         args = self._args
 
-        def _launcher(name):  # empty means using EMWRAP_CONFIG['programs']
-            return args.get(f'launcher_{name}') or None
-
         def _float(key):
             value = args.get(key, '')
             return None if value in (None, '') else float(value)
@@ -73,7 +82,6 @@ class PreprocessingPipeline(ProcessingPipeline):
         mc_args.update(Args.fromString(args.get('motioncor.extra_args') or ''))
 
         ctf_args = {k: v for k, v in args.subset('ctf').items() if v not in (None, '')}
-        ctf_args['launcher'] = _launcher('ctffind')
 
         extract_args = Args.fromString(args.get('extract.extra_args') or '')
         if scale := args.get('extract.scale'):
@@ -81,18 +89,19 @@ class PreprocessingPipeline(ProcessingPipeline):
 
         return {
             'acquisition': Acquisition(self.acq),
-            # Optional launcher to process each batch (e.g. in a cluster)
-            'launcher': _launcher('batch'),
-            'motioncor': {'launcher': _launcher('motioncor'), 'extra_args': mc_args},
+            # Optional launcher to process each batch (e.g. in a cluster),
+            # 'launcher_batch' is the old name of this param
+            'launcher': (args.get('launcher_preprocessing')
+                         or args.get('launcher_batch') or None),
+            'motioncor': {'extra_args': mc_args},
             'ctf': ctf_args,
             'picking': {
                 'particle_size': _float('picking.particle_size'),
                 'threshold': _float('picking.threshold'),
                 'model': args.get('picking.model') or None,
-                'janni_model': args.get('picking.janni_model') or None,
-                'launcher': _launcher('cryolo')
+                'janni_model': args.get('picking.janni_model') or None
             },
-            'extract': {'launcher': _launcher('relion'), 'extra_args': extract_args}
+            'extract': {'extra_args': extract_args}
         }
 
     @property
@@ -175,6 +184,12 @@ class PreprocessingPipeline(ProcessingPipeline):
 
         return _preprocessing
 
+    def _removeBatchFile(self, batch, fn):
+        """ Remove a batch file merged into the output (unless EMWRAP_CLEAN=0). """
+        if self.do_clean():
+            batch.log(f"Removing {fn}", flush=True)
+            os.remove(fn)
+
     def _output(self, batch):
         """ Update output STAR files. """
 
@@ -204,8 +219,7 @@ class PreprocessingPipeline(ProcessingPipeline):
                                                               'rlnMicrographName',
                                                               'rlnCtfImage',
                                                               'rlnMicrographCoordinates'))
-                batch.log(f"Removing {micsStarBatch}", flush=True)
-                os.remove(micsStarBatch)
+                self._removeBatchFile(batch, micsStarBatch)
 
                 # Update coordinates.star
                 coordStar, coordStarBatch = _pair('coordinates.star')
@@ -220,8 +234,7 @@ class PreprocessingPipeline(ProcessingPipeline):
                                 sf.writeRow(self.fixOutputRow(row,
                                                               'rlnMicrographName',
                                                               'rlnMicrographCoordinates'))
-                batch.log(f"Removing {coordStarBatch}", flush=True)
-                os.remove(coordStarBatch)
+                self._removeBatchFile(batch, coordStarBatch)
 
                 # Update particles.star
                 partStar, partStarBatch = _pair('particles.star')
@@ -238,8 +251,7 @@ class PreprocessingPipeline(ProcessingPipeline):
                                 i = row.rlnImageName.split('@')[0]
                                 sf.writeRow(row._replace(rlnImageName=f"{i}@{partStack[micName]}",
                                                          rlnMicrographName=self.fixOutputPath(micName)))
-                batch.log(f"Removing {partStarBatch}", flush=True)
-                os.remove(partStarBatch)
+                self._removeBatchFile(batch, partStarBatch)
 
                 batch.info.update({
                     'output_elapsed': str(t.getElapsedTime())
@@ -247,12 +259,11 @@ class PreprocessingPipeline(ProcessingPipeline):
                 self.outputs.update({
                     'Micrographs': {'label': 'Micrographs',
                                     'files': [
-                                        [micsStar, 'MicrographGroupMetadata.star'],
-                                        [coordStar, 'MicrographCoordsGroup.star']]
+                                        [micsStar, 'MicrographGroupMetadata.star.relion.ctf.Micrographs']]
                                     },
                     'Particles': {'label': 'Particles',
                                   'files': [
-                                      [partStar, 'ParticleGroupMetadata.star']]
+                                      [partStar, 'ParticleGroupMetadata.star.relion.Particles']]
                                   },
                 })
                 self.writeRelionOutputNodes(

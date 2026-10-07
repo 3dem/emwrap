@@ -172,7 +172,7 @@ class ImportMoviesPipeline(ProcessingPipeline):
     def _registerOutput(self):
         self.outputs['Movies'] = {
             'label': 'Movies',
-            'files': [[self.outputStar, 'MicrographMovieGroupMetadata.star.relion']]
+            'files': [[self.outputStar, 'MicrographMovieGroupMetadata.star.relion.Movies']]
         }
         self.writeRelionOutputNodes(self.outputs['Movies']['files'])
         self.writeInfo()
