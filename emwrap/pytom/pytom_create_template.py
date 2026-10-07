@@ -41,8 +41,7 @@ class PyTomCreateTemplate(ProcessingPipeline):
         # and both are kept side by side for comparison
         inputMap = os.path.basename(subargs['--input-map'])
         inputCopy = batch.join(inputMap)
-        if os.path.islink(inputCopy):
-            os.unlink(inputCopy)
+        
         if not (os.path.exists(inputCopy) and
                 os.path.samefile(subargs['--input-map'], inputCopy)):
             shutil.copy(subargs['--input-map'], inputCopy)
