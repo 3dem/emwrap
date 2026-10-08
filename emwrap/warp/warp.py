@@ -733,9 +733,16 @@ class WarpBasePipeline(ProcessingPipeline):
             
         newTsTable = Table(tsTable.getColumnNames() + extra_cols)
         dims = None
+        deselected = []
         for frameRow in tsTable:
             moviePrefix = Path.removeBaseExt(frameRow.rlnMicrographMovieName)
             movieMrc = moviePrefix + '.mrc'
+            # Tilts deselected in Warp are skipped by ts_import, so they
+            # should not be part of the tilt-series STAR either
+            movieXml = WarpXml(self.join(self.FS, moviePrefix + '.xml'))
+            if not movieXml.isSelected():
+                deselected.append(moviePrefix)
+                continue
             frameDict = frameRow._asdict()
             for k, v in filesMap.items():
                 movieFn = self.join(self.FS, v, movieMrc)
@@ -748,24 +755,22 @@ class WarpBasePipeline(ProcessingPipeline):
             if avgMrcPath:
                 self.writeTiltThumbnail(avgMrcPath)
 
-            movieXml = self.join(self.FS, moviePrefix + '.xml')
             defocusDict = defaultdict(lambda: 0)
 
             # xml and average mrc already validated for whole TS above
-            warpXml = WarpXml(movieXml)
-            ctf = warpXml.getDict('Movie', 'CTF', 'Param')
+            ctf = movieXml.getDict('Movie', 'CTF', 'Param')
             if frameDict['rlnCtfPowerSpectrum']:
-                self.writePsThumbnail(frameDict['rlnCtfPowerSpectrum'], warpXml)
+                self.writePsThumbnail(frameDict['rlnCtfPowerSpectrum'], movieXml)
 
             defocusDict['rlnDefocusU'] = _float(float(ctf['Defocus']) * 10000)  # Convert to Angstroms
             defocusDict['rlnCtfAstigmatism'] = _float(float(ctf['DefocusDelta']) * 10000)  # Convert to Angstroms
             defocusDict['rlnDefocusV'] = _float(defocusDict['rlnDefocusU'] + defocusDict['rlnCtfAstigmatism'])
             defocusDict['rlnDefocusAngle'] = _float(ctf['DefocusAngle'])
             # Warp has no figure of merit or ice ring density; those stay 0
-            if ctfRes := warpXml.get('Movie', '@CTFResolutionEstimate'):
+            if ctfRes := movieXml.get('Movie', '@CTFResolutionEstimate'):
                 defocusDict['rlnCtfMaxResolution'] = _float(ctfRes)
 
-            motion = warpXml.getMovieMotion()
+            motion = movieXml.getMovieMotion()
 
             for k in extra_cols:
                 if k.startswith('rlnAccumMotion'):
@@ -775,6 +780,13 @@ class WarpBasePipeline(ProcessingPipeline):
                     frameDict[k] = defocusDict[k]
 
             newTsTable.addRowValues(**frameDict)
+
+        if deselected:
+            self.log(f"TS {tsName}: skipping {len(deselected)} tilt(s) "
+                     f"deselected in Warp: {', '.join(deselected)}")
+        if not len(newTsTable):
+            self.log(f"ERROR: All tilts are deselected in Warp for TS {tsName}")
+            return False, None, dims
 
         return True, newTsTable, dims
 
@@ -815,6 +827,39 @@ class WarpBasePipeline(ProcessingPipeline):
             aln['rlnTomoYTilt'] *= -1 
 
         return alignments
+
+    def _tomostarTilts(self, tsName, tsTable):
+        """ Return the rows of ``tsTable`` whose movies are listed in the
+        tomostar file of ``tsName``, or all rows if there is no tomostar. """
+        tomostar = self.join(self.TM, tsName + '.tomostar')
+        if not os.path.exists(tomostar):
+            return list(tsTable)
+
+        tmTable = StarFile.getTableFromFile('', tomostar, guessType=False)
+        movies = {os.path.basename(r.wrpMovieName) for r in tmTable}
+        rows = [r for r in tsTable
+                if os.path.basename(r.rlnMicrographMovieName) in movies]
+        if skipped := len(tsTable) - len(rows):
+            self.log(f"TS {tsName}: {skipped} tilt(s) not in {tomostar}, "
+                     f"keeping {len(rows)} / {len(tsTable)}")
+        return rows
+
+    def _unusedTilts(self, tsName):
+        """ Return the movie names (without extension) of the tilts with
+        UseTilt=False in the Warp tilt-series XML of ``tsName``. """
+        tsXml = self.join(self.TS, tsName + '.xml')
+        if not os.path.exists(tsXml):
+            return set()
+
+        xml = WarpXml(tsXml)
+        try:
+            useTilt = xml.getValues(xml.root, 'UseTilt')
+            moviePath = xml.getValues(xml.root, 'MoviePath')
+        except KeyError:
+            return set()
+
+        return {Path.removeBaseExt(m)
+                for m, use in zip(moviePath, useTilt) if use != 'True'}
 
     def updateAlignTsDict(self, tsDict, newPs=None):
         """ Update tsDict with alignment labels and write the enriched TS star.
@@ -864,19 +909,35 @@ class WarpBasePipeline(ProcessingPipeline):
 
         # Generate the proper metadata star file for this row
         tsTable = StarFile.getTableFromFile(tsName, inputTsStar, guessType=False)
+        # ts_import skips tilts whose frame series are deselected in
+        # warp_frameseries (e.g. tilts excluded by a subset job), so keep
+        # only the tilts that made it into the tomostar
+        tiltRows = self._tomostarTilts(tsName, tsTable)
         alignments = self.parseAlignmentParams(tsDict, newPs)
-        if len(alignments) != len(tsTable):
+        if len(alignments) != len(tiltRows):
             self.log(f"ERROR: Alignment count mismatch for TS {tsName}: "
-                     f"{len(alignments)} alignments vs {len(tsTable)} tilts")
+                     f"{len(alignments)} alignments vs {len(tiltRows)} tilts")
             return False, dims
         newTsTable = Table(tsTable.getColumnNames() + RelionStar.TOMO_ALIGNMENT_COLUMNS)
         # Alignments from AreTomo are sorted from negative to positive tilt angle
         # so we need to sort the TS metadata to match that order
-        sortedRows = sorted(tsTable, key=lambda r: float(r.rlnTomoNominalStageTiltAngle))
+        sortedRows = sorted(tiltRows, key=lambda r: float(r.rlnTomoNominalStageTiltAngle))
+        # The IMOD files still contain the tilts disabled by Warp during
+        # alignment (UseTilt=False), so drop them after matching alignments
+        unused = self._unusedTilts(tsName)
         for aln, tiltRow in zip(alignments, sortedRows):
+            if Path.removeBaseExt(tiltRow.rlnMicrographMovieName) in unused:
+                continue
             tiltRowDict = tiltRow._asdict()
             tiltRowDict.update(aln)
             newTsTable.addRowValues(**tiltRowDict)
+
+        if unused:
+            self.log(f"TS {tsName}: skipping {len(unused)} tilt(s) disabled "
+                     f"in Warp: {', '.join(sorted(unused))}")
+        if not len(newTsTable):
+            self.log(f"ERROR: All tilts are disabled in Warp for TS {tsName}")
+            return False, dims
 
         self.write_ts_table(tsName, newTsTable, tsStarFile)
         return ok, dims
