@@ -61,10 +61,15 @@ class TestApoF(unittest.TestCase):
             cls.project_path = args.project
             os.makedirs(cls.project_path, exist_ok=True)
             
-        cls.tilt_series = args.ts or '*'
+        cls.tilt_series = getattr(args, 'ts', None) or '*'
         cls.ngpus = args.gpus or int(os.environ.get('EMWRAP_TEST_GPUS', 1))
         cls.dry = args.dry
-        cls.data_root = ProcessingConfig.get_testdata_path('WarpApofTutorial', validate=True)
+        cls.data_root = cls.get_data_root(args)
+
+    @classmethod
+    def get_data_root(cls, args):
+        """Return the folder with the test data, linked as 'data' in the project."""
+        return ProcessingConfig.get_testdata_path('WarpApofTutorial', validate=True)
 
     def load_workflow_jobs(self):
         print(f"Loading workflow template: {Color.warn(self.workflow_template)}")
