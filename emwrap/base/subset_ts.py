@@ -244,6 +244,19 @@ class SubsetTsPipeline(ProcessingPipeline):
         shutil.copy2(tsStarPath, self.join(relTsStar))
         return self.fixOutputPath(relTsStar)
 
+    def _copyMdoc(self, mdocFile):
+        """ Copy 'mdocFile' into this job's own 'mdocs' folder, so it only
+        contains the mdocs of the selected tilt series, and return the new
+        path (relative to the working dir) to use as 'rlnTomoMdocFile'. """
+        if not mdocFile or not os.path.exists(mdocFile):
+            self.log(Color.warn(
+                f"WARNING: mdoc file not found, keeping original path: {mdocFile}"))
+            return mdocFile
+        self.mkdir('mdocs')
+        relMdoc = os.path.join('mdocs', os.path.basename(mdocFile))
+        shutil.copy2(mdocFile, self.join(relMdoc))
+        return self.fixOutputPath(relMdoc)
+
     def _resolveTomoNamesFromStar(self, starPath, paramLabel):
         """ Return the set of rlnTomoName values found in 'starPath'.
         Accepts the same kind of STAR files as 'input_set' (tilt_series.star,
@@ -284,10 +297,14 @@ class SubsetTsPipeline(ProcessingPipeline):
                 f"exclude_tilts was provided, but {inputStar} has no "
                 "'rlnTomoTiltSeriesStarFile' column to rewrite.")
 
+        hasMdocs = inputTable.hasColumn('rlnTomoMdocFile')
         filtered = Table(inputTable.getColumnNames())
         for row in inputTable:
             if row.rlnTomoName not in subsetNames:
                 continue
+            if hasMdocs:
+                row = row._replace(
+                    rlnTomoMdocFile=self._copyMdoc(row.rlnTomoMdocFile))
             if excludedIds := self.excludedTiltsMap.get(row.rlnTomoName):
                 newTsStar = self._filterTiltSeriesStar(
                     row.rlnTomoName, row.rlnTomoTiltSeriesStarFile, excludedIds)

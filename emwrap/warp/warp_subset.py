@@ -90,9 +90,11 @@ class WarpSubsetTs(WarpBasePipeline):
             f"{Color.cyan(self.inputFolder)}", flush=True
         )
 
+        # mdocs are not imported here: the subset job copies only the mdocs
+        # of the selected tilt series into its own 'mdocs' folder
         self._importInputs(
             self.inputFolder,
-            keys=sourceKeys,
+            keys=sourceKeys - {self.MDOCS},
             mutable=True
         )
 
