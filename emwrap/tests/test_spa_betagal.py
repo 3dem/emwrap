@@ -204,17 +204,28 @@ class TestSpaBetagal(TestApoF):
               f"pixel size: {Color.bold(ps)} Å/px, batch logs: {len(logs)}")
 
     def _check_classes2d(self, pm, job_id):
-        """ Check that the 2D classes were registered as output, with all
-        particles from the preprocessing (in a single batch). """
-        optimisers = glob(pm.join(job_id, 'Classes2D', '*', 'run_it*_optimiser.star'))
-        self.assertTrue(optimisers, f"No 2D classification results in {job_id}/Classes2D")
+        """ Check that the 2D classes of all batches were registered as a
+        single MultiClasses2D output (no Classes2D or Particles outputs),
+        with all particles from the preprocessing. """
+        nodes = pm._data._relionOutputNodes(job_id)
+        types = [label.split('.')[-1] for label in nodes.values()]
+        self.assertEqual(types, ['MultiClasses2D'],
+                         f"Unexpected 2D classification outputs: {nodes}")
+
+        multiStar = pm.join(job_id, 'classes2d.star')
+        info = pm._data._computeOutputTypeInfo(pm._data._outputId(multiStar, job_id), None)
+        print(f"{os.path.relpath(multiStar, pm.path)}: {info}")
+        self.assertEqual(info['type'], 'MultiClasses2D')
+
+        with StarFile(multiStar) as sf:
+            batches = sf.getTable('classes2d')
+        self.assertTrue(len(batches), f"No 2D classification batches in {multiStar}")
 
         classified = 0
-        for optimiser in optimisers:
-            info = pm._data._computeOutputTypeInfo(pm._data._outputId(optimiser, job_id), None)
-            print(f"{os.path.relpath(optimiser, pm.path)}: {info}")
-            self.assertEqual(info['type'], 'Classes2D')
-            with StarFile(optimiser.replace('_optimiser.star', '_data.star')) as sf:
+        for row in batches:
+            for fn in [row.optimiserStar, row.modelStar, row.dataStar, row.classesStack]:
+                self.assertTrue(os.path.exists(pm.join(fn)), f"Missing file: {fn}")
+            with StarFile(pm.join(row.dataStar)) as sf:
                 classified += sf.getTableSize('particles')
 
         self.assertEqual(classified, self._particles,

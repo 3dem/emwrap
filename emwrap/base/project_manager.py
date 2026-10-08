@@ -1376,12 +1376,18 @@ class ProjectManager(FolderManager):
         elif args.list is not None:  # only when -l / --list is on the command line
             if args.force:
                 pm.recomputeAllInfos()
-            if inputId := args.list:  # it can be empty string when no value is passed
+            # It can be empty string when no value is passed, and the job id
+            # might have a trailing / (e.g. from the shell autocompletion)
+            if inputId := Path.rmslash(args.list):
                 w = pm.get_workflow()
                 if job := w.getJob(inputId):
                     pm.listJobDetails(job)
-                elif w.hasData(Path.rmslash(inputId)):
-                    pm.listOutputDetails(w.getData(Path.rmslash(inputId)))
+                elif w.hasData(inputId):
+                    pm.listOutputDetails(w.getData(inputId))
+                else:
+                    print(Color.red(f"ERROR: '{inputId}' is not a job or output "
+                                    f"of the project"), file=sys.stderr)
+                    sys.exit(1)
             else:
                 pm.listJobs()
 

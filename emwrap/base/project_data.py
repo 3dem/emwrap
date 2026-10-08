@@ -520,8 +520,8 @@ class ProjectData(FolderManager):
 
     def _spaStarInfo(self, output_id, filepath):
         """ Return output info of SPA STAR files (Movies, Micrographs,
-        Particles and Classes2D from Relion optimiser files), with the
-        number of items and the current pixel size, or None.
+        Particles, Classes2D from Relion optimiser files and MultiClasses2D),
+        with the number of items and the current pixel size, or None.
         The datatype declared in RELION_OUTPUT_NODES.star is used if it is
         an emwrap datatype (capitalized, e.g. 'Particles'), not a lowercase
         Relion keyword (e.g. 'relion' in 'ParticleGroupMetadata.star.relion'). """
@@ -532,6 +532,8 @@ class ProjectData(FolderManager):
 
         with StarFile(filepath) as sf:
             tables = sf.getTableNames()
+            if 'classes2d' in tables:
+                return self._multiClasses2dInfo(sf)
             for tableName, datatype in self.SPA_TABLES.items():
                 if tableName in tables:
                     n = sf.getTableSize(tableName)
@@ -561,6 +563,18 @@ class ProjectData(FolderManager):
             with StarFile(dataStar) as sf:
                 info += f', {sf.getTableSize("particles")} particles'
         return {'type': 'Classes2D', 'info': f'{info}, {ps:0.3f} Å/px'}
+
+    @staticmethod
+    def _multiClasses2dInfo(sf):
+        """ Info of a MultiClasses2D STAR file: a 'classes2d' table with one
+        row per set of 2D classes (e.g. 2D classification batches). """
+        table = sf.getTable('classes2d')
+        classes = sum(int(row.classesCount) for row in table)
+        particles = sum(int(row.particlesCount) for row in table)
+        info = f'{len(table)} batches, {classes} classes, {particles} particles'
+        if len(table):
+            info += f', {float(table[0].pixelSize):0.3f} Å/px'
+        return {'type': 'MultiClasses2D', 'info': info}
 
     def _collectJobOutputIds(self, job_id, job=None):
         """Gather output node ids from the workflow graph, RELION star, and cache."""

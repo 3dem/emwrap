@@ -26,7 +26,7 @@ from glob import glob
 
 from emtools.utils import Color, Timer, Path, Process, FolderManager, Pretty
 from emtools.jobs import Batch, Args
-from emtools.metadata import Mdoc, StarFile
+from emtools.metadata import Mdoc, StarFile, Table
 
 from emwrap.base import ProcessingPipeline
 from .classify2d import RelionClassify2D
@@ -147,8 +147,18 @@ class StarBatchManager(FolderManager):
 
 
 class Relion2DPipeline(ProcessingPipeline):
-    """ Run Relion 2D classification in batches of the input particles. """
+    """ Run Relion 2D classification in batches of the input particles.
+
+    The output is a single MultiClasses2D: a STAR file (classes2d.star)
+    with one row per batch (a set of 2D classes) and the Relion files of
+    its last iteration. """
     name = 'emw-rln2d'
+
+    MULTI_CLASSES2D = 'classes2d.star'
+    # Columns of the MultiClasses2D STAR file ('classes2d' table)
+    MULTI_CLASSES2D_COLUMNS = ['batchId', 'classesCount', 'particlesCount',
+                               'pixelSize', 'optimiserStar', 'modelStar',
+                               'dataStar', 'classesStack']
 
     def __init__(self, input_args, output):
         ProcessingPipeline.__init__(self, input_args, output)
@@ -188,7 +198,8 @@ class Relion2DPipeline(ProcessingPipeline):
             iterFiles = allIterFiles[max(allIterFiles)] if allIterFiles else {}
             if not iterFiles:
                 batch.error = f"No output files."
-            elif missing := [k for k in ['optimiser', 'data'] if k not in iterFiles]:
+            elif missing := [k for k in ['optimiser', 'model', 'data', 'classes']
+                             if k not in iterFiles]:
                 batch.error = f"Missing output files: {missing}"
             elif missing := [fn for fn in iterFiles.values() if not batch.exists(fn)]:
                 batch.error = f"Missing files: {missing}"
@@ -203,25 +214,80 @@ class Relion2DPipeline(ProcessingPipeline):
             classesDir = self.join('Classes2D', os.path.basename(batch.path))
 
             with self.outputLock:
-                classesId = f'Classes2D_{batch.id}'
-                self.outputs[classesId] = {
-                    'label': classesId,
-                    'files': [
-                        [os.path.join(classesDir, iterFiles['optimiser']),
-                         'OptimiserData.star.relion.class2d.Classes2D'],
-                        [os.path.join(classesDir, iterFiles['data']),
-                         'ParticleGroupMetadata.star.relion.class2d.Particles']
-                    ]}
-                self.writeRelionOutputNodes(
-                    [f for o in self.outputs.values() for f in o['files']])
-
                 batch.info['index'] = batch['index']
                 batch.info['items'] = batch['items']
-                batch.info['path'] = self.join('Classes2D', os.path.basename(batch['path']))
+                batch.info['path'] = classesDir
+                batch.info['classes2d'] = self._classes2dInfo(classesDir, iterFiles)
                 self.updateBatchInfo(batch)
+                self._writeMultiClasses2D()
                 batch.log(f"Completed batch in {batch.info['_elapsed']},"
                           f"total batches: {len(self.info['batches'])}", flush=True)
         return batch
+
+    def _classes2dInfo(self, classesDir, iterFiles):
+        """ Info of the 2D classes of a batch (stored in the batch info),
+        with the files of the last iteration (relative to the project). """
+        def _path(key):
+            return self.fixOutputPath(os.path.join('Classes2D',
+                                                   os.path.basename(classesDir),
+                                                   iterFiles[key]))
+
+        modelStar = os.path.join(classesDir, iterFiles['model'])
+        with StarFile(modelStar) as sf:
+            classes = sf.getTableSize('model_classes')
+            ps = float(sf.getTable('model_general')[0].rlnPixelSize)
+        with StarFile(os.path.join(classesDir, iterFiles['data'])) as sf:
+            particles = sf.getTableSize('particles')
+
+        return {
+            'classes': classes,
+            'particles': particles,
+            'pixelSize': ps,
+            'optimiser': _path('optimiser'),
+            'model': _path('model'),
+            'data': _path('data'),
+            'stack': _path('classes')
+        }
+
+    def _batchClasses2dInfo(self, batchId, batchInfo):
+        """ Return the classes 2D info of a batch, computing it from the
+        batch folder for batches processed before it was stored. """
+        if 'classes2d' not in batchInfo:
+            classesDir = self.join('Classes2D', batchId)
+            if not os.path.exists(classesDir):
+                return None
+            allIterFiles = RelionClassify2D.get_iter_files(Batch(id=batchId, path=classesDir))
+            iterFiles = allIterFiles[max(allIterFiles)] if allIterFiles else {}
+            if any(k not in iterFiles for k in ['optimiser', 'model', 'data', 'classes']):
+                return None
+            batchInfo['classes2d'] = self._classes2dInfo(classesDir, iterFiles)
+        return batchInfo['classes2d']
+
+    def _writeMultiClasses2D(self):
+        """ Write the MultiClasses2D STAR file, with one row per batch,
+        and register it as the only output of the job. """
+        t = Table(columns=self.MULTI_CLASSES2D_COLUMNS)
+        for batchId, batchInfo in sorted(self.info['batches'].items()):
+            if c := self._batchClasses2dInfo(batchId, batchInfo):
+                t.addRowValues(batchId, c['classes'], c['particles'],
+                               '%0.5f' % c['pixelSize'], c['optimiser'],
+                               c['model'], c['data'], c['stack'])
+
+        multiStar = self.join(self.MULTI_CLASSES2D)
+        tmpStar = multiStar + '.tmp'
+        with StarFile(tmpStar, 'w') as sf:
+            sf.writeTable('classes2d', t, timeStamp=True)
+        os.replace(tmpStar, multiStar)
+
+        self.outputs = {
+            'MultiClasses2D': {
+                'label': 'MultiClasses2D',
+                'files': [[multiStar, 'ProcessData.star.emwrap.MultiClasses2D']]
+            }
+        }
+        self.writeRelionOutputNodes(
+            [f for o in self.outputs.values() for f in o['files']])
+        self.writeInfo()
 
     def generate_batches(self):
         """ Use a StarBatchManager to generate processing batches from the input
@@ -259,6 +325,10 @@ class Relion2DPipeline(ProcessingPipeline):
         if self.exists('Classes2D'):
             if batches := self.info['batches']:
                 self.log(f"Existing output batches: {len(batches)}")
+                # Update the output from existing batches (e.g. when
+                # previous runs registered one Classes2D output per batch)
+                with self.outputLock:
+                    self._writeMultiClasses2D()
         else:
             self.mkdir('Classes2D')
 
