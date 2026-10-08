@@ -202,6 +202,8 @@ class Motioncor:
             '-AmpCont': acq.amplitude_contrast,
         })
         if gain := acq.get('gain', None):
-            args['-Gain'] = gain
+            # Absolute path, since MotionCor runs from the batch folder
+            # and the gain path is relative to the project
+            args['-Gain'] = os.path.abspath(gain)
 
         return args

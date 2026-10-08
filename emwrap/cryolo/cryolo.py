@@ -62,6 +62,8 @@ class CryoloPredict:
 
         def _get(key):
             if value := kwargs.get(key) or conf.get(key):
+                if not os.path.exists(value):
+                    raise Exception(f"Cryolo '{key}' file does not exist: {value}")
                 return value
             raise Exception(f"Missing Cryolo '{key}', define it in "
                             f"EMWRAP_CONFIG['programs']['{self.PROGRAM}']")
