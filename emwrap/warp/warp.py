@@ -459,8 +459,12 @@ class WarpBasePipeline(ProcessingPipeline):
 
     def write_ts_table(self, tableName, table, starFile):
         self.log(f"Writing: {starFile}")
-        with StarFile(starFile, 'w') as sfOut:
+        # Written then renamed: the file is read while the job runs (by the
+        # dashboard, for one), and must never be seen half written
+        tmpFile = starFile + '.tmp'
+        with StarFile(tmpFile, 'w') as sfOut:
             sfOut.writeTable(tableName, table, computeFormat='left', timeStamp=True)
+        os.replace(tmpFile, starFile)
 
     def appendGlobalTsRow(self, starFile, rowDict):
         """Append one global row; all rows must share the same columns."""
@@ -491,19 +495,21 @@ class WarpBasePipeline(ProcessingPipeline):
              self._args.get('mctf.create_settings.bin_angpix', '') or 0)
         return float(v) or inputPs
 
-    def _writeJpeg(self, srcPath, suffix, makeImage):
+    def _writeJpeg(self, srcPath, suffix, makeImage, also=None):
         """ Write FS/thumbnails/<src name><suffix>.jpg from makeImage().
 
         Made in the job, right after Warp wrote srcPath, so a dashboard
         never has to read the MRC while acquisition is using the disk.
-        Skipped when the jpeg is newer than srcPath. A failure only logs: a
-        missing thumbnail must not fail the job.
+        Skipped when the jpeg is newer than srcPath, and the file also, made
+        by makeImage alongside it, exists. A failure only logs: a missing
+        thumbnail must not fail the job.
         """
         name = Path.removeBaseExt(srcPath) + suffix + '.jpg'
         thumbPath = self.join(self.FS, self.THUMBNAILS, name)
         try:
             if (os.path.exists(thumbPath) and
-                    os.path.getmtime(thumbPath) >= os.path.getmtime(srcPath)):
+                    os.path.getmtime(thumbPath) >= os.path.getmtime(srcPath) and
+                    (also is None or os.path.exists(also))):
                 return
             img = makeImage()
             os.makedirs(os.path.dirname(thumbPath), exist_ok=True)
@@ -561,7 +567,8 @@ class WarpBasePipeline(ProcessingPipeline):
             os.replace(tmpPath, jsonPath)
             return PILImage.fromarray(arr).resize(
                 (self.PS_THUMBNAIL_SIZE, self.PS_THUMBNAIL_SIZE), PILImage.BICUBIC)
-        self._writeJpeg(psMrcPath, '_ps', _make)
+        # A jpeg from an emwrap that did not write the json yet is redone
+        self._writeJpeg(psMrcPath, '_ps', _make, also=jsonPath)
 
     def eerUpsampling(self):
         """ Return the EER upsampling factor (1, 2 or 4) from eerSampling. """
@@ -770,7 +777,13 @@ class WarpBasePipeline(ProcessingPipeline):
             if ctfRes := movieXml.get('Movie', '@CTFResolutionEstimate'):
                 defocusDict['rlnCtfMaxResolution'] = _float(ctfRes)
 
-            motion = movieXml.getMovieMotion()
+            try:
+                motion = movieXml.getMovieMotion()
+            except (KeyError, ValueError) as e:
+                # One movie without its motion must not fail the batch; 0
+                # is what readers take as not reported
+                self.log(f"WARNING: no motion for {moviePrefix}: {e}")
+                motion = {'total': 0, 'early': 0, 'late': 0}
 
             for k in extra_cols:
                 if k.startswith('rlnAccumMotion'):
