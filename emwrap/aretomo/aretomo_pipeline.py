@@ -88,13 +88,13 @@ class AreTomoPipeline(ProcessingPipeline):
         })
         args.update(self.extraArgs)
         # Make a local link to the input frame integration file
-        args["-FmIntFile"] = batch.link(args["-FmIntFile"])
+        args["-FmIntFile"] = batch.link(args["-FmIntFile"], absolute=True)
         # TODO: create the file if it does not exist
         startDiv = math.ceil(self.acq.total_dose)
 
         # Link the gain reference
         if self.inputGain:
-            args['-Gain'] = batch.link(self.inputGain)
+            args['-Gain'] = batch.link(self.inputGain, absolute=True)
 
         batch.call(self.program, args)
 
