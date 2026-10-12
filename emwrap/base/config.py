@@ -144,7 +144,8 @@ class ProcessingConfig:
         "relion.reconstructparticletomo": {
             "launcher": "emwrap.relion.native",
             "label": "Relion Tomo Reconstruct Particles",
-            "output": "Reconstruct"
+            "output": "Reconstruct",
+            "tomo": True
         },
         "relion.initialmodel.tomo": {
             "launcher": "emwrap.relion.native",
