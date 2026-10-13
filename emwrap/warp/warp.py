@@ -28,7 +28,7 @@ from emtools.metadata import (StarFile, Table, RelionStar, WarpXml, Imod,
                               WarpPopulation)
 from emtools.jobs import Batch, Args
 from PIL import Image as PILImage
-from emtools.image import Image, Thumbnail
+from emtools.image import Image, tilt_qc
 from emwrap.base import ProcessingPipeline
 
 
@@ -60,7 +60,10 @@ def warpCtfView(ps, ctf, opts):
     ps = ps.astype(np.float64)
     h, w = ps.shape
     oy, ox = h - 1, w // 2
-    window, pix = int(opts['Window']), float(opts['PixelSize'])
+    # The spectrum is of the image binned 2^BinTimes times; PixelSize is
+    # before binning (half the data's with EER upsampling)
+    window = int(opts['Window'])
+    pix = float(opts['PixelSize']) * 2 ** float(opts.get('BinTimes', 0) or 0)
     # Warp's range is a fraction of Nyquist
     rmin = float(opts['RangeMin']) * window / 2
     rmax = float(opts['RangeMax']) * window / 2
@@ -119,6 +122,8 @@ def warpCtfView(ps, ctf, opts):
         'measured': np.round(measured, 3).tolist(),
         'simulated': np.round(simulated, 3).tolist(),
         'correlation': round(float(np.corrcoef(measured, simulated)[0, 1]), 3),
+        # Of the spectrum, Å; also tells a json from before the binning fix
+        'pixelSize': pix,
     }
     return out, profile
 
@@ -501,15 +506,16 @@ class WarpBasePipeline(ProcessingPipeline):
         Made in the job, right after Warp wrote srcPath, so a dashboard
         never has to read the MRC while acquisition is using the disk.
         Skipped when the jpeg is newer than srcPath, and the file also, made
-        by makeImage alongside it, exists. A failure only logs: a missing
-        thumbnail must not fail the job.
+        by makeImage alongside it, exists (or also(), if it is a function,
+        is true). A failure only logs: a missing thumbnail must not fail
+        the job.
         """
         name = Path.removeBaseExt(srcPath) + suffix + '.jpg'
         thumbPath = self.join(self.FS, self.THUMBNAILS, name)
         try:
             if (os.path.exists(thumbPath) and
                     os.path.getmtime(thumbPath) >= os.path.getmtime(srcPath) and
-                    (also is None or os.path.exists(also))):
+                    (also is None or (also() if callable(also) else os.path.exists(also)))):
                 return
             img = makeImage()
             os.makedirs(os.path.dirname(thumbPath), exist_ok=True)
@@ -530,17 +536,9 @@ class WarpBasePipeline(ProcessingPipeline):
             def make():
                 if not cache:
                     cache.append(Image.get_array(avgMrcPath))
-                data = cache[0]
-                # Block-average down to about twice the output size; this is
-                # the cheap part that also removes most of the shot noise.
-                f = max(1, max(data.shape) // (2 * size))
-                h, w = (data.shape[0] // f) * f, (data.shape[1] // f) * f
-                binned = (data[:h, :w].astype(np.float32)
-                          .reshape(h // f, f, w // f, f).mean(axis=(1, 3)))
-                # A light blur reads better and halves the jpeg
-                return Thumbnail(output_format=None, max_size=(size, size),
-                                 std_threshold=2, contrast_factor=0.5,
-                                 gaussian_radius=1.0).from_array(binned)
+                # The recipe the image QC measures were calibrated on; the
+                # emw-tilt-curation job makes missing jpegs with it too
+                return tilt_qc.tilt_jpeg(cache[0], size)
             return make
 
         for suffix, size in (('', self.THUMBNAIL_SIZE),
@@ -567,8 +565,31 @@ class WarpBasePipeline(ProcessingPipeline):
             os.replace(tmpPath, jsonPath)
             return PILImage.fromarray(arr).resize(
                 (self.PS_THUMBNAIL_SIZE, self.PS_THUMBNAIL_SIZE), PILImage.BICUBIC)
-        # A jpeg from an emwrap that did not write the json yet is redone
-        self._writeJpeg(psMrcPath, '_ps', _make, also=jsonPath)
+        def _current():
+            # Redone when there is no json, or one from before the fix of
+            # the spectrum's pixel size (no pixelSize), whose simulated CTF
+            # was wrong with EER upsampling
+            try:
+                with open(jsonPath) as f:
+                    return 'pixelSize' in json.load(f)
+            except (OSError, ValueError):
+                return False
+        self._writeJpeg(psMrcPath, '_ps', _make, also=_current)
+
+    def writeTsImageQc(self, tsName, tsTable):
+        """ Image content measures of a tilt series (see emtools tilt_qc),
+        into FS/thumbnails/<tsName>_imageqc.json, for the dashboard to
+        flag blank, blacked out or different field tilts.  Measured on the
+        512 px jpegs, which the thresholds were calibrated on, after all of
+        them are written.  Skipped when up to date; a failure only logs. """
+        thumbDir = self.join(self.FS, self.THUMBNAILS)
+        try:
+            # rlnMicrographName is FS/average/<movie>.mrc: its jpegs are in thumbDir
+            tilts = tilt_qc.tilts_from_star_rows([row._asdict() for row in tsTable],
+                                                 ctf_correlation=False)
+            tilt_qc.write_series_json(tilt_qc.json_path(thumbDir, tsName), tsName, tilts)
+        except Exception as e:
+            self.log(f"WARNING: could not write image QC for TS {tsName}: {e}")
 
     def eerUpsampling(self):
         """ Return the EER upsampling factor (1, 2 or 4) from eerSampling. """
@@ -801,6 +822,7 @@ class WarpBasePipeline(ProcessingPipeline):
             self.log(f"ERROR: All tilts are deselected in Warp for TS {tsName}")
             return False, None, dims
 
+        self.writeTsImageQc(tsName, newTsTable)
         return True, newTsTable, dims
 
     def alignmentPs(self):

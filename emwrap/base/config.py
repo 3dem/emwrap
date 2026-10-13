@@ -50,7 +50,15 @@ class ProcessingConfig:
         "emw-subset-ts": {
             "launcher": "emwrap.base.subset_ts",
             "label": "EMwrap Subset TS",
-            "output": "EMwrap"
+            "output": "EMwrap",
+            "programs": ["WARP"]
+        },
+        "emw-tilt-curation": {
+            # Its Warp step (change_selection) uses the WARP program launcher
+            "launcher": "emwrap.base.tilt_curation",
+            "label": "EMwrap Tilt Curation",
+            "output": "EMwrap",
+            "programs": ["WARP"]
         },
         "emw-merge-sets": {
             "launcher": "emwrap.base.merge_sets",
@@ -547,6 +555,7 @@ class ProcessingConfig:
                 'launcher': launcher_info['display'],
                 'launcher_status': launcher_info['status'],
                 'launcher_status_label': launcher_info['status_label'],
+                'programs': cls.get_job_program_launchers(job_conf, conf),
                 'form_file': form_file,
                 'form_exists': os.path.exists(form_file),
                 'form_status': 'ok' if os.path.exists(form_file) else 'warning',
@@ -616,6 +625,21 @@ class ProcessingConfig:
         return launcher_line
 
     @classmethod
+    def get_job_program_launchers(cls, job_conf, conf=None):
+        """ Launchers of the external programs a job runs besides its own
+        module ('programs' in its job conf, e.g. WARP for the Warp
+        deselection of emw-tilt-curation), as get_launcher_info dicts with
+        the program 'name'. """
+        programs = (conf or cls._get_config() or {}).get('programs', {})
+        rows = []
+        for name in (job_conf or {}).get('programs', []):
+            info = cls.get_launcher_info(programs.get(name, {}))
+            if name not in programs:
+                info['display'] = f'{name} not in EMWRAP_CONFIG programs'
+            rows.append(dict(info, name=name))
+        return rows
+
+    @classmethod
     def check_job_launchers(cls, conf):
         print(f"\n>>> {Color.warn('JOB LAUNCHERS')}")
 
@@ -628,6 +652,10 @@ class ProcessingConfig:
         for jobName, jobConf in cls.get_jobs().items():
             launcher_line = cls._check_launcher(jobConf)
             print(format_str.format(jobName, launcher_line, ''))
+            # Programs the job also runs, e.g. Warp for a deselection step
+            for program in jobConf.get('programs', []):
+                line = cls._check_launcher(conf.get('programs', {}).get(program, {}))
+                print(format_str.format(f'  + {program}', line, ''))
 
     @classmethod
     def check_programs(cls, conf):

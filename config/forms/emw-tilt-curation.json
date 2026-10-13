@@ -1,0 +1,185 @@
+{
+    "name": "emw-tilt-curation",
+    "label": "EMwrap Tilt Curation",
+    "help": "Automatically leave out the tilt images of each tilt series that fail the curation rule, and write the result as a new TiltSeries.\n\nEach tilt image is judged on:\n- its image content, measured on its 512 px jpeg: blank (no texture), blacked out (more of the field black than the rest of the tilt series), a different field from the tilt before it, or shifted away from the first tilt;\n- its motion and CTF values from the tilt-series STAR file: accumulated motion, CTF fit resolution, CTF profile correlation, astigmatism and defocus.\nOnce a tilt has lost the field (blank, blacked out, different field or shifted), the tilts acquired after it on the same side of the first tilt can be left out too.\n\nThe image measures are relative to each tilt series, so a tilt series dark or low in contrast throughout is not penalised. The defaults were calibrated on a hand curation of lamella tilt series (EMPIAR-11830) and are the same limits the OTF dashboard uses. Leave a limit empty to not use that check.\n\nOutput: as the subset job (emw-subset-ts) with every tilt series and the failing tilts excluded, a filtered tilt-series STAR file per tilt series. When the input job has a Warp frame-series state, the same tilts are deselected in a copy of it (WarpTools change_selection), so the next Warp jobs do not use them. tilt_curation.csv lists every tilt with its measures, whether it was kept and why not. Tilt series are never left out unless 'Leave out tilt series keeping less than' is set (or no tilt is left).",
+    "sections": [
+        {
+            "label": "Input",
+            "params": [
+                {
+                    "name": "input_set",
+                    "label": "Input tilt series:",
+                    "paramClass": "PathParam",
+                    "pointerClass": "TiltSeries",
+                    "help": "tilt_series.star of motion corrected tilt series (e.g. the output of Warp Motion and CTF), before alignment: individual tilts cannot be deselected in a Warp tilt-series state once it exists."
+                },
+                {
+                    "name": "has_jpegs",
+                    "label": "Tilt images have jpegs",
+                    "paramClass": "BooleanParam",
+                    "default": true,
+                    "help": "Yes: use the 512 px jpegs emwrap's Warp Motion and CTF wrote for each tilt (in the 'thumbnails' folder beside the tilt averages); a tilt without one gets one made here.\nNo: make the jpegs here from the tilt averages (rlnMicrographName) into this job's 'thumbnails' folder, with the same recipe, then measure them. For tilt series not motion corrected by emwrap's Warp wrapper."
+                }
+            ]
+        },
+        {
+            "label": "Criteria",
+            "params": [
+                {
+                    "label": "Image content (from the jpegs)",
+                    "paramClass": "Group",
+                    "help": "Measured on each tilt's 512 px jpeg, relative to the tilt series. Leave a limit empty to not use that check.",
+                    "params": [
+                        {
+                            "name": "texture_min",
+                            "label": "Blank: texture below (fraction of the series median)",
+                            "paramClass": "FloatParam",
+                            "default": 0.5,
+                            "allowsEmpty": true,
+                            "help": "Texture is the median standard deviation of 16 px blocks of the jpeg. A tilt with less than this fraction of the tilt series' median texture is blank (or blacked out over most of the field)."
+                        },
+                        {
+                            "name": "dark_area_max",
+                            "label": "Blacked out: black area above the series median by more than (fraction of the field)",
+                            "paramClass": "FloatParam",
+                            "default": 0.1,
+                            "allowsEmpty": true,
+                            "help": "Black area is the fraction of 16 px blocks with a mean grey level below 40. Subtracting the tilt series' median, a lamella edge present in every tilt does not count."
+                        },
+                        {
+                            "paramClass": "Line",
+                            "label": "Different field: below both",
+                            "params": [
+                                {
+                                    "name": "match_peak_min",
+                                    "label": "phase correlation",
+                                    "paramClass": "FloatParam",
+                                    "default": 0.04,
+                                    "allowsEmpty": true,
+                                    "help": "Phase correlation peak with the last tilt before it (on its side of the first acquired tilt) that matched well."
+                                },
+                                {
+                                    "name": "match_ncc_min",
+                                    "label": "normalised correlation",
+                                    "paramClass": "FloatParam",
+                                    "default": 0.15,
+                                    "allowsEmpty": true,
+                                    "help": "Normalised cross correlation with that tilt. A different field needs both low: one alone misses on thick lamellae."
+                                }
+                            ]
+                        },
+                        {
+                            "name": "field_shift_max",
+                            "label": "Shifted: field shift from the first tilt above (fraction of the field of view)",
+                            "paramClass": "FloatParam",
+                            "default": 0.3,
+                            "allowsEmpty": true,
+                            "help": "The shifts between neighbouring tilts, added up from the first acquired tilt."
+                        },
+                        {
+                            "name": "reject_beyond",
+                            "label": "Also leave out the tilts after one that lost the field",
+                            "paramClass": "BooleanParam",
+                            "default": true,
+                            "help": "Once a tilt is blank, blacked out, a different field or shifted, the tilts acquired after it on the same side of the first acquired tilt are left out too: curators do not trust them."
+                        }
+                    ]
+                },
+                {
+                    "label": "Motion and CTF (from the STAR file)",
+                    "paramClass": "Group",
+                    "help": "Values written by motion correction and CTF estimation. A value the pipeline did not measure (a placeholder 0) is not judged. Leave a limit empty to not use that check.",
+                    "params": [
+                        {
+                            "name": "motion_max",
+                            "label": "Accumulated motion above (Å)",
+                            "paramClass": "FloatParam",
+                            "default": 75,
+                            "allowsEmpty": true,
+                            "help": "rlnAccumMotionTotal. On the calibration session, curators did not reject tilts for motion below about 75 Å."
+                        },
+                        {
+                            "name": "ctf_resolution_max",
+                            "label": "CTF fit resolution worse than (Å)",
+                            "paramClass": "FloatParam",
+                            "default": 10,
+                            "allowsEmpty": true,
+                            "help": "rlnCtfMaxResolution."
+                        },
+                        {
+                            "name": "ctf_correlation_min",
+                            "label": "CTF profile correlation below",
+                            "paramClass": "FloatParam",
+                            "default": 0.15,
+                            "allowsEmpty": true,
+                            "help": "Correlation of the measured and simulated CTF radial profiles, from the <movie>_ctf.json emwrap's Warp Motion and CTF writes beside the jpegs. Below 0.15 the fit failed. Only judged for tilts that have that json (motion corrected by emwrap's Warp wrapper), whether or not the jpegs are made here."
+                        },
+                        {
+                            "name": "fom_min",
+                            "label": "CTF figure of merit below",
+                            "paramClass": "FloatParam",
+                            "default": 0.03,
+                            "allowsEmpty": true,
+                            "help": "rlnCtfFigureOfMerit. Warp does not report one (it writes a placeholder 0, not judged); used with other CTF programs."
+                        },
+                        {
+                            "name": "astigmatism_max",
+                            "label": "Astigmatism above (µm)",
+                            "paramClass": "FloatParam",
+                            "default": 0.4,
+                            "allowsEmpty": true,
+                            "help": "rlnCtfAstigmatism."
+                        },
+                        {
+                            "name": "defocus_max",
+                            "label": "Defocus above (µm), or overfocus",
+                            "paramClass": "FloatParam",
+                            "default": 6,
+                            "allowsEmpty": true,
+                            "help": "rlnDefocusU. A negative defocus (overfocus) is left out too."
+                        }
+                    ]
+                },
+                {
+                    "label": "Tilt series",
+                    "paramClass": "Group",
+                    "params": [
+                        {
+                            "name": "drop_series_below",
+                            "label": "Drop TS keeping < (fraction of their tilts)",
+                            "paramClass": "FloatParam",
+                            "allowsEmpty": true,
+                            "help": "Empty (the default): tilt series are never left out, only their failing tilts (a tilt series with no tilt left is left out). E.g. 0.75 leaves out the tilt series that would keep fewer than 75% of their tilts; the OTF dashboard lists those for review."
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "label": "Compute",
+            "params": [
+                {
+                    "name": "threads",
+                    "label": "Threads",
+                    "paramClass": "IntParam",
+                    "default": 4,
+                    "help": "Tilt series processed at the same time (making jpegs and measuring them)."
+                },
+                {
+                    "label": "Launchers",
+                    "paramClass": "Group",
+                    "help": "Launchers to use for the different programs",
+                    "params": [
+                        {
+                            "name": "launcher_warp",
+                            "label": "WARP",
+                            "paramClass": "StringParam",
+                            "allowsEmpty": true,
+                            "help": "Launcher to use for Warp (WarpTools change_selection), used to deselect the left out tilts in the Warp frame-series state when the input job has one. Empty: the WARP launcher of the emwrap configuration."
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}
