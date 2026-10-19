@@ -27,6 +27,17 @@ sconfig['otf'][workflow]['emwrap_workflow'] or the OTF class default
 The OTF class is generic and subclasses define the processing type:
     - SpaOTF: single-particle (import movies, preprocessing and 2D)
     - TomoOTF: tomography (import tilt series, Warp and AreTomo3)
+The type is taken from sconfig['otf'][workflow]['emwrap_otf'] or, by default,
+detected from the session data: tomography if there are tilt series mdoc
+files (see OTF.detectType).
+
+Settings (e.g. 'images_pattern' or 'emwrap_workflow') are read from the
+workflow config or the microscope config (sconfig['acquisition'][microscope]),
+and a setting for the OTF type takes precedence, e.g.:
+    "acquisition": {"Krios01": {
+        "images_pattern": "Images-Disc*/GridSquare_*/Data/Foil*fractions.tiff",
+        "tomo": {"images_pattern": "Frames/*.eer", "tilt_axis_angle": 85}}}
+    "otf": {"emwrap": {"tomo": {"emwrap_workflow": "tomo-otf"}}}
 
 Instance (facility) specific behaviour can be added in two ways:
     1. EMhub 'sessions' config, with job params that are applied in order
@@ -48,8 +59,9 @@ import importlib
 from glob import glob
 
 from emtools.utils import Color, FolderManager, Pretty, Path
-from emtools.metadata import StarFile
+from emtools.metadata import StarFile, Mdoc
 from emtools.image import Image
+from emtools.jobs import Args
 
 from emwrap.base import ProjectManager, ProcessingConfig
 
@@ -63,12 +75,14 @@ class OTF(FolderManager):
             input is None or a tuple (jobtype, star_file, table): the job
             will be launched once the table of the input job has some rows.
         OUTPUTS: dict jobtype -> [(star_file, table)] to report the status.
+        REQUIRED_JOBS: job types that the workflow template must have.
     and implement setupJobs to fill the jobs params with session values.
     """
     TYPE = None
     WORKFLOW = None
     STEPS = []
     OUTPUTS = {}
+    REQUIRED_JOBS = []
 
     def __init__(self, path, **kwargs):
         FolderManager.__init__(self, path)
@@ -109,7 +123,7 @@ class OTF(FolderManager):
 
         if workflow:
             source = 'from --workflow'
-        elif workflow := ctx['wf_conf'].get('emwrap_workflow'):
+        elif workflow := self.getSetting(ctx, 'emwrap_workflow'):
             source = "from config 'emwrap_workflow'"
         else:
             source = f"default for {self.TYPE} OTF: '{self.WORKFLOW}'"
@@ -121,6 +135,9 @@ class OTF(FolderManager):
         for j in workflow['jobs']:
             jobs.setdefault(j['jobtype'], j['params'])
         original = {jobType: dict(params) for jobType, params in jobs.items()}
+        if missing := [t for t in self.REQUIRED_JOBS if t not in jobs]:
+            raise Exception(f"Workflow template {workflowFile} is missing jobs "
+                            f"{missing} required by the {self.TYPE} OTF")
 
         self.setupJobs(jobs, ctx)
         self.customizeJobs(jobs, ctx)
@@ -187,38 +204,97 @@ class OTF(FolderManager):
         wf_conf = sconfig.get('otf', {}).get(otf.get('workflow', 'none').lower(), {})
         return wf_conf if isinstance(wf_conf, dict) else {}
 
-    def createContext(self, session, sconfig, resources):
-        """ Collect the session and config values used to setup the jobs. """
+    @classmethod
+    def sessionContext(cls, session, sconfig, resources):
+        """ Session and config values, without the ones that depend
+        on the OTF type (see createContext). """
         micMap = {r['id']: r['name'] for r in resources}
         microscope = micMap[session['resource_id']]
-        conf_acq = sconfig['acquisition'][microscope]
-        wf_conf = self.getWorkflowConf(session, sconfig)
-
-        acq = {k: float(v) for k, v in session['acquisition'].items()}
-        acq['gain'] = None
-        if gain_pattern := conf_acq.get('gain_pattern'):
-            gains = glob(self.join('data', gain_pattern.format(microscope=microscope)))
-            acq['gain'] = gains[-1] if gains else None
-
         return {
             'session': session,
             'microscope': microscope,
             'raw': session['extra']['raw'],
             'otf': session['extra'].get('otf', {}),
             'otf_conf': sconfig.get('otf', {}),
-            'wf_conf': wf_conf,
-            'conf_acq': conf_acq,
-            'acq': acq
+            'wf_conf': cls.getWorkflowConf(session, sconfig),
+            'conf_acq': sconfig['acquisition'][microscope]
         }
 
+    def createContext(self, session, sconfig, resources):
+        """ Collect the session and config values used to setup the jobs. """
+        ctx = self.sessionContext(session, sconfig, resources)
+        ctx['type'] = self.TYPE
+
+        acq = {k: float(v) for k, v in session['acquisition'].items()}
+        acq['gain'] = None
+        if gain_pattern := self.getSetting(ctx, 'gain_pattern'):
+            gains = glob(self.join('data', gain_pattern.format(microscope=ctx['microscope'])))
+            acq['gain'] = gains[-1] if gains else None
+        ctx['acq'] = acq
+        return ctx
+
     @staticmethod
-    def getSetting(ctx, key, default=None):
+    def getSetting(ctx, key, default=None, otfType=None, generic=True):
         """ Get a setting from the workflow config or, if not there,
-        from the microscope acquisition config. """
-        for conf in [ctx['wf_conf'], ctx['conf_acq']]:
+        from the microscope acquisition config. A setting for the OTF type
+        (e.g. conf['tomo'][key]) takes precedence over the generic one
+        (conf[key]), that is not used if generic=False.
+        The OTF type is ctx['type'] if otfType is not given. """
+        otfType = otfType or ctx.get('type')
+        confs = [ctx['wf_conf'], ctx['conf_acq']]
+        typed = [c.get(otfType) for c in confs if isinstance(c.get(otfType), dict)]
+        for conf in typed + (confs if generic else []):
             if key in conf:
                 return conf[key]
         return default
+
+    # Where to look for mdoc files (relative to the data folder),
+    # if 'mdoc_pattern' is not in the config
+    MDOC_PATTERNS = ['*.mdoc', '*/*.mdoc']
+
+    @classmethod
+    def findMdocs(cls, dataPath, pattern=None):
+        """ Return (pattern, files) of the mdoc files in the data folder,
+        with the given pattern or the first of MDOC_PATTERNS with files. """
+        for p in [pattern] if pattern else cls.MDOC_PATTERNS:
+            if files := sorted(glob(os.path.join(dataPath, p))):
+                return p, files
+        return pattern or cls.MDOC_PATTERNS[0], []
+
+    @classmethod
+    def detectType(cls, ctx, log=print):
+        """ Detect the OTF type ('spa' or 'tomo') from the session data:
+            - 'tomo' if there are tilt series mdoc files (with more than one
+              ZValue section; SerialEM movies mdoc have FrameSet sections)
+            - 'tomo' if there are mdoc files but not SPA images (e.g. the
+              first tilt series is being acquired)
+            - 'spa' otherwise
+        The mdoc files are found with the 'mdoc_pattern' tomo setting (or
+        MDOC_PATTERNS) and the SPA images with the 'images_pattern' setting.
+        """
+        dataPath = ctx['raw']['path']
+        pattern, mdocs = cls.findMdocs(
+            dataPath, cls.getSetting(ctx, 'mdoc_pattern', otfType='tomo'))
+
+        def _detected(otfType, reason):
+            log(f"Detected {Color.bold(otfType)} OTF: {reason}")
+            return otfType
+
+        for fn in mdocs[:5]:
+            try:
+                n = len(Mdoc.parse(fn).zvalues)
+            except Exception:
+                continue
+            if n > 1:
+                return _detected('tomo', f"tilt series mdoc {fn} ({n} tilts)")
+
+        if mdocs:
+            imagesPattern = cls.getSetting(ctx, 'images_pattern', otfType='spa')
+            if not imagesPattern or not glob(os.path.join(dataPath, imagesPattern)):
+                return _detected('tomo', f"{len(mdocs)} mdoc files ({pattern}) "
+                                         f"and no SPA images ({imagesPattern})")
+
+        return _detected('spa', f"no tilt series mdoc files ({pattern})")
 
     def setupJobs(self, jobs, ctx):
         """ Fill jobs params (jobtype -> params) with the session values. """
@@ -474,23 +550,42 @@ class OTF(FolderManager):
 
     # ------------------- Class selection -----------------------------
     @staticmethod
-    def getClass(name):
-        """ Return the OTF class from a type ('spa', 'tomo')
-        or from a 'module.Class' string. """
-        if name in OTF_TYPES:
-            return OTF_TYPES[name]
+    def getClass(name, types=None):
+        """ Return the OTF class from a type ('spa', 'tomo', mapped with
+        types or OTF_TYPES) or from a 'module.Class' string. """
+        types = types or OTF_TYPES
+        if name in types:
+            return types[name]
         moduleName, className = name.rsplit('.', 1)
         return getattr(importlib.import_module(moduleName), className)
 
     @classmethod
-    def fromSession(cls, path, sessionJson=None, session=None, sconfig=None):
+    def classFromSession(cls, session, sconfig, resources, types=None, log=print):
+        """ Return the OTF class for the EMhub session, from the workflow
+        config 'emwrap_otf': a type ('spa', 'tomo'), a 'module.Class' string,
+        'auto' (default) to detect the type from the data (see detectType),
+        or a dict type -> class (e.g. {"spa": "my_otf.MySpaOTF"}) to use
+        with the detected type. """
+        ctx = cls.sessionContext(session, sconfig, resources)
+        name = ctx['wf_conf'].get('emwrap_otf') or 'auto'
+        classes = {}
+        if isinstance(name, dict):
+            classes, name = name, 'auto'
+        if name == 'auto':
+            name = cls.detectType(ctx, log=log)
+            name = classes.get(name, name)
+        return cls.getClass(name, types=types)
+
+    @classmethod
+    def fromSession(cls, path, sessionJson=None, session=None, sconfig=None,
+                    resources=None, log=print):
         """ Create the OTF instance from the session.json in the path
-        or from the EMhub session config. """
+        or from the EMhub session config (see classFromSession, the type
+        detection is logged with log). """
         if session is not None:
-            name = cls.getWorkflowConf(session, sconfig).get('emwrap_otf', 'spa')
-        else:
-            with open(sessionJson or os.path.join(path, 'session.json')) as f:
-                name = json.load(f).get('otf_type') or 'spa'
+            return cls.classFromSession(session, sconfig, resources, log=log)(path)
+        with open(sessionJson or os.path.join(path, 'session.json')) as f:
+            name = json.load(f).get('otf_type') or 'spa'
         return cls.getClass(name)(path)
 
 
@@ -505,12 +600,24 @@ class SpaOTF(OTF):
     Jobs are run through the ProjectManager, so they are launched with the
     central emwrap launcher (emh-tomo --launch) and use the programs
     defined in EMWRAP_CONFIG['programs'].
+
+    Settings (from the workflow or microscope config):
+        motioncor_patches: patches in the shortest dimension (default 5),
+            the other one keeps the image ratio (e.g. '5 5' or '7 5')
+        gain_flip, gain_rot: MotionCor -FlipGain and -RotGain values
+            (template default is used if not set)
+        eer_fractions: fractions to group EER frames (default 40), written
+            to fmint.txt and passed with -FmIntFile. The session dose is
+            used as the dose per raw (EER) frame.
+    These are merged into 'motioncor.extra_args', so setting this param in
+    the config job_params would replace them.
     """
     TYPE = 'spa'
     WORKFLOW = 'spa-otf'
     IMPORT = 'emw-import-movies'
     PREPROCESSING = 'emw-preprocessing'
     CLASS2D = 'emw-rln2d'
+    REQUIRED_JOBS = [IMPORT, PREPROCESSING]
 
     STEPS = [
         (IMPORT, None),
@@ -526,7 +633,9 @@ class SpaOTF(OTF):
 
     def setupJobs(self, jobs, ctx):
         acq = ctx['acq']
-        input_movies = os.path.join('data', ctx['conf_acq']['images_pattern'])
+        if not (images_pattern := self.getSetting(ctx, 'images_pattern')):
+            raise Exception("Missing 'images_pattern' setting for the SPA OTF")
+        input_movies = os.path.join('data', images_pattern)
 
         if movies := glob(self.join(input_movies)):
             first = movies[0]
@@ -534,6 +643,8 @@ class SpaOTF(OTF):
             self.log(f"Dimensions from: {first}: {ctx['dims']}")
         else:
             raise Exception(f"There are not movies in: {input_movies}")
+
+        self._setupMotioncor(jobs[self.PREPROCESSING], ctx, first)
 
         jobs[self.IMPORT].update({
             'in_movies': input_movies,
@@ -547,6 +658,55 @@ class SpaOTF(OTF):
         # crYOLO model selected when creating the session
         if cryolo_model := ctx['otf'].get('cryolo_model'):
             jobs[self.PREPROCESSING]['picking.model'] = cryolo_model
+
+    def _setupMotioncor(self, pp, ctx, firstMovie):
+        """ MotionCor params that depend on the data and the microscope
+        settings (see SpaOTF doc). """
+        pp['motioncor.patch'] = self.getPatches(
+            ctx['dims'], int(self.getSetting(ctx, 'motioncor_patches', 5)))
+
+        mcArgs = {}
+        for setting, arg in [('gain_flip', '-FlipGain'), ('gain_rot', '-RotGain')]:
+            if (value := self.getSetting(ctx, setting)) is not None:
+                mcArgs[arg] = value
+
+        self._remove('fmint.txt')
+        if firstMovie.lower().endswith('.eer'):
+            fractions = int(self.getSetting(ctx, 'eer_fractions', 40))
+            fmint = self.join('fmint.txt')
+            self.log(f"Creating file: {Color.warn(fmint)} ({fractions} fractions)")
+            self.writeFmIntFile(fmint, ctx['dims'][2], fractions, ctx['acq']['dose'])
+            # Absolute path, since MotionCor runs from the batch folder
+            mcArgs['-FmIntFile'] = os.path.abspath(fmint)
+
+        if mcArgs:
+            args = Args.fromString(pp.get('motioncor.extra_args') or '')
+            args.update(mcArgs)
+            pp['motioncor.extra_args'] = ' '.join(args.toList())
+
+    @staticmethod
+    def getPatches(dims, n=5):
+        """ MotionCor patches ('X Y'), with n patches in the shortest
+        dimension and the same ratio for the other one,
+        e.g. '5 5' for 4096x4096 or '7 5' for 5760x4092. """
+        x, y = dims[:2]
+        m = max(n, round(n * max(x, y) / min(x, y)))
+        return f"{m} {n}" if x >= y else f"{n} {m}"
+
+    @staticmethod
+    def writeFmIntFile(fn, nframes, fractions, dose):
+        """ Write the MotionCor FmIntFile to group the EER frames into
+        the given number of fractions. Each line is: <raw frames>
+        <raw frames per fraction> <dose per raw frame>. The remaining
+        frames are added to the last fraction. """
+        group = max(1, nframes // fractions)
+        ngroups = nframes // group
+        rest = nframes % group
+        lines = [(group * (ngroups - 1), group)] if ngroups > 1 else []
+        lines.append((group + rest, group + rest))
+        with open(fn, 'w') as f:
+            for frames, size in lines:
+                f.write(f"{frames:>8} {size:>5} {dose}\n")
 
     def sessionInfo(self, jobIds):
         ppId = jobIds[self.PREPROCESSING]
@@ -569,9 +729,13 @@ class TomoOTF(OTF):
     Both processing jobs use the imported tilt series as input and monitor
     it for new tilt series (with their 'input_timeout' param).
 
-    Settings (from the workflow or microscope config):
+    Settings (from the workflow or microscope config, 'tomo' settings,
+    e.g. conf['tomo']['images_pattern'], take precedence):
         mdoc_pattern: pattern of mdoc files, relative to the data folder
-        tilt_images: frames folder, relative to the data folder
+            (default: first of MDOC_PATTERNS with files)
+        tilt_images: frames folder, relative to the data folder. If not set,
+            it is the folder of the 'tomo' images_pattern (the generic one is
+            for SPA) or the folder of the first mdoc SubFramePath found.
         tilt_axis_angle: nominal tilt axis angle
     """
     TYPE = 'tomo'
@@ -579,6 +743,7 @@ class TomoOTF(OTF):
     IMPORT = 'emw-import-ts'
     WARP = 'emw-warp-otf'
     ARETOMO3 = 'emw-aretomo3'
+    REQUIRED_JOBS = [IMPORT]
 
     STEPS = [
         (IMPORT, None),
@@ -595,11 +760,13 @@ class TomoOTF(OTF):
 
     def setupJobs(self, jobs, ctx):
         acq = ctx['acq']
-        mdoc_files = os.path.join('data', self.getSetting(ctx, 'mdoc_pattern', '*.mdoc'))
-        tilt_images = os.path.join('data', self.getSetting(ctx, 'tilt_images', ''))
-
-        if not glob(self.join(mdoc_files)):
+        pattern, mdocs = self.findMdocs(self.join('data'),
+                                        self.getSetting(ctx, 'mdoc_pattern'))
+        mdoc_files = os.path.join('data', pattern)
+        if not mdocs:
             raise Exception(f"There are not mdoc files in: {mdoc_files}")
+        tilt_images = os.path.join('data', self._tiltImagesFolder(ctx, mdocs))
+        self.log(f"Mdoc files: {mdoc_files}, tilt images: {tilt_images}")
 
         importParams = {
             'mdoc_files': mdoc_files,
@@ -615,15 +782,40 @@ class TomoOTF(OTF):
         if tilt_axis := self.getSetting(ctx, 'tilt_axis_angle'):
             jobs[self.IMPORT]['tilt_axis_angle'] = tilt_axis
             # AreTomo3 TiltAxis is '<angle> <refine_flag>'
-            at3 = jobs[self.ARETOMO3]
-            refine = (at3.get('aretomo3.TiltAxis') or '').split()[1:] or ['0']
-            at3['aretomo3.TiltAxis'] = f"{tilt_axis} {refine[0]}"
+            if at3 := jobs.get(self.ARETOMO3):
+                refine = (at3.get('aretomo3.TiltAxis') or '').split()[1:] or ['0']
+                at3['aretomo3.TiltAxis'] = f"{tilt_axis} {refine[0]}"
+
+    def _tiltImagesFolder(self, ctx, mdocs):
+        """ Tilt images folder, relative to the data folder
+        (see 'tilt_images' setting in the class doc). """
+        if (folder := self.getSetting(ctx, 'tilt_images')) is not None:
+            return folder
+        if pattern := self.getSetting(ctx, 'images_pattern', generic=False):
+            return os.path.dirname(pattern)
+
+        dataPath = self.join('data')
+        for mdocFn in mdocs[:5]:
+            try:
+                zvalues = Mdoc.parse(mdocFn).zvalues
+            except Exception:
+                continue
+            if not zvalues or not (frame := Mdoc.getSubFrameBase(zvalues[0][1])):
+                continue
+            # Frames are usually next to the mdoc or in a subfolder
+            for p in [os.path.dirname(mdocFn), dataPath]:
+                for d in [p, os.path.join(p, '*'), os.path.join(p, '**')]:
+                    if found := glob(os.path.join(d, frame), recursive=True):
+                        folder = os.path.relpath(os.path.dirname(found[0]), dataPath)
+                        return '' if folder == '.' else folder
+        raise Exception("Tilt images not found, set the 'tilt_images' or "
+                        "the 'tomo' 'images_pattern' settings")
 
     def sessionInfo(self, jobIds):
         return {
             "tilt_series": f"{jobIds[self.IMPORT]}/tilt_series.star",
-            "tomograms_warp": f"{jobIds[self.WARP]}/tomograms.star",
-            "tomograms_aretomo3": f"{jobIds[self.ARETOMO3]}/tomograms.star",
+            "tomograms_warp": f"{jobIds[self.WARP]}/tomograms.star" if self.WARP in jobIds else '',
+            "tomograms_aretomo3": f"{jobIds[self.ARETOMO3]}/tomograms.star" if self.ARETOMO3 in jobIds else '',
         }
 
 
@@ -642,7 +834,8 @@ def main():
     p.add_argument('--otf', metavar='TYPE_OR_CLASS',
                    help="OTF type ('spa', 'tomo') or 'module.Class' to "
                         "create the project. By default, it is taken from "
-                        "the workflow config ('emwrap_otf') or 'spa'.")
+                        "the workflow config ('emwrap_otf') or detected "
+                        "from the session data (mdoc files for 'tomo').")
     p.add_argument('--workflow', '-w', metavar='ID_OR_JSON',
                    help="Workflow template used to create the project (with "
                         "--create): a workflow id (from emwrap config/workflows) "
@@ -663,7 +856,8 @@ def main():
         if args.otf:
             otf = OTF.getClass(args.otf)(path)
         else:
-            otf = OTF.fromSession(path, session=session, sconfig=sconfig)
+            otf = OTF.fromSession(path, session=session, sconfig=sconfig,
+                                  resources=resources)
         otf.create(session, sconfig, resources, workflow=args.workflow)
 
     elif args.run:
