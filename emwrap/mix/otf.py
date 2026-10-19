@@ -20,6 +20,9 @@ On-The-Fly (OTF) processing of EMhub sessions.
 An OTF project is an emwrap project created from a workflow template
 (config/workflows/*.json), whose jobs are filled with the session values
 and then launched, each one when its input has some data.
+The workflow template is taken from (first found): the --workflow option,
+sconfig['otf'][workflow]['emwrap_workflow'] or the OTF class default
+(e.g. config/workflows/spa-otf.json), and its full path is printed.
 
 The OTF class is generic and subclasses define the processing type:
     - SpaOTF: single-particle (import movies, preprocessing and 2D)
@@ -44,7 +47,7 @@ import argparse
 import importlib
 from glob import glob
 
-from emtools.utils import Color, FolderManager, Pretty
+from emtools.utils import Color, FolderManager, Pretty, Path
 from emtools.metadata import StarFile
 from emtools.image import Image
 
@@ -71,15 +74,18 @@ class OTF(FolderManager):
         FolderManager.__init__(self, path)
 
     # ------------------- Creation -----------------------------------
-    def create(self, session, sconfig, resources):
+    def create(self, session, sconfig, resources, workflow=None):
         cwd = os.getcwd()
+        # Resolve a relative workflow file before changing the working dir
+        if workflow and workflow.endswith('.json'):
+            workflow = os.path.abspath(os.path.expanduser(workflow))
         os.chdir(self.path)
         try:
-            self._create(session, sconfig, resources)
+            self._create(session, sconfig, resources, workflow=workflow)
         finally:
             os.chdir(cwd)
 
-    def _create(self, session, sconfig, resources):
+    def _create(self, session, sconfig, resources, workflow=None):
         """ Create the OTF project for this session.
 
         Args:
@@ -91,6 +97,8 @@ class OTF(FolderManager):
                 or GPUs) can be defined in the config (see module doc), e.g.:
                 {"emw-preprocessing": {"launcher_preprocessing": "/path/to/script.sh"}}
             resources: EMhub resources, to find the microscope of the session
+            workflow: workflow template (id or JSON file) that takes
+                precedence over the one in the config.
         """
         project = ProjectManager(self.path, create=True)
         project.clean()
@@ -99,8 +107,20 @@ class OTF(FolderManager):
         self._linkData(session['extra']['raw']['path'])
         ctx = self.createContext(session, sconfig, resources)
 
-        workflow = self.loadWorkflowTemplate(ctx['wf_conf'].get('emwrap_workflow'))
-        jobs = {j['jobtype']: j['params'] for j in workflow['jobs']}
+        if workflow:
+            source = 'from --workflow'
+        elif workflow := ctx['wf_conf'].get('emwrap_workflow'):
+            source = "from config 'emwrap_workflow'"
+        else:
+            source = f"default for {self.TYPE} OTF: '{self.WORKFLOW}'"
+        workflowFile = self.getWorkflowTemplateFile(workflow)
+        workflow = self.loadWorkflowTemplate(workflow, source=source, log=self.log)
+        # Params are setup in the first job of each type and then the
+        # changes are copied to other jobs of the same type (if any)
+        jobs = {}
+        for j in workflow['jobs']:
+            jobs.setdefault(j['jobtype'], j['params'])
+        original = {jobType: dict(params) for jobType, params in jobs.items()}
 
         self.setupJobs(jobs, ctx)
         self.customizeJobs(jobs, ctx)
@@ -111,8 +131,17 @@ class OTF(FolderManager):
                 if jobType in jobs:
                     jobs[jobType].update(jobParams)
 
+        for j in workflow['jobs']:
+            params = jobs[j['jobtype']]
+            if j['params'] is not params:
+                j['params'].update({k: v for k, v in params.items()
+                                    if original[j['jobtype']].get(k) != v})
+
         idMap = project.loadWorkflow(workflow=workflow)
-        jobIds = {j['jobtype']: idMap[j['jobid']] for j in workflow['jobs']}
+        # First job of each type, used for the outputs reported to EMhub
+        jobIds = {}
+        for j in workflow['jobs']:
+            jobIds.setdefault(j['jobtype'], idMap[j['jobid']])
 
         self._dumpJson('acquisition.json', ctx['acq'])
 
@@ -121,11 +150,20 @@ class OTF(FolderManager):
 
         # Paths used by EMhub (and session workers) to show the session data
         sessionJson = {
+            'session_id': session['id'],
             'otf_type': self.TYPE,
+            # Workflow template used to create the project
+            'workflow': {
+                'file': workflowFile,
+                'source': source,
+                'title': workflow.get('title', ''),
+                'created': Pretty.now()
+            },
             'jobs': jobIds,
-            'steps': self._stepsFromJobs(jobIds),
+            'steps': self._stepsFromWorkflow(workflow, idMap),
             'outputs': [_star(jobType, starFn)
                         for jobType, outputs in self.OUTPUTS.items()
+                        if jobType in jobIds
                         for starFn, _ in outputs]
         }
         sessionJson.update(self.sessionInfo(jobIds))
@@ -133,7 +171,8 @@ class OTF(FolderManager):
 
         with open(self.join('README.txt'), 'a') as f:
             f.write(f'\n\n# OTF CREATED: {Pretty.now()}\n')
-            f.write(f'# SESSION_ID = {session["id"]}\n\n')
+            f.write(f'# SESSION_ID = {session["id"]}\n')
+            f.write(f'# WORKFLOW = {workflowFile} ({source})\n\n')
             f.write('# Run the OTF (jobs are launched when their inputs are ready):\n')
             f.write('emh-tomo --launch emwrap.mix.otf --run\n\n')
             f.write('# or run the jobs one by one:\n')
@@ -222,24 +261,37 @@ class OTF(FolderManager):
             return json.load(f)
 
     @classmethod
-    def loadWorkflowTemplate(cls, workflow=None):
-        """ Load the workflow template, either from a workflow id (from the
-        emwrap config/workflows folder) or from a JSON file path.
-        By default, cls.WORKFLOW is used. """
+    def getWorkflowTemplateFile(cls, workflow=None):
+        """ Return the full path of the workflow template, either from a
+        workflow id (from the emwrap config/workflows folder) or from a
+        JSON file path. By default, cls.WORKFLOW is used. """
         workflow = workflow or cls.WORKFLOW
         if workflow.endswith('.json'):
-            with open(os.path.expanduser(workflow)) as f:
-                return json.load(f)
-        return ProcessingConfig.get_workflow(workflow)
+            return os.path.abspath(os.path.expanduser(workflow))
+        return ProcessingConfig.get_workflow_file(workflow)
+
+    @classmethod
+    def loadWorkflowTemplate(cls, workflow=None, source=None, log=print):
+        """ Load the workflow template (see getWorkflowTemplateFile),
+        logging the full path of the file it is loaded from. """
+        workflowFile = cls.getWorkflowTemplateFile(workflow)
+        source = f" ({source})" if source else ''
+        log(f"Loading workflow template{source}: {Color.bold(workflowFile)}")
+        if not os.path.exists(workflowFile):
+            raise Exception(f"Workflow template not found: {workflowFile}")
+        with open(workflowFile) as f:
+            return json.load(f)
 
     # ------------------- Run and status ---------------------------------
     def _waitTable(self, starFn, tableName, sleep=30):
-        """ Wait until the STAR file exists and has some rows in the table. """
-        self.log(f"Waiting for {tableName} in {starFn}")
+        """ Wait until the STAR file exists and has some rows in the table
+        (or in any table if tableName is None). """
+        self.log(f"Waiting for {tableName or 'any table'} in {starFn}")
         while True:
             try:
                 with StarFile(self.join(starFn)) as sf:
-                    if sf.getTableSize(tableName):
+                    tables = [tableName] if tableName else sf.getTableNames()
+                    if any(sf.getTableSize(t) for t in tables):
                         return
             except Exception:
                 pass
@@ -260,11 +312,128 @@ class OTF(FolderManager):
         """ Steps from session.json, or from STEPS for old projects. """
         return session.get('steps') or self._stepsFromJobs(session['jobs'])
 
+    @classmethod
+    def jobsFromSession(cls, session):
+        """ All OTF job ids (from the steps), or from 'jobs' (one per type)
+        for old projects. """
+        if steps := session.get('steps'):
+            return [s['job'] for s in steps]
+        return list(session.get('jobs', {}).values())
+
+    def _stepsFromWorkflow(self, workflow, idMap):
+        """ Steps to run all the workflow jobs, in the workflow order.
+        A job waits for its input (a STAR file of other workflow job in
+        its params), for the table defined in STEPS or any table. """
+        types = {j['jobid']: j['jobtype'] for j in workflow['jobs']}
+        tables = {(jobType, inp[0], inp[1]): inp[2]
+                  for jobType, inp in self.STEPS if inp}
+
+        def _input(job):
+            for value in job['params'].values():
+                for token in str(value).split():
+                    for otherId in idMap:
+                        prefix = Path.rmslash(otherId) + '/'
+                        if otherId != job['jobid'] and token.startswith(prefix):
+                            starFn = token[len(prefix):]
+                            if starFn.endswith('.star'):
+                                table = tables.get((job['jobtype'], types[otherId], starFn))
+                                return [os.path.join(idMap[otherId], starFn), table]
+            return None
+
+        # Keep the workflow order, but a job always after the job it waits for
+        pending = [{'job': idMap[j['jobid']], 'wait': _input(j)} for j in workflow['jobs']]
+        steps, launched = [], set()
+        while pending:
+            step = next((s for s in pending
+                         if not s['wait'] or os.path.dirname(s['wait'][0]) in launched
+                         or os.path.dirname(s['wait'][0]) not in idMap.values()),
+                        pending[0])
+            pending.remove(step)
+            steps.append(step)
+            launched.add(step['job'])
+        return steps
+
     def _stepsFromJobs(self, jobIds):
         """ Steps to run (job and input to wait for) from STEPS. """
         return [{'job': jobIds[jobType],
                  'wait': [os.path.join(jobIds[inp[0]], inp[1]), inp[2]] if inp else None}
                 for jobType, inp in self.STEPS]
+
+    def isEmwrapProject(self):
+        """ True if the OTF was created with emwrap workflows (session.json
+        with 'jobs'), not with the old OTF (session.json only with paths). """
+        return self.exists('session.json') and 'jobs' in self._loadSession()
+
+    def stop(self, log=None):
+        """ Stop the OTF processing: the OTF runner processes in this folder
+        (emwrap.mix.otf --run, launching the jobs when their inputs are ready),
+        the active jobs of the project, that are marked as Aborted, so they
+        can be run again (continuing with their outputs), and any other process
+        still running in the OTF folder (e.g. jobs of old OTF projects).
+        Return the list of stopped processes pids and jobs ids. """
+        import psutil
+
+        log = log or self.log
+        path = os.path.realpath(self.path)
+        me = os.getpid()
+
+        def _cwd(proc):
+            cwd = proc.info['cwd']
+            return os.path.realpath(cwd) if cwd else ''
+
+        def _kill(proc):
+            for p in proc.children(recursive=True) + [proc]:
+                try:
+                    p.kill()
+                except psutil.NoSuchProcess:
+                    pass
+
+        runners = []
+        for proc in psutil.process_iter(['pid', 'cmdline', 'cwd']):
+            try:
+                cmdline = ' '.join(proc.info['cmdline'] or [])
+                if (proc.pid != me and 'emwrap.mix.otf' in cmdline
+                        and '--run' in cmdline and _cwd(proc) == path):
+                    _kill(proc)
+                    runners.append(proc.pid)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+        if runners:
+            log(f"Stopped OTF runner processes: {runners}")
+
+        jobs = []
+        if self.isEmwrapProject():
+            project = ProjectManager(self.path)
+            project.update()
+            for jobId in self.jobsFromSession(self._loadSession()):
+                try:
+                    project.stopJob(jobId)
+                    jobs.append(jobId)
+                except Exception:  # not running
+                    pass
+        if jobs:
+            log(f"Stopped OTF jobs: {jobs}")
+
+        # Other processing programs still running in the OTF folder (e.g.
+        # jobs of old OTF projects, not created with emwrap workflows), but
+        # not other processes there (e.g. user shells)
+        others = []
+        programs = ('emw', 'emwrap', 'relion')
+        for proc in psutil.process_iter(['pid', 'cwd', 'cmdline']):
+            try:
+                cwd = _cwd(proc)
+                cmdline = ' '.join(proc.info['cmdline'] or [])
+                if (proc.pid != me and proc.pid not in runners
+                        and (cwd == path or cwd.startswith(path + os.sep))
+                        and any(p in cmdline for p in programs)):
+                    _kill(proc)
+                    others.append(proc.pid)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+        if others:
+            log(f"Stopped other processes in the OTF folder: {others}")
+
+        return runners + others, jobs
 
     def status(self):
         def _log(logFn):
@@ -290,6 +459,8 @@ class OTF(FolderManager):
 
         session = self._loadSession()
         for jobType, outputs in self.OUTPUTS.items():
+            if jobType not in session['jobs']:
+                continue
             runDir = self.join(session['jobs'][jobType])
             starMsgs = [_check_starfile(os.path.join(runDir, starFn), table)
                         for starFn, table in outputs]
@@ -383,7 +554,7 @@ class SpaOTF(OTF):
             "movies": f"{jobIds[self.IMPORT]}/movies.star",
             "micrographs": f"{ppId}/micrographs.star",
             "coordinates": f"{ppId}/coordinates.star",
-            "classes2d": jobIds[self.CLASS2D],
+            "classes2d": jobIds.get(self.CLASS2D, ''),
         }
 
 
@@ -466,10 +637,18 @@ def main():
                    help="Create new OTF project, previous files will be cleaned.")
     g.add_argument('--run', '-r', action='store_true')
     g.add_argument('--status', '-s', action='store_true')
+    g.add_argument('--stop', action='store_true',
+                   help="Stop the OTF runner and the running jobs.")
     p.add_argument('--otf', metavar='TYPE_OR_CLASS',
                    help="OTF type ('spa', 'tomo') or 'module.Class' to "
                         "create the project. By default, it is taken from "
                         "the workflow config ('emwrap_otf') or 'spa'.")
+    p.add_argument('--workflow', '-w', metavar='ID_OR_JSON',
+                   help="Workflow template used to create the project (with "
+                        "--create): a workflow id (from emwrap config/workflows) "
+                        "or a JSON file. By default, it is taken from the "
+                        "workflow config ('emwrap_workflow') or the OTF type "
+                        "default (e.g. 'spa-otf').")
 
     args = p.parse_args()
     path = os.getcwd()
@@ -485,13 +664,16 @@ def main():
             otf = OTF.getClass(args.otf)(path)
         else:
             otf = OTF.fromSession(path, session=session, sconfig=sconfig)
-        otf.create(session, sconfig, resources)
+        otf.create(session, sconfig, resources, workflow=args.workflow)
 
     elif args.run:
         OTF.fromSession(path).run()
 
     elif args.status:
         OTF.fromSession(path).status()
+
+    elif args.stop:
+        OTF.fromSession(path).stop()
 
 
 if __name__ == '__main__':
