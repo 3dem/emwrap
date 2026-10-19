@@ -100,6 +100,11 @@ class ProcessingConfig:
         "emw-pytme": {"launcher": "emwrap.pytme", "visible": False},        
         "emw-relion-symmetrize_volume": {"launcher": "emwrap.relion.symmetrize_volume"},
         "emw-relion-mask_create": {"launcher": "emwrap.relion.mask_create"},
+        "emw-relion-subset-selection": {
+            "launcher": "emwrap.relion.subset_selection",
+            "label": "Relion Subset Selection",
+            "output": "SubsetSelection"
+        },
         "emw-warp-mtools_create": {
             "launcher": "emwrap.warp.warp_mtools_create",
             "label": "Warp M Create Population",
@@ -144,7 +149,8 @@ class ProcessingConfig:
         "relion.reconstructparticletomo": {
             "launcher": "emwrap.relion.native",
             "label": "Relion Tomo Reconstruct Particles",
-            "output": "Reconstruct"
+            "output": "Reconstruct",
+            "tomo": True
         },
         "relion.initialmodel.tomo": {
             "launcher": "emwrap.relion.native",
