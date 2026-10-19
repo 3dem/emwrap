@@ -43,7 +43,9 @@ class StarBatchManager(FolderManager):
             inputStar: input particles star file.
             groupColumn: column used to group particles.
                 Usually gridSquare or micrographName
-            minSize: minimum size for each batch
+            minSize: size of each batch. When grouping, the minimum size:
+                the batch is created at the first particle of a new group
+                once it has at least minSize particles.
         """
         FolderManager.__init__(self, outputPath)
         self._inputStar = inputStar
@@ -59,7 +61,8 @@ class StarBatchManager(FolderManager):
         self._rows = []
         self.log = kwargs.get('log', print)
         self._groupColumn = groupColumn
-        self._lastValue = None  # used with groupColum to create new batches
+        self._total = 0  # Total particles found in the input
+        self._pending = 0  # Particles in the input not yet in a batch
 
     def generate(self):
         """ Generate batches based on the input items. """
@@ -70,30 +73,70 @@ class StarBatchManager(FolderManager):
                 if self._lastCheck is None or mTime > self._lastCheck:
                     self.log(f"Reading star file: {self._inputStar}, "
                              "checking for new batches.", flush=True)
+                    total = self._total
                     for batch in self._createNewBatches():
-                        self._lastUpdate = now
                         yield batch
+                    if self._total > total:
+                        self._lastUpdate = now
+                    self._logStatus(new=self._total - total)
+                else:
+                    self._logStatus()
                 self._lastCheck = datetime.now()
+            else:
+                self.log(f"Waiting for input: {self._inputStar}", flush=True)
             time.sleep(self._sleep)
 
         # After timeout, let's check if there are any remaining items
         # for the last batch, it will take all remaining items
         # We keep the loop for simplicity, but it should be only one batch
         # as this point
+        self.log(f"{Color.warn('Timeout')}: no new particles for "
+                 f"{Pretty.delta(self._lastCheck - self._lastUpdate)}, "
+                 f"creating the last batch with the remaining particles.", flush=True)
         for batch in self._createNewBatches(last=True):
             yield batch
+        self._logStatus(final=True)
 
-    def _batchCondition(self, row, rows):
-        if self._groupColumn is not None:
-            value = getattr(row, self._groupColumn)
-            r = (self._lastValue is not None and
-                 self._lastValue != value and
-                 len(rows) > self._minSize)
-            self._lastValue = value
-        else:  # We are not grouping by any column in this case
-            r = len(rows) > self._minSize
+    def _needed(self):
+        """ Particles still needed to create the next batch. When grouping,
+        one more particle (of a new group) is needed after reaching minSize. """
+        needed = max(0, self._minSize - self._pending)
+        return needed + 1 if self._groupColumn is not None else needed
 
-        return r
+    def _logStatus(self, new=None, final=False):
+        """ Log the particles found, batched and pending, and how many
+        particles (or how much time until the timeout) are left for the
+        next batch. """
+        newStr = f" (+{new} new)" if new is not None else ''
+        batched = self._total - self._pending
+        msg = (f"Particles: {Color.cyan(str(self._total))} found{newStr}, "
+               f"{batched} in {self._count} batches, "
+               f"{Color.cyan(str(self._pending))} pending. ")
+
+        if final:
+            msg += "No more batches will be created."
+        elif self._groupColumn is None and self._minSize == 0:
+            msg += "Batch size 0: all new particles go in a new batch."
+        else:
+            atLeast = 'at least ' if self._groupColumn is not None else ''
+            msg += (f"Next batch (size {self._minSize}) needs {atLeast}"
+                    f"{Color.bold(str(self._needed()))} more particles")
+            if self._groupColumn is not None:
+                msg += f" and a new '{self._groupColumn}' value"
+            if self._lastUpdate is not None:
+                since = datetime.now() - self._lastUpdate
+                left = max(self._timeout - since, timedelta(0))
+                msg += (f", or timeout in {Color.bold(Pretty.delta(left))} "
+                        f"(no new particles for {Pretty.delta(since)})")
+            msg += '.'
+        self.log(msg, flush=True)
+
+    def _groupEnded(self, row, rows):
+        """ When grouping, return True if the row starts a new group and the
+        current rows (all from previous groups) reach the batch size. """
+        return (self._groupColumn is not None and len(rows) >= self._minSize
+                and len(rows) > 0
+                and getattr(row, self._groupColumn) != getattr(rows[-1], self._groupColumn))
 
     def _createNewBatches(self, last=False):
         with StarFile(self._inputStar) as sf:
@@ -102,16 +145,29 @@ class StarBatchManager(FolderManager):
 
             if self._groupColumn is None and self._minSize == 0:  # Take all
                 rows = [row for row in sf.iterTable('particles', start=self._startIndex)]
-                yield self._createBatch(tOptics, tParticles, rows)
+                self._total = self._startIndex + len(rows)
+                self._pending = len(rows)
+                if rows:
+                    yield self._createBatch(tOptics, tParticles, rows)
             else:
                 rows = []
+                start = self._startIndex
+                n = 0
 
-                for row in sf.iterTable('particles', start=self._startIndex):
-                    if self._batchCondition(row, rows):
+                for row in sf.iterTable('particles', start=start):
+                    n += 1
+                    self._total = start + n
+                    self._pending = self._total - self._startIndex
+                    if self._groupEnded(row, rows):
                         yield self._createBatch(tOptics, tParticles, rows)
                         rows = []
                     rows.append(row)
+                    if self._groupColumn is None and len(rows) >= self._minSize:
+                        yield self._createBatch(tOptics, tParticles, rows)
+                        rows = []
 
+                self._total = start + n
+                self._pending = len(rows)
                 if rows and last:
                     yield self._createBatch(tOptics, tParticles, rows)
 
@@ -123,7 +179,12 @@ class StarBatchManager(FolderManager):
                       items={'start': self._startIndex, 'count': len(rows)},
                       path=self.join(batch_id))
         batch.create()
+        start = self._startIndex
         self._startIndex += len(rows)
+        self._pending -= len(rows)
+        self.log(f"{Color.green('New batch')} {batch_id}: {len(rows)} particles "
+                 f"(items {start + 1}-{self._startIndex}), "
+                 f"{self._startIndex} particles in {self._count} batches.", flush=True)
 
         outStarFile = batch.join('particles.star')
         with StarFile(outStarFile, 'w') as sfOut:
@@ -140,10 +201,7 @@ class StarBatchManager(FolderManager):
         since last new items were found. """
         if self._lastCheck is None or self._lastUpdate is None:
             return False
-        else:
-            self.log(f"Checking timeout: self._lastCheck - self._lastUpdate: "
-                     f"{Pretty.delta(self._lastCheck - self._lastUpdate)}")
-            return (self._lastCheck - self._lastUpdate) > self._timeout
+        return (self._lastCheck - self._lastUpdate) > self._timeout
 
 
 class Relion2DPipeline(ProcessingPipeline):
