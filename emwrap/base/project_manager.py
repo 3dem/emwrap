@@ -380,9 +380,10 @@ class ProjectManager(FolderManager):
             return v
 
         while remaining:
+            # Keep the jobDict order (e.g. workflow order) for the new ids
             ready = [
-                jobId for jobId in remaining
-                if jobDict[jobId]['parents'].issubset(newIdsDict)
+                jobId for jobId in jobDict if jobId in remaining
+                and jobDict[jobId]['parents'].issubset(newIdsDict)
             ]
             if not ready:
                 raise Exception(
@@ -416,11 +417,20 @@ class ProjectManager(FolderManager):
 
         return self._instanciateJobs({jobId: _jobInfo(jobId) for jobId in jobIds})
 
-    def exportWorkflow(self, jobIds, output_path):
-        """" Export a subworkflow with the given job ids. """
+    def exportWorkflow(self, jobIds, output_path, in_project=True):
+        """" Export a subworkflow with the given job ids.
+
+        Args:
+            jobIds: ids of the jobs to export, in the given order
+            output_path: JSON file to write the workflow
+            in_project: if True, the file is written in the project folder
+                (only with the output_path name), otherwise in output_path.
+        Returns:
+            The path of the written file.
+        """
         workflow_json = {"jobs": []}
         for jobId in jobIds:
-            job = self._getJob(jobId)
+            job = self._getJob(Path.rmslash(jobId))
             workflow_json['jobs'].append({
                 'jobid': job.id,
                 'jobtype': job['jobtype'],
@@ -428,9 +438,11 @@ class ProjectManager(FolderManager):
             })
 
         # FIXME: For now, let's write all outputs to the project directory
-        output_name = os.path.basename(output_path)  
-        with open(self.join(output_name), 'w') as f:
+        if in_project:
+            output_path = self.join(os.path.basename(output_path))
+        with open(output_path, 'w') as f:
             json.dump(workflow_json, f, indent=4)
+        return output_path
 
     def loadWorkflow(self, **kwargs):
         """ Load a workflow with jobs templates. """
@@ -1313,6 +1325,11 @@ class ProjectManager(FolderManager):
         g.add_argument('--stop', '-t', metavar='JOB_ID',
                        help="Stop a launched or running job.")
 
+        g.add_argument('--export-workflow', nargs='+', metavar='JOB_ID_OR_OUTPUT',
+                       help="Export the given jobs as a workflow JSON file: "
+                            "[JOB_ID ...] OUTPUT_JSON. If no job id is given, "
+                            "all the project jobs are exported. The workflow can "
+                            "be loaded in other projects with --workflow.")
         g.add_argument('--workflow', '-w', metavar='WORKFLOW_FILE',
                        help="Load a workflow from a JSON file and create its jobs.")
 
@@ -1418,6 +1435,16 @@ class ProjectManager(FolderManager):
 
         elif args.stop:
             pm.stopJob(args.stop)
+
+        elif args.export_workflow:
+            *jobIds, output = args.export_workflow
+            if not output.endswith('.json'):
+                raise Exception("Expecting: --export-workflow [JOB_ID ...] OUTPUT_JSON")
+            if not jobIds:  # export all project jobs
+                jobIds = [job.id for job in pm._readPipelineWorkflow().jobs()]
+            output = os.path.abspath(output)  # relative to the current folder
+            pm.exportWorkflow(jobIds, output, in_project=False)
+            pm.log(f"Exported workflow with {len(jobIds)} job(s) to: {output}")
 
         elif args.workflow:
             if args.clean:
