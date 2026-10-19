@@ -21,6 +21,8 @@ from emtools.jobs import Batch
 from emtools.metadata import StarFile
 from emtools.utils import Path
 
+from emwrap.base.project_lock import wait_project_lock_free
+
 from .relion_base import RelionBasePipeline
 
 
@@ -48,9 +50,9 @@ class RelionNative(RelionBasePipeline):
 
             batch = Batch(id=job.rlnJobTypeLabel, path=self.workingDir)
 
-            # Remove .relion_lock directory
-            if os.path.exists(self.join('.relion_lock')):
-                shutil.rmtree(self.join('.relion_lock'))
+            # relion_pipeliner takes the project lock itself; wait until it
+            # is released (stale locks are broken) instead of removing it
+            wait_project_lock_free(self.workingDir)
 
             # Get Relion's version
             self.batch_execute('version', batch, {'relion_pipeliner': '--version'})

@@ -907,9 +907,7 @@ class ProjectData(FolderManager):
             'runName': str(runName or ''),
             'comment': str(comment or ''),
         }
-        with open(path, 'w') as f:
-            json.dump(payload, f, indent=2)
-            f.write('\n')
+        atomic_write_json(path, payload, indent=2)
         return payload
 
     def getOutputInfo(self, output_id):
