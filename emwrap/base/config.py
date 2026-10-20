@@ -52,6 +52,11 @@ class ProcessingConfig:
             "label": "EMwrap Subset TS",
             "output": "EMwrap"
         },
+        "emw-subset-classes": {
+            "launcher": "emwrap.base.subset_classes",
+            "label": "EMwrap Subset Classes",
+            "output": "EMwrap"
+        },
         "emw-merge-sets": {
             "launcher": "emwrap.base.merge_sets",
             "label": "EMwrap Merge Sets",
@@ -144,7 +149,8 @@ class ProcessingConfig:
         "relion.reconstructparticletomo": {
             "launcher": "emwrap.relion.native",
             "label": "Relion Tomo Reconstruct Particles",
-            "output": "Reconstruct"
+            "output": "Reconstruct",
+            "tomo": True
         },
         "relion.initialmodel.tomo": {
             "launcher": "emwrap.relion.native",

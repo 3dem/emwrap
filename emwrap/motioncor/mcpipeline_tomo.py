@@ -69,7 +69,7 @@ class McPipelineTomo(ProcessingPipeline):
             # Link the gain reference
             acq = Acquisition(self.acq)
             if self.inputGain:
-                acq['gain'] = batch.link(self.inputGain)
+                acq['gain'] = batch.link(self.inputGain, absolute=True)
 
             mc = Motioncor(acq, **self._args['motioncor'])
             mc.process_batch(batch, gpu=gpu)

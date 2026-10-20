@@ -514,14 +514,14 @@ class DenoisET(ProcessingPipeline):
  
             # --output: predict3d writes into an 'output' subfolder
             outputDir = 'output'
-            os.makedirs(outputDir, exist_ok=True)
+            os.makedirs(batch.join(outputDir), exist_ok=True)
 
             # Build inference arguments
             cmdArgs = self._get_args('infer.dn3')
             cmdArgs.update({
                 '--input': '.',
                 '--output': outputDir,
-                '--model': batch.link(self.modelPath),
+                '--model': os.path.abspath(self.modelPath),
             })
  
             launcher = self._get_launcher()
