@@ -1125,7 +1125,7 @@ class AreTomo3Pipeline(ProcessingPipeline):
                 self._args['aretomo3.FmDose'] = frameDose
 
             if self.inputGain:
-                acq['gain'] = batch.link(self.inputGain)
+                acq['gain'] = batch.link(self.inputGain, absolute=True)
 
             at3 = AreTomo3(acq, **self._args)
             at3.process_batch(batch, gpu=gpu)

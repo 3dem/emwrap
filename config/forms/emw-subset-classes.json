@@ -1,0 +1,25 @@
+{
+    "name": "emw-subset-classes",
+    "label": "EMwrap Subset Classes",
+    "help": "Keep the particles of the selected 3D classes from a 3D classification job. Inspect the classes of the 3D classification, then list the class numbers to keep. The particles are selected by their 'rlnClassNumber' value.",
+    "sections": [
+        {
+            "label": "Class selection",
+            "params": [
+                {
+                    "name": "input_set",
+                    "label": "Select classes from:",
+                    "paramClass": "PathParam",
+                    "pattern": "STAR files (*.star)",
+                    "help": "Particles STAR file of the 3D classification iteration (e.g. Class3D/job017/run_it025_data.star), or an optimisation_set.star (e.g. Class3D/job017/run_it025_optimisation_set.star). With particles as input, only the filtered particles.star is generated. With an optimisation set, its particles are filtered and a new optimisation_set.star pointing to them is also generated."
+                },
+                {
+                    "name": "classes",
+                    "label": "Classes to keep:",
+                    "paramClass": "StringParam",
+                    "help": "Class numbers to keep, separated by commas or spaces. Ranges are allowed, e.g. '1,3-4' keeps classes 1, 3 and 4. The output is particles.star with the particles of these classes."
+                }
+            ]
+        }
+    ]
+}
