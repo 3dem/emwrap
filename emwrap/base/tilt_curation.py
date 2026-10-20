@@ -21,7 +21,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from emtools.utils import Color
 from emtools.metadata import StarFile
-from emtools.image import tilt_qc
+from emtools.image import TiltThumbnails, tilt_qc
 
 from emwrap.base import ProcessingPipeline
 from emwrap.base.subset_ts import SubsetTsPipeline, MODE_EXPLICIT_NAMES
@@ -43,7 +43,6 @@ LIMIT_PARAMS = {
     'astigmatism_max': ('astigmatism', 1e4),
     'defocus_max': ('defocus', 1e4),
 }
-JPEG_SIZE = 512     # px; the size the image measures were calibrated on
 # Columns of tilt_curation.csv after the decision: the rule's inputs, with
 # texture and dark area relative to the series as the limits apply to them
 CSV_VALUES = ['motion', 'ctfResolution', 'ctfCorrelation', 'figureOfMerit', 'defocus',
@@ -56,6 +55,10 @@ class TiltCurationPipeline(SubsetTsPipeline):
     dashboard uses): blank, blacked out, a different field or shifted away
     (measured on the 512 px tilt jpegs), motion, CTF fit, defocus and
     astigmatism, and the tilts acquired after one that lost the field.
+
+    The jpegs and image measures are the ones the job that made the tilt
+    averages wrote (emwrap's wrappers do, see TiltThumbnails) when they
+    exist; those missing are made here, into this job's thumbnails folder.
 
     Input and output are TiltSeries.  The output is written as by the
     subset job (emw-subset-ts) with every tilt series and the failing tilts
@@ -75,7 +78,6 @@ class TiltCurationPipeline(SubsetTsPipeline):
         self.randomCount = self.randomSeed = None
         self.matchSet = ''
 
-        self.hasJpegs = args.get('has_jpegs', True)
         # A parameter not given keeps the rule's default; an empty one
         # turns that check off
         self.limits = {}
@@ -105,9 +107,9 @@ class TiltCurationPipeline(SubsetTsPipeline):
     # ------------------------------------------------------------------
     def _read_tilts(self, tomoName, tsStar):
         """ The tilts of a tilt series (tilt_qc.tilts_from_star_rows), each
-        with the jpeg to measure: emwrap's when has_jpegs and it exists,
-        else one to make ('make') into this job's thumbnails/<tomoName>/
-        (one folder per tilt series: names may repeat across them). """
+        with the jpeg to measure: the one of the job of its average when it
+        exists, else one to make ('make') into this job's thumbnails folder,
+        in <tomoName>/ (names may repeat across tilt series). """
         table = StarFile.getTableFromFile(tomoName, tsStar, guessType=False)
         if not table:
             raise Exception(f"Could not read tilt-series table '{tomoName}' from {tsStar}")
@@ -119,27 +121,31 @@ class TiltCurationPipeline(SubsetTsPipeline):
             t['make'] = False
             if t['mic'] is None:
                 continue        # no average: judged on its star values only
-            if not (self.hasJpegs and os.path.exists(t['jpeg'])):
-                t['jpeg'] = self.join('thumbnails', tomoName, t['name'] + '.jpg')
+            if not (t['jpeg'] and os.path.exists(t['jpeg'])):
+                t['jpeg'] = TiltThumbnails.tilt_jpeg(t['mic'], self._thumbnails(tomoName))
                 t['make'] = True
         return tilts
 
+    def _thumbnails(self, tomoName):
+        return self.join(TiltThumbnails.FOLDER, tomoName)
+
     def _measures(self, tomoName, tilts):
-        """ The image measures of the tilts.  emwrap's, when has_jpegs and
-        its json is up to date for every tilt: measured over all the motion
-        corrected tilts, as the dashboard reads them, so the series medians
-        and the field walk agree with it even for a subset; the tilts the
-        input does not have come back as dropped (they count for the
-        medians only).  Otherwise measured here into image_qc/. """
+        """ The image measures of the tilts.  Those of the job of the
+        averages, when its json is up to date for every tilt: measured over
+        all the motion corrected tilts, as the dashboard reads them, so the
+        series medians and the field walk agree with it even for a subset;
+        the tilts the input does not have come back as dropped (they count
+        for the medians only).  Otherwise measured here, beside the jpegs
+        made here. """
         jpeg = next((t['jpeg'] for t in tilts if t['jpeg']), None)
-        if self.hasJpegs and jpeg and not any(t['make'] for t in tilts):
+        if jpeg and not any(t['make'] for t in tilts):
             path = tilt_qc.json_path(os.path.dirname(jpeg), tomoName)
             rows = tilt_qc.read_series_json(path, tilts)
             if rows is not None:
                 names = {t['name'] for t in tilts}
                 return rows, [dict(r, dropped=True) for r in rows if r.get('name') not in names]
         rows, _ = tilt_qc.write_series_json(
-            self.join('image_qc', tomoName + tilt_qc.SUFFIX), tomoName, tilts)
+            tilt_qc.json_path(self._thumbnails(tomoName), tomoName), tomoName, tilts)
         return rows or [], []
 
     def _curate_series(self, tomoName, tsStar):
@@ -147,11 +153,8 @@ class TiltCurationPipeline(SubsetTsPipeline):
         (tilts, {movie: [reasons]}, number of jpegs made); the tilts with
         their measures and those relative to the series. """
         tilts = self._read_tilts(tomoName, tsStar)
-        made = 0
-        for t in tilts:
-            if t['make']:
-                os.makedirs(os.path.dirname(t['jpeg']), exist_ok=True)
-                made += tilt_qc.write_tilt_jpeg(t['mic'], t['jpeg'], JPEG_SIZE)
+        made = sum(TiltThumbnails.write_tilt(t['mic'], self._thumbnails(tomoName), medium=False)
+                   for t in tilts if t['make'])
         rows, others = self._measures(tomoName, tilts)
         measures = {r['name']: r for r in rows}
         for t in tilts:
@@ -216,11 +219,7 @@ class TiltCurationPipeline(SubsetTsPipeline):
 
         self.log(f"Input set: {Color.bold(self.inputSet)}, "
                  f"{Color.green(len(globalTable))} tilt series")
-        self.log("Jpegs: " + ("emwrap's where they exist, made here otherwise" if self.hasJpegs
-                              else "made here from the tilt averages"))
         self.log("Limits: " + ', '.join(f'{k}={v}' for k, v in self.limits.items()))
-        self.mkdir('thumbnails')
-        self.mkdir('image_qc')
 
         series = [(r.rlnTomoName, r.rlnTomoTiltSeriesStarFile) for r in globalTable]
         results = self._curate_all(series)
@@ -254,7 +253,6 @@ class TiltCurationPipeline(SubsetTsPipeline):
         nOut = sum(len(r[1]) for r in results.values())
         self.inputs = {
             'input_set': self.inputSet,
-            'has_jpegs': self.hasJpegs,
             'limits': self.limits,
             'drop_series_below': self.dropBelow,
         }

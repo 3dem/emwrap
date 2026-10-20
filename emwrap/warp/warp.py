@@ -27,105 +27,11 @@ from emtools.utils import FolderManager, Path
 from emtools.metadata import (StarFile, Table, RelionStar, WarpXml, Imod,
                               WarpPopulation)
 from emtools.jobs import Batch, Args
-from PIL import Image as PILImage
-from emtools.image import Image, tilt_qc
+from emtools.image import Image
 from emwrap.base import ProcessingPipeline
+from emwrap.base.tilt_thumbnails import TiltThumbnailWriter
 
-
-def _zscore_detrended(k, v, degree=3):
-    """ v minus a low order polynomial in k, scaled to unit spread: removes
-    the smooth background under the Thon rings. """
-    v = v - np.polyval(np.polyfit(k, v, degree), k)
-    return v / (v.std() or 1.0)
-
-
-def warpCtfView(ps, ctf, opts):
-    """ Diagnostic view of a Warp CTF fit: an image and a radial profile.
-
-    ps is Warp's half-plane power spectrum as stored (kx across, ky up to
-    the bottom row), ctf and opts the Movie CTF and OptionsCTF params of the
-    movie xml.  Only the fitted frequency range is shown.
-
-    Image (uint8): the measured half plane on top and the CTF^2 simulated
-    from the fit mirrored below, so rings that run straight across the
-    divider mean the fit matches.  The measured half is Warp's values as
-    stored, with only a linear grey level window: no filtering, averaging
-    or normalisation, which on a low dose tilt would turn noise into ring
-    like structure.  Faint rings are what the data has.
-
-    Profile (dict): the rotational average of the measured spectrum and of
-    the simulated CTF^2, background removed, against spatial frequency, and
-    their correlation.  At this dose this is the more reliable check.
-    """
-    ps = ps.astype(np.float64)
-    h, w = ps.shape
-    oy, ox = h - 1, w // 2
-    # The spectrum is of the image binned 2^BinTimes times; PixelSize is
-    # before binning (half the data's with EER upsampling)
-    window = int(opts['Window'])
-    pix = float(opts['PixelSize']) * 2 ** float(opts.get('BinTimes', 0) or 0)
-    # Warp's range is a fraction of Nyquist
-    rmin = float(opts['RangeMin']) * window / 2
-    rmax = float(opts['RangeMax']) * window / 2
-    R = int(min(np.ceil(rmax * 1.1), oy, ox - 1))
-
-    top = ps[oy - R:oy + 1, ox - R:ox + R + 1]          # ky = R..0 as stored
-    yy, xx = np.mgrid[R:-1:-1, -R:R + 1]
-    rr = np.hypot(xx, yy)
-    band = (rr >= rmin) & (rr <= rmax)
-    # Detector artifacts put a bright line along kx = 0.  It is shown as it
-    # is, but left out of the grey level window and of the profile.
-    offLine = np.abs(xx) > 1
-
-    # CTF^2 from the fit: Warp's defocus is D + dD cos(2 (theta - angle))
-    volt = float(ctf['Voltage']) * 1e3
-    lam = 12.2643247 / np.sqrt(volt * (1 + volt * 0.978466e-6))    # Å
-    cs = float(ctf['Cs']) * 1e7                                     # mm -> Å
-    D, dD = float(ctf['Defocus']) * 1e4, float(ctf['DefocusDelta']) * 1e4
-    ang = np.radians(float(ctf['DefocusAngle']))
-
-    def ctf2(rad, theta):
-        k = rad / (window * pix)
-        dz = D + dD * np.cos(2 * (theta - ang))
-        chi = np.pi * lam * dz * k ** 2 - 0.5 * np.pi * cs * lam ** 3 * k ** 4
-        return np.sin(chi + np.arcsin(float(ctf['Amplitude']))) ** 2
-
-    sim = ctf2(rr, np.arctan2(yy, xx))
-
-    def stretch(a, mask):
-        lo, hi = np.percentile(a[mask], [2, 98])
-        v = np.clip((a - lo) / ((hi - lo) or 1), 0, 1)
-        v[~band] = 0.5
-        return v
-
-    img = np.vstack([stretch(top, band & offLine),
-                     (0.15 + 0.7 * stretch(sim, band))[::-1][1:]])
-    out = (img * 255).astype(np.uint8)
-    out[R, :] = 255   # divider: measured above, simulated below
-
-    # Radial profiles in half pixel bins over the fitted range
-    cols = np.arange(w)[None, :] - ox
-    full_rr = np.hypot(cols, oy - np.arange(h)[:, None])
-    valid = np.broadcast_to(np.abs(cols) > 1, ps.shape)
-    bins = (full_rr[valid] * 2).astype(int)
-    b = np.arange(int(np.ceil(rmin * 2)), int(rmax * 2))
-    radius = b / 2.0 + 0.25
-    counts = np.bincount(bins, minlength=b[-1] + 1)
-    sums = np.bincount(bins, weights=ps[valid], minlength=b[-1] + 1)
-    measured = sums[b] / np.maximum(counts[b], 1)
-    thetas = np.linspace(0, np.pi, 90)
-    simulated = ctf2(radius[:, None], thetas[None, :]).mean(axis=1)
-    k = radius / (window * pix)
-    measured, simulated = _zscore_detrended(k, measured), _zscore_detrended(k, simulated)
-    profile = {
-        'k': np.round(k, 5).tolist(),                 # 1/Å
-        'measured': np.round(measured, 3).tolist(),
-        'simulated': np.round(simulated, 3).tolist(),
-        'correlation': round(float(np.corrcoef(measured, simulated)[0, 1]), 3),
-        # Of the spectrum, Å; also tells a json from before the binning fix
-        'pixelSize': pix,
-    }
-    return out, profile
+from .utils import warpCtfView
 
 
 class WarpBasePipeline(ProcessingPipeline):
@@ -144,14 +50,6 @@ class WarpBasePipeline(ProcessingPipeline):
     M_IMPORT_EXCLUDES = ('versions', 'sources')
     WARP_PARTICLES_STAR = 'warp_particles.star'
     WARP_FOLDERS = [FS, TS, TM]
-    # Per tilt jpegs next to FS/average, read by the emhub OTF dashboard
-    THUMBNAILS = 'thumbnails'
-    THUMBNAIL_SIZE = 512
-    # For a closer look at a tilt.  Larger is not better: each jpeg's
-    # contrast is set from its own pixels, and beyond this size those of a
-    # low dose tilt are mostly shot noise.
-    MEDIUM_THUMBNAIL_SIZE = 1024
-    PS_THUMBNAIL_SIZE = 384
 
     INPUTS = {
         'fs': FS,
@@ -431,6 +329,7 @@ class WarpBasePipeline(ProcessingPipeline):
             self.gain = os.path.basename(gainFile)
         else:
             self.gain = None
+        self.thumbnails = TiltThumbnailWriter(self)
 
     def _importInputs(self, inputFolder, keys=None, dest=None, mutable=False):
         """ Import Warp inputs (see ``importInputs``) from a previous job
@@ -500,96 +399,18 @@ class WarpBasePipeline(ProcessingPipeline):
              self._args.get('mctf.create_settings.bin_angpix', '') or 0)
         return float(v) or inputPs
 
-    def _writeJpeg(self, srcPath, suffix, makeImage, also=None):
-        """ Write FS/thumbnails/<src name><suffix>.jpg from makeImage().
-
-        Made in the job, right after Warp wrote srcPath, so a dashboard
-        never has to read the MRC while acquisition is using the disk.
-        Skipped when the jpeg is newer than srcPath, and the file also, made
-        by makeImage alongside it, exists (or also(), if it is a function,
-        is true). A failure only logs: a missing thumbnail must not fail
-        the job.
-        """
-        name = Path.removeBaseExt(srcPath) + suffix + '.jpg'
-        thumbPath = self.join(self.FS, self.THUMBNAILS, name)
-        try:
-            if (os.path.exists(thumbPath) and
-                    os.path.getmtime(thumbPath) >= os.path.getmtime(srcPath) and
-                    (also is None or (also() if callable(also) else os.path.exists(also)))):
-                return
-            img = makeImage()
-            os.makedirs(os.path.dirname(thumbPath), exist_ok=True)
-            # Write then rename, so a reader never gets a partial file
-            tmpPath = thumbPath + '.tmp'
-            img.save(tmpPath, format='JPEG', quality=80)
-            os.replace(tmpPath, thumbPath)
-        except Exception as e:
-            self.log(f"WARNING: could not write thumbnail for {srcPath}: {e}")
-
-    def writeTiltThumbnail(self, avgMrcPath):
-        """ Jpegs of a tilt average, into FS/thumbnails: <movie>.jpg for the
-        filmstrip and <movie>_medium.jpg for a closer look.  The MRC is read
-        once, and only if one of them is out of date. """
-        cache = []
-
-        def _make(size):
-            def make():
-                if not cache:
-                    cache.append(Image.get_array(avgMrcPath))
-                # The recipe the image QC measures were calibrated on; the
-                # emw-tilt-curation job makes missing jpegs with it too
-                return tilt_qc.tilt_jpeg(cache[0], size)
-            return make
-
-        for suffix, size in (('', self.THUMBNAIL_SIZE),
-                             ('_medium', self.MEDIUM_THUMBNAIL_SIZE)):
-            self._writeJpeg(avgMrcPath, suffix, _make(size))
-
-    def writePsThumbnail(self, psMrcPath, warpXml):
-        """ CTF fit view of a tilt (see warpCtfView), into FS/thumbnails:
-        <movie>_ps.jpg with the image and <movie>_ctf.json with the radial
-        profiles, for the dashboard to plot. """
-        jsonPath = self.join(self.FS, self.THUMBNAILS,
-                             Path.removeBaseExt(psMrcPath) + '_ctf.json')
-
+    @staticmethod
+    def ctfViewMaker(psMrcPath, warpXml):
+        """ The CTF fit view of a tilt (see warpCtfView), as the thumbnail
+        writer takes it: a function returning (image, profile). """
         def _make():
             arr, profile = warpCtfView(Image.get_array(psMrcPath),
                                        warpXml.getDict('Movie', 'CTF', 'Param'),
                                        warpXml.getDict('Movie', 'OptionsCTF', 'Param'))
             res = warpXml.get('Movie', '@CTFResolutionEstimate')
             profile['fitResolution'] = float(res) if res else None
-            os.makedirs(os.path.dirname(jsonPath), exist_ok=True)
-            tmpPath = jsonPath + '.tmp'
-            with open(tmpPath, 'w') as f:
-                json.dump(profile, f)
-            os.replace(tmpPath, jsonPath)
-            return PILImage.fromarray(arr).resize(
-                (self.PS_THUMBNAIL_SIZE, self.PS_THUMBNAIL_SIZE), PILImage.BICUBIC)
-        def _current():
-            # Redone when there is no json, or one from before the fix of
-            # the spectrum's pixel size (no pixelSize), whose simulated CTF
-            # was wrong with EER upsampling
-            try:
-                with open(jsonPath) as f:
-                    return 'pixelSize' in json.load(f)
-            except (OSError, ValueError):
-                return False
-        self._writeJpeg(psMrcPath, '_ps', _make, also=_current)
-
-    def writeTsImageQc(self, tsName, tsTable):
-        """ Image content measures of a tilt series (see emtools tilt_qc),
-        into FS/thumbnails/<tsName>_imageqc.json, for the dashboard to
-        flag blank, blacked out or different field tilts.  Measured on the
-        512 px jpegs, which the thresholds were calibrated on, after all of
-        them are written.  Skipped when up to date; a failure only logs. """
-        thumbDir = self.join(self.FS, self.THUMBNAILS)
-        try:
-            # rlnMicrographName is FS/average/<movie>.mrc: its jpegs are in thumbDir
-            tilts = tilt_qc.tilts_from_star_rows([row._asdict() for row in tsTable],
-                                                 ctf_correlation=False)
-            tilt_qc.write_series_json(tilt_qc.json_path(thumbDir, tsName), tsName, tilts)
-        except Exception as e:
-            self.log(f"WARNING: could not write image QC for TS {tsName}: {e}")
+            return arr, profile
+        return _make
 
     def eerUpsampling(self):
         """ Return the EER upsampling factor (1, 2 or 4) from eerSampling. """
@@ -781,14 +602,14 @@ class WarpBasePipeline(ProcessingPipeline):
             if dims is None and os.path.exists(avgMrcPath):
                 dims = Image.get_dimensions(avgMrcPath)
             if avgMrcPath:
-                self.writeTiltThumbnail(avgMrcPath)
+                self.thumbnails.tilt(avgMrcPath)
 
             defocusDict = defaultdict(lambda: 0)
 
             # xml and average mrc already validated for whole TS above
             ctf = movieXml.getDict('Movie', 'CTF', 'Param')
-            if frameDict['rlnCtfPowerSpectrum']:
-                self.writePsThumbnail(frameDict['rlnCtfPowerSpectrum'], movieXml)
+            if psPath := frameDict['rlnCtfPowerSpectrum']:
+                self.thumbnails.ps(psPath, self.ctfViewMaker(psPath, movieXml))
 
             defocusDict['rlnDefocusU'] = _float(float(ctf['Defocus']) * 10000)  # Convert to Angstroms
             defocusDict['rlnCtfAstigmatism'] = _float(float(ctf['DefocusDelta']) * 10000)  # Convert to Angstroms
@@ -798,18 +619,19 @@ class WarpBasePipeline(ProcessingPipeline):
             if ctfRes := movieXml.get('Movie', '@CTFResolutionEstimate'):
                 defocusDict['rlnCtfMaxResolution'] = _float(ctfRes)
 
+            # Warp only has the trajectory: early and late motion are not
+            # reported (0), see WarpXml.getMovieMotion
+            motion = {'rlnAccumMotionTotal': 0, 'rlnAccumMotionEarly': 0, 'rlnAccumMotionLate': 0}
             try:
-                motion = movieXml.getMovieMotion()
+                motion['rlnAccumMotionTotal'] = movieXml.getMovieMotion()
             except (KeyError, ValueError) as e:
                 # One movie without its motion must not fail the batch; 0
                 # is what readers take as not reported
                 self.log(f"WARNING: no motion for {moviePrefix}: {e}")
-                motion = {'total': 0, 'early': 0, 'late': 0}
 
             for k in extra_cols:
-                if k.startswith('rlnAccumMotion'):
-                    # rlnAccumMotionTotal -> 'total', etc
-                    frameDict[k] = _float(motion[k[len('rlnAccumMotion'):].lower()])
+                if k in motion:
+                    frameDict[k] = _float(motion[k])
                 elif k.startswith('rlnDefocus') or k.startswith('rlnCtf') and k not in frameDict:
                     frameDict[k] = defocusDict[k]
 
@@ -822,7 +644,7 @@ class WarpBasePipeline(ProcessingPipeline):
             self.log(f"ERROR: All tilts are deselected in Warp for TS {tsName}")
             return False, None, dims
 
-        self.writeTsImageQc(tsName, newTsTable)
+        self.thumbnails.imageQc(tsName, newTsTable)
         return True, newTsTable, dims
 
     def alignmentPs(self):

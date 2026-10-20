@@ -12,13 +12,6 @@
                     "paramClass": "PathParam",
                     "pointerClass": "TiltSeries",
                     "help": "tilt_series.star of motion corrected tilt series (e.g. the output of Warp Motion and CTF), before alignment: individual tilts cannot be deselected in a Warp tilt-series state once it exists."
-                },
-                {
-                    "name": "has_jpegs",
-                    "label": "Tilt images have jpegs",
-                    "paramClass": "BooleanParam",
-                    "default": true,
-                    "help": "Yes: use the 512 px jpegs emwrap's Warp Motion and CTF wrote for each tilt (in the 'thumbnails' folder beside the tilt averages); a tilt without one gets one made here.\nNo: make the jpegs here from the tilt averages (rlnMicrographName) into this job's 'thumbnails' folder, with the same recipe, then measure them. For tilt series not motion corrected by emwrap's Warp wrapper."
                 }
             ]
         },
