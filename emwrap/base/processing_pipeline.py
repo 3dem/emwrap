@@ -301,7 +301,11 @@ class ProcessingPipeline(Pipeline, FolderManager):
             Pipeline.run(self)
             self.postrun()
             if ProcessingPipeline.do_clean():
-                self.__clean_tmp()
+                try:
+                    self.__clean_tmp()
+                except OSError as e:
+                    # e.g. a process still writing in tmp, the outputs are fine
+                    self.log(f"WARNING: Could not clean {self.tmpDir}: {e}")
             else:
                 print(f"Temporary directory was not deleted, "
                       f"remove it with the following command: \n"

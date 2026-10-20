@@ -117,10 +117,14 @@ class ImportTsPipeline(ProcessingPipeline):
         else:
             self.allTsTable.addRowValues(**rowValues)
         
-        with StarFile(self.outputStar, 'w') as sfOut:
+        # Write to a temporary file first, the output is read on-the-fly
+        # (e.g. by WarpOTF) and should never be seen partially written
+        tmpStar = self.outputStar + '.tmp'
+        with StarFile(tmpStar, 'w') as sfOut:
             sfOut.writeTable('global', self.allTsTable,
                              computeFormat="left",
-                             timeStamp=True)  
+                             timeStamp=True)
+        os.replace(tmpStar, self.outputStar)
         self.writeRelionOutputNodes([[self.outputStar, 'TomogramGroupMetadata.star.emwrap.frameseries']])          
         self.writeInfo()
 
@@ -145,7 +149,10 @@ class ImportTsPipeline(ProcessingPipeline):
                                     moviesPath=self.tsFolder,
                                     blacklist=previousTs,
                                     createBatch=False,
-                                    timeout=self.wait['timeout'])
+                                    timeout=self.wait['timeout'],
+                                    wait=self.wait['sleep'],
+                                    fileChange=self.wait['file_change'],
+                                    checkMovies=True)
         g = self.addGenerator(batchMgr.generate)
         self.addProcessor(g.outputQueue, self._output)
 
