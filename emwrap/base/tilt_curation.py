@@ -75,7 +75,7 @@ class TiltCurationPipeline(SubsetTsPipeline):
         self.randomCount = self.randomSeed = None
         self.matchSet = ''
 
-        self.hasJpegs = self._bool(args.get('has_jpegs', True))
+        self.hasJpegs = args.get('has_jpegs', True)
         # A parameter not given keeps the rule's default; an empty one
         # turns that check off
         self.limits = {}
@@ -85,15 +85,9 @@ class TiltCurationPipeline(SubsetTsPipeline):
             else:
                 value = self._float(args[param], param)
                 self.limits[key] = None if value is None else value * factor
-        self.limits['beyond'] = self._bool(args.get('reject_beyond', True))
+        self.limits['beyond'] = args.get('reject_beyond', True)
         self.dropBelow = self._float(args.get('drop_series_below', ''), 'drop_series_below')
         self.threads = max(1, int(self._float(args.get('threads', 4), 'threads') or 1))
-
-    @staticmethod
-    def _bool(value):
-        if isinstance(value, bool):
-            return value
-        return str(value).strip().lower() in ('1', 'true', 'yes', 'on')
 
     @staticmethod
     def _float(value, name):

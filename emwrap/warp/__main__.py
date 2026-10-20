@@ -83,40 +83,6 @@ def copy(args):
         raise Exception("Output folder already exists.")
     WarpBasePipeline.importInputs(os.getcwd(), args.output)
 
-
-def ctf_views(args):
-    """ Redo the CTF fit views (<movie>_ps.jpg and _ctf.json) of a motion
-    correction job that are missing or out of date, as the job would. """
-    from emtools.metadata import WarpXml
-
-    class JobThumbnails(WarpBasePipeline):
-        def __init__(self, jobDir):     # only the thumbnail methods are used
-            self._jobDir = jobDir
-
-        def join(self, *p):
-            return os.path.join(self._jobDir, *p)
-
-        def log(self, msg):
-            print(msg, flush=True)
-
-    for jobDir in args.job:
-        job = JobThumbnails(os.path.abspath(jobDir))
-        xmls = sorted(glob.glob(job.join(job.FS, '*.xml')))
-        done = 0
-        for i, xml in enumerate(xmls, 1):
-            ps = job.join(job.FS, 'powerspectrum', Path.removeBaseExt(xml) + '.mrc')
-            if os.path.exists(ps):
-                jsonPath = job.join(job.FS, job.THUMBNAILS, Path.removeBaseExt(xml) + '_ctf.json')
-                before = os.path.getmtime(jsonPath) if os.path.exists(jsonPath) else None
-                job.writePsThumbnail(ps, WarpXml(xml))
-                done += os.path.exists(jsonPath) and os.path.getmtime(jsonPath) != before
-            if i % 1000 == 0:
-                print(f'  {i}/{len(xmls)} movies, {done} views redone', flush=True)
-        print(f'{jobDir}: {done} of {len(xmls)} CTF views redone')
-    # emhub keeps the correlations until a tilt series star file changes
-    print('A running emhub server shows the new CTF profile correlations after a restart.')
-
-
 def main():
     parser = argparse.ArgumentParser(prog='emwrap.warp')
     subparsers = parser.add_subparsers(
@@ -145,11 +111,6 @@ def main():
     copy_parser.add_argument('--force', '-f', action="store_true",
                               help="Clean output directory if it exist. ")
 
-    ctf_parser = subparsers.add_parser(
-        "ctf-views", help="Redo missing or out of date CTF fit views "
-                          "(thumbnails/<movie>_ps.jpg, _ctf.json) of a job")
-    ctf_parser.add_argument('job', nargs='+', help="Motion correction job folders")
-
     args = parser.parse_args()
 
     if args.command == 'remap':
@@ -158,8 +119,6 @@ def main():
         star(args)
     elif args.command == 'copy':
         copy(args)
-    elif args.command == 'ctf-views':
-        ctf_views(args)
     else:
         raise Exception(f"Unknown command '{args.command}")
 

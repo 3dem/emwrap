@@ -54,7 +54,6 @@ class ProcessingConfig:
             "programs": ["WARP"]
         },
         "emw-tilt-curation": {
-            # Its Warp step (change_selection) uses the WARP program launcher
             "launcher": "emwrap.base.tilt_curation",
             "label": "EMwrap Tilt Curation",
             "output": "EMwrap",
