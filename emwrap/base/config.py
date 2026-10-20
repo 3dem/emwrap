@@ -52,6 +52,11 @@ class ProcessingConfig:
             "label": "EMwrap Subset TS",
             "output": "EMwrap"
         },
+        "emw-subset-classes": {
+            "launcher": "emwrap.base.subset_classes",
+            "label": "EMwrap Subset Classes",
+            "output": "EMwrap"
+        },
         "emw-merge-sets": {
             "launcher": "emwrap.base.merge_sets",
             "label": "EMwrap Merge Sets",
@@ -100,11 +105,6 @@ class ProcessingConfig:
         "emw-pytme": {"launcher": "emwrap.pytme", "visible": False},        
         "emw-relion-symmetrize_volume": {"launcher": "emwrap.relion.symmetrize_volume"},
         "emw-relion-mask_create": {"launcher": "emwrap.relion.mask_create"},
-        "emw-relion-subset-selection": {
-            "launcher": "emwrap.relion.subset_selection",
-            "label": "Relion Subset Selection",
-            "output": "SubsetSelection"
-        },
         "emw-warp-mtools_create": {
             "launcher": "emwrap.warp.warp_mtools_create",
             "label": "Warp M Create Population",
