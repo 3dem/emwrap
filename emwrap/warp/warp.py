@@ -361,6 +361,21 @@ class WarpBasePipeline(ProcessingPipeline):
         with StarFile(starFile, 'w') as sfOut:
             sfOut.writeTable(tableName, table, computeFormat='left', timeStamp=True)
 
+    def checkOutputTs(self, goodTable, failedTable, label='tilt-series'):
+        """ Validate the output tilt-series of a job: log a warning with the
+        failed ones and raise an exception (the job is marked as failed)
+        if no output was produced. """
+        nGood, nFailed = len(goodTable), len(failedTable)
+        total = nGood + nFailed
+        if nFailed:
+            names = ', '.join(r.rlnTomoName for r in failedTable)
+            self.log(f"WARNING: {nFailed} of {total} {label} failed: {names}")
+        if not nGood:
+            raise Exception(f"No output {label} were produced "
+                            f"({nFailed} of {total} failed), "
+                            f"check {self.join('run.out')}")
+        self.log(f"Output {label}: {nGood} of {total}")
+
     def appendGlobalTsRow(self, starFile, rowDict):
         """Append one global row; all rows must share the same columns."""
         rowDict = dict(rowDict)
@@ -1140,17 +1155,14 @@ class WarpBaseTsAlign(WarpBasePipeline):
             table = newTsAllTable if ok else failedTable
             table.addRowValues(**tsDict)
 
-        self.write_ts_table('global', newTsAllTable, newTsStarFile)
-
-        N = len(newTsAllTable)
-        # ps = newTsAllTable[0].rlnTomoTiltSeriesPixelSize
-
-        x, y, n = dims
         outputNodes = [[newTsStarFile, 'TomogramGroupMetadata.star.emwrap.tsalign']]
 
         if len(failedTable) > 0:
             self.write_ts_table('global', failedTable, failedStarFile)
             outputNodes.append([failedStarFile, 'TomogramGroupMetadata.star.emwrap.tsalign-failed'])
+
+        self.checkOutputTs(newTsAllTable, failedTable, 'aligned tilt-series')
+        self.write_ts_table('global', newTsAllTable, newTsStarFile)
 
         self.writeRelionOutputNodes(outputNodes)
         self.updateBatchInfo(batch)
