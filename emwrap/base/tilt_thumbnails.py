@@ -17,8 +17,10 @@ import re
 import json
 import threading
 
+import PIL
+
 from emtools.utils import Path
-from emtools.image import Image, TiltThumbnails
+from emtools.image import Image, Thumbnail
 
 
 class TiltThumbnailWriter:
@@ -27,17 +29,19 @@ class TiltThumbnailWriter:
     Whatever program processed the tilts, the job that wrote a tilt's
     average and power spectrum writes them into <job>/tilt_series/thumbnails:
 
-        <average>.jpg           TiltThumbnails.SIZE px: filmstrip, and what
-                                TiltQualityCuration measures
-        <average>_medium.jpg    TiltThumbnails.MEDIUM_SIZE px: a closer look
-        <ps>_ps.jpg             TiltThumbnails.PS_SIZE px: CTF fit view
+        <average>.jpg           filmstrip, and what the image QC measures
+        <average>_medium.jpg    a closer look
+        <ps>_ps.jpg             CTF fit view
         <ps>_ctf.json           its radial profiles and their correlation
         <tomoName>_imageqc.json the image content measures of the tilt series
+                                (written by TiltQualityCuration)
 
     <average> and <ps> are the base names of the MRCs.  Readers (emhub OTF
     dashboard, TiltQualityCuration) find the folder from the path of the
-    MRC: folder().  The images themselves are made by
-    emtools.image.TiltThumbnails.
+    MRC: folder().  The sizes are the callers' (TiltQualityCuration has the
+    ones the image QC was calibrated on).  The tilt images are emtools'
+    Thumbnail.Tilt(), the recipe the image measures were calibrated on
+    (tilt_image()).
 
     An instance writes them for the job of a pipeline, for any program
     wrapper: what each wrapper reads from its program's output goes into
@@ -88,6 +92,22 @@ class TiltThumbnailWriter:
         return cls._file(psPath, '_ctf.json', folder)
 
     # ------------------------------------------------------------------
+    # Images
+    # ------------------------------------------------------------------
+    @staticmethod
+    def tilt_image(data, size):
+        """ The jpeg image (PIL) of a tilt average: block-averaged to about
+        twice the size, which removes most of the shot noise, then
+        contrast-stretched and lightly blurred. """
+        return Thumbnail.Tilt(max_size=(size, size)).from_array(
+            Thumbnail.bin_array(data, size))
+
+    @staticmethod
+    def ps_image(arr, size):
+        """ The CTF fit view image (PIL) of a uint8 array. """
+        return PIL.Image.fromarray(arr).resize((size, size), PIL.Image.BICUBIC)
+
+    # ------------------------------------------------------------------
     # Files
     # ------------------------------------------------------------------
     @staticmethod
@@ -124,35 +144,31 @@ class TiltThumbnailWriter:
         return path
 
     @classmethod
-    def write_tilt(cls, avgPath, folder=None, medium=True):
-        """ Write the jpegs of a tilt average (and the medium one) that are
-        older than it; the MRC is read once, only if one is.  Returns the
-        number written. """
-        data, written = None, 0
-        sizes = ((False, TiltThumbnails.SIZE), (True, TiltThumbnails.MEDIUM_SIZE))
-        for isMedium, size in sizes[:1 + medium]:
-            path = cls._required(cls.tilt_jpeg(avgPath, folder, isMedium), avgPath)
-            if not cls._current(path, avgPath):
-                if data is None:
-                    data = Image.get_array(avgPath)
-                cls.save_jpeg(TiltThumbnails.tilt_image(data, size), path)
-                written += 1
-        return written
+    def write_tilt(cls, avgPath, size, folder=None, medium=False):
+        """ Write the jpeg of a tilt average at size px, <average>.jpg or
+        with medium <average>_medium.jpg, unless it is newer than the
+        average.  Returns True if written. """
+        path = cls._required(cls.tilt_jpeg(avgPath, folder, medium), avgPath)
+        if cls._current(path, avgPath):
+            return False
+        cls.save_jpeg(cls.tilt_image(Image.get_array(avgPath), size), path)
+        return True
 
     @classmethod
-    def write_ps(cls, psPath, makeView, folder=None):
+    def write_ps(cls, psPath, makeView, size, folder=None):
         """ Write the CTF fit view of a power spectrum, unless it is newer
         than it.  makeView() -> (uint8 array, profile dict): made by each
         program wrapper, as the spectrum and the fit are stored differently
         by each program; the profile has 'k' (1/Å), 'measured',
-        'simulated' and 'correlation'.  Returns True if written. """
+        'simulated' and 'correlation'.  The view is written at size px.
+        Returns True if written. """
         jpeg = cls._required(cls.ps_jpeg(psPath, folder), psPath)
         jsonPath = cls.ctf_json(psPath, folder)
         if cls._current(jpeg, psPath) and cls._current(jsonPath, psPath):
             return False
         arr, profile = makeView()
         cls.save_json(profile, jsonPath)
-        cls.save_jpeg(TiltThumbnails.ps_image(arr), jpeg)
+        cls.save_jpeg(cls.ps_image(arr, size), jpeg)
         return True
 
     @classmethod
@@ -167,30 +183,18 @@ class TiltThumbnailWriter:
     # ------------------------------------------------------------------
     # Writing them for a job (never fails it)
     # ------------------------------------------------------------------
-    def tilt(self, avgPath):
-        """ <average>.jpg and <average>_medium.jpg of a tilt average. """
+    def tilt(self, avgPath, size, medium=False):
+        """ <average>.jpg, or with medium <average>_medium.jpg, of a tilt
+        average at size px. """
         try:
-            self.write_tilt(avgPath, self.thumbnailsDir)
+            self.write_tilt(avgPath, size, self.thumbnailsDir, medium)
         except Exception as e:
             self.log(f"WARNING: could not write thumbnail for {avgPath}: {e}")
 
-    def ps(self, psPath, makeView):
-        """ <ps>_ps.jpg and <ps>_ctf.json of a power spectrum; makeView()
-        returns (uint8 array, profile dict), see write_ps. """
+    def ps(self, psPath, makeView, size):
+        """ <ps>_ps.jpg (size px) and <ps>_ctf.json of a power spectrum;
+        makeView() returns (uint8 array, profile dict), see write_ps. """
         try:
-            self.write_ps(psPath, makeView, self.thumbnailsDir)
+            self.write_ps(psPath, makeView, size, self.thumbnailsDir)
         except Exception as e:
             self.log(f"WARNING: could not write CTF fit view for {psPath}: {e}")
-
-    def imageQc(self, tsName, tsTable):
-        """ <tsName>_imageqc.json: the image content measures of a tilt
-        series (TiltQualityCuration), from its tilt jpegs, once they are all
-        written.  Skipped when up to date. """
-        # Imported here: TiltQualityCuration finds its files with this class
-        from emwrap.base.tilt_quality_curation import TiltQualityCuration as tqc
-        try:
-            tilts = tqc.tilts_from_star_rows([row._asdict() for row in tsTable],
-                                             ctf_correlation=False, thumbnails=self.thumbnailsDir)
-            tqc.write_series_json(tqc.json_path(self.thumbnailsDir, tsName), tsName, tilts)
-        except Exception as e:
-            self.log(f"WARNING: could not write image QC for TS {tsName}: {e}")

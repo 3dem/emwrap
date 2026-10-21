@@ -30,6 +30,7 @@ from emtools.jobs import Batch, Args
 from emtools.image import Image
 from emwrap.base import ProcessingPipeline
 from emwrap.base.tilt_thumbnails import TiltThumbnailWriter
+from emwrap.base.tilt_quality_curation import TiltQualityCuration
 
 from .utils import warpCtfView
 
@@ -602,14 +603,16 @@ class WarpBasePipeline(ProcessingPipeline):
             if dims is None and os.path.exists(avgMrcPath):
                 dims = Image.get_dimensions(avgMrcPath)
             if avgMrcPath:
-                self.thumbnails.tilt(avgMrcPath)
+                self.thumbnails.tilt(avgMrcPath, TiltQualityCuration.JPEG_SIZE)
+                self.thumbnails.tilt(avgMrcPath, TiltQualityCuration.MEDIUM_JPEG_SIZE, medium=True)
 
             defocusDict = defaultdict(lambda: 0)
 
             # xml and average mrc already validated for whole TS above
             ctf = movieXml.getDict('Movie', 'CTF', 'Param')
             if psPath := frameDict['rlnCtfPowerSpectrum']:
-                self.thumbnails.ps(psPath, self.ctfViewMaker(psPath, movieXml))
+                self.thumbnails.ps(psPath, self.ctfViewMaker(psPath, movieXml),
+                                   TiltQualityCuration.PS_JPEG_SIZE)
 
             defocusDict['rlnDefocusU'] = _float(float(ctf['Defocus']) * 10000)  # Convert to Angstroms
             defocusDict['rlnCtfAstigmatism'] = _float(float(ctf['DefocusDelta']) * 10000)  # Convert to Angstroms
@@ -644,7 +647,12 @@ class WarpBasePipeline(ProcessingPipeline):
             self.log(f"ERROR: All tilts are deselected in Warp for TS {tsName}")
             return False, None, dims
 
-        self.thumbnails.imageQc(tsName, newTsTable)
+        # The image content measures of the tilt series, from its jpegs;
+        # like them, a failure must not fail the job
+        try:
+            TiltQualityCuration.write_table_json(self.thumbnails.thumbnailsDir, tsName, newTsTable)
+        except Exception as e:
+            self.log(f"WARNING: could not write image QC for TS {tsName}: {e}")
         return True, newTsTable, dims
 
     def alignmentPs(self):

@@ -160,7 +160,7 @@ class TiltCurationPipeline(SubsetTsPipeline):
         (tilts, {movie: [reasons]}, number of jpegs made); the tilts with
         their measures and those relative to the series. """
         tilts = self._read_tilts(tomoName, tsStar)
-        made = sum(TiltThumbnailWriter.write_tilt(t['mic'], self._thumbnails(tomoName), medium=False)
+        made = sum(TiltThumbnailWriter.write_tilt(t['mic'], tqc.JPEG_SIZE, self._thumbnails(tomoName))
                    for t in tilts if t['make'])
         rows, others = self._measures(tomoName, tilts)
         measures = {r['name']: r for r in rows}

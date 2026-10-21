@@ -12,8 +12,8 @@
 # *
 # **************************************************************************
 """ Image content measures of the tilts of a tilt series, from their jpegs
-(emtools.image.TiltThumbnails: the size and recipe the measures were
-calibrated on), and the curation rule.
+(TiltThumbnailWriter.tilt_image() at JPEG_SIZE: the recipe and size the
+measures were calibrated on), and the curation rule.
 
 What curators reject a tilt for is mostly in the image: blank, partly
 blacked out (a lamella edge or a grid bar), or showing another area.  For
@@ -33,7 +33,7 @@ penalised.  The measures and the walk are the ones calibrated with the
 tomo-data-curation skill on a hand curation (ChlamyBrnA, EMPIAR-11830).
 
 One json per tilt series, <tomoName>_imageqc.json beside the jpegs, written
-by the job that made them (TiltThumbnailWriter.imageQc).
+by the job that made them (write_table_json).
 
 The curation rule (curate_series) turns the measures and the motion and CTF
 values of the star file into the tilts to leave out: the OTF dashboard
@@ -46,8 +46,6 @@ import json
 import numpy as np
 from PIL import Image as PILImage
 
-from emtools.image import TiltThumbnails
-
 from emwrap.base.tilt_thumbnails import TiltThumbnailWriter
 
 
@@ -59,6 +57,17 @@ class TiltQualityCuration:
     VERSION = 1
     SUFFIX = '_imageqc.json'
     MEASURES = ('texture', 'darkArea', 'matchPeak', 'matchNcc', 'fieldShift')
+
+    # The tilt jpegs (TiltThumbnailWriter).  The measures were calibrated on
+    # this size and on TiltThumbnailWriter.tilt_image(): changing either
+    # needs a recalibration
+    JPEG_SIZE = 512
+    # A closer look.  Larger is not better: each jpeg's contrast is set from
+    # its own pixels, and beyond this size those of a low dose tilt are
+    # mostly shot noise
+    MEDIUM_JPEG_SIZE = 1024
+    # The CTF fit view, measured over simulated
+    PS_JPEG_SIZE = 384
 
     N = 128            # side of the images compared, px
     BLOCK = 16         # px, for texture and darkArea
@@ -317,10 +326,19 @@ class TiltQualityCuration:
                  image=cls.load_jpeg(t['jpeg']) if os.path.exists(t['jpeg']) else None)
             for t in tilts])
         data = {'version': cls.VERSION, 'tomoName': tomo_name,
-                'source': 'tilt jpegs', 'jpegSize': TiltThumbnails.SIZE,
+                'source': 'tilt jpegs', 'jpegSize': cls.JPEG_SIZE,
                 'blockSize': cls.BLOCK, 'darkLevel': cls.DARK_LEVEL, 'tilts': rows}
         TiltThumbnailWriter.save_json(data, path)
         return rows, True
+
+    @classmethod
+    def write_table_json(cls, thumbnails_dir, tomo_name, ts_table):
+        """ <tomoName>_imageqc.json of a tilt series in thumbnails_dir, the
+        folder its jpegs were written to, from its tilt-series STAR table,
+        once the jpegs are all written: see write_series_json. """
+        tilts = cls.tilts_from_star_rows([row._asdict() for row in ts_table],
+                                         ctf_correlation=False, thumbnails=thumbnails_dir)
+        return cls.write_series_json(cls.json_path(thumbnails_dir, tomo_name), tomo_name, tilts)
 
     # ------------------------------------------------------------------
     # The tilts of a tilt series star file
