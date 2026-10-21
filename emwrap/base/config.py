@@ -59,6 +59,11 @@ class ProcessingConfig:
             "output": "EMwrap",
             "programs": ["WARP"]
         },
+        "emw-subset-classes": {
+            "launcher": "emwrap.base.subset_classes",
+            "label": "EMwrap Subset Classes",
+            "output": "EMwrap"
+        },
         "emw-merge-sets": {
             "launcher": "emwrap.base.merge_sets",
             "label": "EMwrap Merge Sets",
