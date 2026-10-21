@@ -21,14 +21,15 @@ from concurrent.futures import ThreadPoolExecutor
 
 from emtools.utils import Color
 from emtools.metadata import StarFile
-from emtools.image import TiltThumbnails, tilt_qc
 
 from emwrap.base import ProcessingPipeline
 from emwrap.base.subset_ts import SubsetTsPipeline, MODE_EXPLICIT_NAMES
+from emwrap.base.tilt_thumbnails import TiltThumbnailWriter
+from emwrap.base.tilt_quality_curation import TiltQualityCuration as tqc
 from emwrap.warp.warp_subset import WarpSubsetTs
 
 
-# Form parameter -> (tilt_qc limit, factor from the form's unit to the
+# Form parameter -> (curation rule limit, factor from the form's unit to the
 # rule's).  Defocus and astigmatism are given in µm, stored in Å.
 LIMIT_PARAMS = {
     'texture_min': ('texture', 1.0),
@@ -51,20 +52,23 @@ CSV_VALUES = ['motion', 'ctfResolution', 'ctfCorrelation', 'figureOfMerit', 'def
 
 class TiltCurationPipeline(SubsetTsPipeline):
     """ Leave out the tilt images of each tilt series that fail the
-    curation rule (emtools.image.tilt_qc.curate_series, the one the OTF
+    curation rule (TiltQualityCuration.curate_series, the one the OTF
     dashboard uses): blank, blacked out, a different field or shifted away
     (measured on the 512 px tilt jpegs), motion, CTF fit, defocus and
     astigmatism, and the tilts acquired after one that lost the field.
 
     The jpegs and image measures are the ones the job that made the tilt
-    averages wrote (emwrap's wrappers do, see TiltThumbnails) when they
-    exist; those missing are made here, into this job's thumbnails folder.
+    averages wrote (emwrap's wrappers do, see TiltThumbnailWriter) when
+    they exist; those missing are made here, into this job's thumbnails
+    folder.
 
-    Input and output are TiltSeries.  The output is written as by the
-    subset job (emw-subset-ts) with every tilt series and the failing tilts
-    excluded: a filtered tilt-series STAR file per tilt series, and the
-    same tilts deselected in the Warp frame series state when the input
-    job has one.
+    Input and output are TiltSeries.  Only the deselection is this job's
+    (_prepareDeselection): the output is written by the subset job
+    (emw-subset-ts, SubsetTsPipeline._writeSubset) with every tilt series
+    and the failing tilts excluded: a filtered tilt-series STAR file per
+    tilt series, and the same tilts deselected in the Warp frame series
+    state when the input job has one.  The per tilt report
+    (tilt_curation.csv) and the summary are written after it (postrun).
     """
     name = 'emw-tilt-curation'
 
@@ -83,13 +87,16 @@ class TiltCurationPipeline(SubsetTsPipeline):
         self.limits = {}
         for param, (key, factor) in LIMIT_PARAMS.items():
             if param not in args:
-                self.limits[key] = tilt_qc.DEFAULT_LIMITS[key]
+                self.limits[key] = tqc.DEFAULT_LIMITS[key]
             else:
                 value = self._float(args[param], param)
                 self.limits[key] = None if value is None else value * factor
         self.limits['beyond'] = args.get('reject_beyond', True)
         self.dropBelow = self._float(args.get('drop_series_below', ''), 'drop_series_below')
         self.threads = max(1, int(self._float(args.get('threads', 4), 'threads') or 1))
+        # Filled by _prepareDeselection, reported in postrun
+        self.results = {}
+        self.droppedSeries = {}
 
     @staticmethod
     def _float(value, name):
@@ -106,7 +113,7 @@ class TiltCurationPipeline(SubsetTsPipeline):
     # Per tilt series
     # ------------------------------------------------------------------
     def _read_tilts(self, tomoName, tsStar):
-        """ The tilts of a tilt series (tilt_qc.tilts_from_star_rows), each
+        """ The tilts of a tilt series (tqc.tilts_from_star_rows), each
         with the jpeg to measure: the one of the job of its average when it
         exists, else one to make ('make') into this job's thumbnails folder,
         in <tomoName>/ (names may repeat across tilt series). """
@@ -114,7 +121,7 @@ class TiltCurationPipeline(SubsetTsPipeline):
         if not table:
             raise Exception(f"Could not read tilt-series table '{tomoName}' from {tsStar}")
         try:
-            tilts = tilt_qc.tilts_from_star_rows([row._asdict() for row in table])
+            tilts = tqc.tilts_from_star_rows([row._asdict() for row in table])
         except ValueError as e:
             raise Exception(f"Tilt-series STAR file {tsStar} for '{tomoName}': {e}")
         for t in tilts:
@@ -122,12 +129,12 @@ class TiltCurationPipeline(SubsetTsPipeline):
             if t['mic'] is None:
                 continue        # no average: judged on its star values only
             if not (t['jpeg'] and os.path.exists(t['jpeg'])):
-                t['jpeg'] = TiltThumbnails.tilt_jpeg(t['mic'], self._thumbnails(tomoName))
+                t['jpeg'] = TiltThumbnailWriter.tilt_jpeg(t['mic'], self._thumbnails(tomoName))
                 t['make'] = True
         return tilts
 
     def _thumbnails(self, tomoName):
-        return self.join(TiltThumbnails.FOLDER, tomoName)
+        return self.join(TiltThumbnailWriter.FOLDER, tomoName)
 
     def _measures(self, tomoName, tilts):
         """ The image measures of the tilts.  Those of the job of the
@@ -139,13 +146,13 @@ class TiltCurationPipeline(SubsetTsPipeline):
         made here. """
         jpeg = next((t['jpeg'] for t in tilts if t['jpeg']), None)
         if jpeg and not any(t['make'] for t in tilts):
-            path = tilt_qc.json_path(os.path.dirname(jpeg), tomoName)
-            rows = tilt_qc.read_series_json(path, tilts)
+            path = tqc.json_path(os.path.dirname(jpeg), tomoName)
+            rows = tqc.read_series_json(path, tilts)
             if rows is not None:
                 names = {t['name'] for t in tilts}
                 return rows, [dict(r, dropped=True) for r in rows if r.get('name') not in names]
-        rows, _ = tilt_qc.write_series_json(
-            tilt_qc.json_path(self._thumbnails(tomoName), tomoName), tomoName, tilts)
+        rows, _ = tqc.write_series_json(
+            tqc.json_path(self._thumbnails(tomoName), tomoName), tomoName, tilts)
         return rows or [], []
 
     def _curate_series(self, tomoName, tsStar):
@@ -153,17 +160,17 @@ class TiltCurationPipeline(SubsetTsPipeline):
         (tilts, {movie: [reasons]}, number of jpegs made); the tilts with
         their measures and those relative to the series. """
         tilts = self._read_tilts(tomoName, tsStar)
-        made = sum(TiltThumbnails.write_tilt(t['mic'], self._thumbnails(tomoName), medium=False)
+        made = sum(TiltThumbnailWriter.write_tilt(t['mic'], self._thumbnails(tomoName), medium=False)
                    for t in tilts if t['make'])
         rows, others = self._measures(tomoName, tilts)
         measures = {r['name']: r for r in rows}
         for t in tilts:
             m = measures.get(t['name'], {})
-            t.update({k: m.get(k) for k in tilt_qc.MEASURES})
+            t.update({k: m.get(k) for k in tqc.MEASURES})
         series = tilts + others
-        for t, (texture, dark) in zip(series, tilt_qc.relative_measures(series)):
+        for t, (texture, dark) in zip(series, tqc.relative_measures(series)):
             t['textureRel'], t['darkExcess'] = texture, dark
-        return tilts, tilt_qc.curate_series(series, self.limits), made
+        return tilts, tqc.curate_series(series, self.limits), made
 
     # ------------------------------------------------------------------
     # Job
@@ -202,9 +209,14 @@ class TiltCurationPipeline(SubsetTsPipeline):
                 raise
         return results
 
-    def prerun(self):
-        if not os.path.exists(self.inputSet):
-            raise Exception(f"Input STAR file not found: {self.inputSet}")
+    # ------------------------------------------------------------------
+    # The deselection: by the curation rule (the output is the subset
+    # job's, SubsetTsPipeline._writeSubset)
+    # ------------------------------------------------------------------
+    def _prepareDeselection(self):
+        """ Curate every tilt series of the input: the failing tilts go to
+        self.excludedTiltsMap, and the tilt series left with nothing or (if
+        asked) too few tilts out of self.subsetNames. """
         globalTable = self._readGlobalTable(self.inputSet)
         inputType = self._detectGlobalTableType(self.inputSet, globalTable)
         if inputType != 'TiltSeries':
@@ -217,52 +229,44 @@ class TiltCurationPipeline(SubsetTsPipeline):
             raise Exception("The input job has a Warp tilt-series state, where single tilts "
                             "cannot be deselected: curate the motion correction output instead.")
 
-        self.log(f"Input set: {Color.bold(self.inputSet)}, "
-                 f"{Color.green(len(globalTable))} tilt series")
+        self.log(f"Curating {Color.green(len(globalTable))} tilt series")
         self.log("Limits: " + ', '.join(f'{k}={v}' for k, v in self.limits.items()))
 
         series = [(r.rlnTomoName, r.rlnTomoTiltSeriesStarFile) for r in globalTable]
-        results = self._curate_all(series)
+        self.results = self._curate_all(series)
 
-        # What goes out: failing tilts, and the tilt series left with
-        # nothing or (if asked) too few tilts
-        dropped, reasons = {}, Counter()
-        for name, (tilts, rejected, _) in results.items():
+        for name, (tilts, rejected, _) in self.results.items():
             kept = len(tilts) - len(rejected)
-            reasons.update(r for why in rejected.values() for r in why)
             if kept == 0:
-                dropped[name] = 'no tilt left'
+                self.droppedSeries[name] = 'no tilt left'
             elif self.dropBelow is not None and kept / len(tilts) < self.dropBelow:
-                dropped[name] = f'keeps {kept} of {len(tilts)} tilts'
-            if rejected and name not in dropped:
+                self.droppedSeries[name] = f'keeps {kept} of {len(tilts)} tilts'
+            if rejected and name not in self.droppedSeries:
                 self.excludedTiltsMap[name] = set(rejected)
             self.log(f"Tilt series {Color.bold(name)}: kept {Color.green(kept)} / {len(tilts)}"
                      + (f", left out {Color.red(sorted(rejected))}" if rejected else '')
-                     + (Color.red(f" -> tilt series left out ({dropped[name]})") if name in dropped else ''))
+                     + (Color.red(f" -> tilt series left out ({self.droppedSeries[name]})")
+                        if name in self.droppedSeries else ''))
 
-        self.subsetNames = {name for name, _ in series} - set(dropped)
+        self.subsetNames = {name for name, _ in series} - set(self.droppedSeries)
         if not self.subsetNames:
             raise Exception("Every tilt series would be left out; check the limits.")
-        report = self._write_report(results)
 
-        outputType, count = self._subsetGlobalInput(self.inputSet, self.subsetNames)
-        if warpKeys:
-            WarpSubsetTs(self._args, self.outputDir).apply(self.subsetNames, self.excludedTiltsMap)
+    # ------------------------------------------------------------------
+    # The curation's own outputs, once the subset is written
+    # ------------------------------------------------------------------
+    def postrun(self):
+        report = self._write_report(self.results)
+        reasons = Counter(r for _, rejected, _ in self.results.values()
+                          for why in rejected.values() for r in why)
+        reasons = {tqc.REASON_LABELS.get(k, k): v for k, v in reasons.most_common()}
+        nTilts = sum(len(tilts) for tilts, _, _ in self.results.values())
+        nOut = sum(len(rejected) for _, rejected, _ in self.results.values())
 
-        nTilts = sum(len(r[0]) for r in results.values())
-        nOut = sum(len(r[1]) for r in results.values())
-        self.inputs = {
-            'input_set': self.inputSet,
-            'limits': self.limits,
-            'drop_series_below': self.dropBelow,
-        }
-        
-        reasons = {tilt_qc.REASON_LABELS.get(k, k): v for k, v in reasons.most_common()},
-            
-        self.writeInfo()
         self.log(f"Left out {Color.red(nOut)} of {Color.bold(nTilts)} tilts in "
                  f"{Color.green(len(self.excludedTiltsMap))} tilt series"
-                 + (f", and {Color.red(len(dropped))} tilt series" if dropped else '')
+                 + (f", and {Color.red(len(self.droppedSeries))} tilt series"
+                    if self.droppedSeries else '')
                  + ": " + ', '.join(f'{v} {k}' for k, v in reasons.items()))
         self.log(f"Per tilt measures and decisions: {Color.cyan(report)}")
 

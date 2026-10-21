@@ -487,29 +487,19 @@ class SubsetTsPipeline(ProcessingPipeline):
             self.log(f"Randomly selected {Color.green(len(self.subsetNames))} / "
                      f"{Color.bold(len(allNames))} tomogram(s){seedMsg}.")
 
-    def prerun(self):
-        if not os.path.exists(self.inputSet):
-            raise Exception(f"Input STAR file not found: {self.inputSet}")
-
-        inputStar = self.inputSet
-        isOptimisationSet = RelionStar.isTomoOptimisationSet(inputStar)
-
-        self._resolveSubsetNames(inputStar)
-
-        self.log(f"Input set: {Color.bold(self.inputSet)}")
-        self.log(f"Subset tomogram names ({Color.green(len(self.subsetNames))}): "
-                 f"{Color.cyan(' '.join(sorted(self.subsetNames)))}")
+    # ------------------------------------------------------------------
+    # The deselection: what each subset job decides its own way.
+    # ------------------------------------------------------------------
+    def _prepareDeselection(self):
+        """ Set self.subsetNames (the tomograms to keep) and
+        self.excludedTiltsMap ({tomoName: {movie indices}}, the tilts to
+        leave out of them). Here from the form: the names by 'mode' and
+        the 'exclude_tilts' table. Subclasses (TiltCurationPipeline)
+        decide them their own way; the output is written the same way
+        (_writeSubset). """
+        self._resolveSubsetNames(self.inputSet)
 
         if self.excludedTiltsMap:
-            unknown = sorted(
-                set(self.excludedTiltsMap) - self.subsetNames
-            )
-            if unknown:
-                raise Exception(
-                    "exclude_tilts references tomogram name(s) not found in "
-                    f"the output subset: {', '.join(unknown)}"
-                )
-
             summary = ', '.join(
                 f"{name}: {sorted(ids)}"
                 for name, ids in sorted(self.excludedTiltsMap.items())
@@ -520,42 +510,35 @@ class SubsetTsPipeline(ProcessingPipeline):
                 f"tomogram(s): {Color.cyan(summary)}"
             )
 
-        # Existing RELION subset behavior remains unchanged.
-        if isOptimisationSet:
-            inputType, count = self._subsetOptimisationSet(
-                inputStar,
-                self.subsetNames
+    # ------------------------------------------------------------------
+    # The output: the same for every subset job.
+    # ------------------------------------------------------------------
+    def _writeSubset(self):
+        """ Write the subset of self.inputSet given by self.subsetNames and
+        self.excludedTiltsMap: the filtered STAR files (and RELION output
+        node) and the same selection in the Warp state when the input job
+        has one. """
+        if not self.subsetNames:
+            raise Exception("No tomograms left in the subset.")
+        if unknown := sorted(set(self.excludedTiltsMap) - self.subsetNames):
+            raise Exception(
+                "exclude_tilts references tomogram name(s) not found in "
+                f"the output subset: {', '.join(unknown)}"
             )
+
+        self.log(f"Subset tomogram names ({Color.green(len(self.subsetNames))}): "
+                 f"{Color.cyan(' '.join(sorted(self.subsetNames)))}")
+
+        if RelionStar.isTomoOptimisationSet(self.inputSet):
+            inputType, count = self._subsetOptimisationSet(
+                self.inputSet, self.subsetNames)
         else:
             inputType, count = self._subsetGlobalInput(
-                inputStar,
-                self.subsetNames
-            )
+                self.inputSet, self.subsetNames)
 
-        if WarpSubsetTs.hasState(inputStar):
+        if WarpSubsetTs.hasState(self.inputSet):
             warpSubset = WarpSubsetTs(self._args, self.outputDir)
             warpSubset.apply(self.subsetNames, self.excludedTiltsMap)
-
-        self.inputs = {
-            'input_set': self.inputSet,
-            'mode': self.mode,
-            'subset_tomo_names': sorted(self.subsetNames),
-            'exclude_tilts': {
-                name: sorted(ids)
-                for name, ids in self.excludedTiltsMap.items()
-            }
-        }
-
-        if self.mode == MODE_MATCH_SET:
-            self.inputs['subset_match_set'] = self.matchSet
-        elif self.mode == MODE_RANDOM:
-            self.inputs['subset_random_count'] = self.randomCount
-            self.inputs['subset_random_seed'] = self.randomSeed
-
-        self.outputs = {
-            'type': inputType,
-            'count': count
-        }
 
         self.writeInfo()
 
@@ -563,6 +546,14 @@ class SubsetTsPipeline(ProcessingPipeline):
             f"Created {inputType} subset with "
             f"{Color.green(count)} item(s)."
         )
+
+    def prerun(self):
+        if not os.path.exists(self.inputSet):
+            raise Exception(f"Input STAR file not found: {self.inputSet}")
+        self.log(f"Input set: {Color.bold(self.inputSet)}")
+
+        self._prepareDeselection()
+        self._writeSubset()
 
 
 if __name__ == '__main__':

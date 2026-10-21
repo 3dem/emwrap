@@ -500,8 +500,6 @@ class MergeSetsPipeline(ProcessingPipeline):
             globalStars = [item['globalStar'] for item in classified]
             count = self._mergeGlobalTables(globalStars, inputType)
 
-        self.inputs = {'input_sets': self.inputSets}
-        self.outputs = {'type': inputType, 'count': count}
         self.writeInfo()
         self.log(f"Created merged {inputType} set with {Color.green(count)} item(s).")
 
