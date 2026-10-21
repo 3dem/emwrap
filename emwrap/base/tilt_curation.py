@@ -256,22 +256,14 @@ class TiltCurationPipeline(SubsetTsPipeline):
             'limits': self.limits,
             'drop_series_below': self.dropBelow,
         }
-        self.outputs = {
-            'type': outputType,
-            'count': count,
-            'tilts': nTilts,
-            'tiltsLeftOut': nOut,
-            'reasons': {tilt_qc.REASON_LABELS.get(k, k): v for k, v in reasons.most_common()},
-            'seriesLeftOut': dropped,
-            'jpegsMade': sum(r[2] for r in results.values()),
-            'excludedTilts': {name: sorted(ids) for name, ids in self.excludedTiltsMap.items()},
-            'report': os.path.basename(report),
-        }
+        
+        reasons = {tilt_qc.REASON_LABELS.get(k, k): v for k, v in reasons.most_common()},
+            
         self.writeInfo()
         self.log(f"Left out {Color.red(nOut)} of {Color.bold(nTilts)} tilts in "
                  f"{Color.green(len(self.excludedTiltsMap))} tilt series"
                  + (f", and {Color.red(len(dropped))} tilt series" if dropped else '')
-                 + ": " + ', '.join(f'{v} {k}' for k, v in self.outputs['reasons'].items()))
+                 + ": " + ', '.join(f'{v} {k}' for k, v in reasons.items()))
         self.log(f"Per tilt measures and decisions: {Color.cyan(report)}")
 
 
