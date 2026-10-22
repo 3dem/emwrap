@@ -374,7 +374,13 @@ class ProjectData(FolderManager):
 
         if filepath.endswith('.star'):            
             try:
-                if '_series' in filepath:
+                if filepath.endswith('tilt_analysis.star'):
+                    global_table = StarFile.getTableFromFile('global', filepath)
+                    return {
+                        'type': 'TiltSeriesAnalysis',
+                        'info': f'{len(global_table)} items'
+                    }
+                elif '_series' in filepath:
                     
                         datatype = 'TiltSeriesMovies'
                         global_table = StarFile.getTableFromFile('global', filepath)

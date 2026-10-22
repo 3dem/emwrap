@@ -129,3 +129,97 @@ def load_tomograms_table(tomo_session):
 
     return table
 
+
+def _zscore_detrended(k, v, degree=3):
+    """ v minus a low order polynomial in k, scaled to unit spread: removes
+    the smooth background under the Thon rings. """
+    v = v - np.polyval(np.polyfit(k, v, degree), k)
+    return v / (v.std() or 1.0)
+
+
+def warpCtfView(ps, ctf, opts):
+    """ Diagnostic view of a Warp CTF fit: an image and a radial profile.
+
+    ps is Warp's half-plane power spectrum as stored (kx across, ky up to
+    the bottom row), ctf and opts the Movie CTF and OptionsCTF params of the
+    movie xml.  Only the fitted frequency range is shown.
+
+    Image (uint8): the measured half plane on top and the CTF^2 simulated
+    from the fit mirrored below, so rings that run straight across the
+    divider mean the fit matches.  The measured half is Warp's values as
+    stored, with only a linear grey level window: no filtering, averaging
+    or normalisation, which on a low dose tilt would turn noise into ring
+    like structure.  Faint rings are what the data has.
+
+    Profile (dict): the rotational average of the measured spectrum and of
+    the simulated CTF^2, background removed, against spatial frequency, and
+    their correlation.  At this dose this is the more reliable check.
+    """
+    ps = ps.astype(np.float64)
+    h, w = ps.shape
+    oy, ox = h - 1, w // 2
+    # The spectrum is of the image binned 2^BinTimes times; PixelSize is
+    # before binning (half the data's with EER upsampling)
+    window = int(opts['Window'])
+    pix = float(opts['PixelSize']) * 2 ** float(opts.get('BinTimes', 0) or 0)
+    # Warp's range is a fraction of Nyquist
+    rmin = float(opts['RangeMin']) * window / 2
+    rmax = float(opts['RangeMax']) * window / 2
+    R = int(min(np.ceil(rmax * 1.1), oy, ox - 1))
+
+    top = ps[oy - R:oy + 1, ox - R:ox + R + 1]          # ky = R..0 as stored
+    yy, xx = np.mgrid[R:-1:-1, -R:R + 1]
+    rr = np.hypot(xx, yy)
+    band = (rr >= rmin) & (rr <= rmax)
+    # Detector artifacts put a bright line along kx = 0.  It is shown as it
+    # is, but left out of the grey level window and of the profile.
+    offLine = np.abs(xx) > 1
+
+    # CTF^2 from the fit: Warp's defocus is D + dD cos(2 (theta - angle))
+    volt = float(ctf['Voltage']) * 1e3
+    lam = 12.2643247 / np.sqrt(volt * (1 + volt * 0.978466e-6))    # Å
+    cs = float(ctf['Cs']) * 1e7                                     # mm -> Å
+    D, dD = float(ctf['Defocus']) * 1e4, float(ctf['DefocusDelta']) * 1e4
+    ang = np.radians(float(ctf['DefocusAngle']))
+
+    def ctf2(rad, theta):
+        k = rad / (window * pix)
+        dz = D + dD * np.cos(2 * (theta - ang))
+        chi = np.pi * lam * dz * k ** 2 - 0.5 * np.pi * cs * lam ** 3 * k ** 4
+        return np.sin(chi + np.arcsin(float(ctf['Amplitude']))) ** 2
+
+    sim = ctf2(rr, np.arctan2(yy, xx))
+
+    def stretch(a, mask):
+        lo, hi = np.percentile(a[mask], [2, 98])
+        v = np.clip((a - lo) / ((hi - lo) or 1), 0, 1)
+        v[~band] = 0.5
+        return v
+
+    img = np.vstack([stretch(top, band & offLine),
+                     (0.15 + 0.7 * stretch(sim, band))[::-1][1:]])
+    out = (img * 255).astype(np.uint8)
+    out[R, :] = 255   # divider: measured above, simulated below
+
+    # Radial profiles in half pixel bins over the fitted range
+    cols = np.arange(w)[None, :] - ox
+    full_rr = np.hypot(cols, oy - np.arange(h)[:, None])
+    valid = np.broadcast_to(np.abs(cols) > 1, ps.shape)
+    bins = (full_rr[valid] * 2).astype(int)
+    b = np.arange(int(np.ceil(rmin * 2)), int(rmax * 2))
+    radius = b / 2.0 + 0.25
+    counts = np.bincount(bins, minlength=b[-1] + 1)
+    sums = np.bincount(bins, weights=ps[valid], minlength=b[-1] + 1)
+    measured = sums[b] / np.maximum(counts[b], 1)
+    thetas = np.linspace(0, np.pi, 90)
+    simulated = ctf2(radius[:, None], thetas[None, :]).mean(axis=1)
+    k = radius / (window * pix)
+    measured, simulated = _zscore_detrended(k, measured), _zscore_detrended(k, simulated)
+    profile = {
+        'k': np.round(k, 5).tolist(),                 # 1/Å
+        'measured': np.round(measured, 3).tolist(),
+        'simulated': np.round(simulated, 3).tolist(),
+        'correlation': round(float(np.corrcoef(measured, simulated)[0, 1]), 3),
+        'pixelSize': pix,     # of the spectrum, Å
+    }
+    return out, profile
