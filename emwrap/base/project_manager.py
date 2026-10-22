@@ -35,7 +35,7 @@ from .job_form import JobForm, JobValidationError
 from .processing_pipeline import ProcessingPipeline
 from .project_data import ProjectData, PROJECT_JSON, LABELS_JSON, EMHUB_DIR
 from .project_labels import ProjectLabels
-from .project_lock import ProjectLock
+from .project_lock import ProjectLock, read_consistent, file_signature
 
 
 
@@ -65,7 +65,7 @@ class ProjectManager(FolderManager):
 
         if self.exists(self.pipeline_star):
             self.log(f"ProjectManager::: Loading project from: {path}")
-            self._wf = RelionStar.pipeline_to_workflow(self.pipeline_star)
+            self._wf = self._readPipeline()
             
         elif create:
             # Create a new project
@@ -92,10 +92,20 @@ class ProjectManager(FolderManager):
         with self._project_write('recompute infos'):
             self._data.recomputeAllInfos()
 
+    def _readPipeline(self):
+        """ Read default_pipeline.star without locking. Relion rewrites it
+        in place, so retry if it changes (or is incomplete) while reading. """
+        return read_consistent(self.pipeline_star, RelionStar.pipeline_to_workflow)
+
+    def _diskSignature(self):
+        """ Signature of the files that define the project state. """
+        return (file_signature(self.pipeline_star),
+                file_signature(self.join(PROJECT_JSON)))
+
     def reload_from_disk(self):
         """Reload pipeline and project.json from disk into memory."""
         if self.exists(self.pipeline_star):
-            self._wf = RelionStar.pipeline_to_workflow(self.pipeline_star)
+            self._wf = self._readPipeline()
         self._data.reload()
 
     @contextmanager
@@ -119,41 +129,41 @@ class ProjectManager(FolderManager):
         category_dirs = set()
 
         if self.exists(self.pipeline_star):
-            wf = RelionStar.pipeline_to_workflow(self.pipeline_star)
+            wf = self._readPipeline()
             for job in wf.jobs():
                 job_ids.append(job.id)
                 if '/' in job.id:
                     category_dirs.add(job.id.split('/', 1)[0])
 
-        static_paths = ['.gui_projectdir', '.TMP_runfiles', '.relion_lock',
+        # .relion_lock is not included: it is held while cleaning
+        static_paths = ['.gui_projectdir', '.TMP_runfiles',
                         '.Trash', 'default_pipeline.star', PROJECT_JSON,
                         'Import', 'External']
         return job_ids, category_dirs, static_paths
 
     def clean(self):
-        """Remove all project files and recreate an empty project."""
+        """Remove all project files and recreate an empty project.
+
+        While holding the lock, files are only moved into a trash folder
+        (fast renames); the slow deletion is done after releasing the lock.
+        """
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        trash = self.join(f'.emwrap_clean_{ts}')
+
         with ProjectLock(self.path, message='clean project'):
             job_ids, category_dirs, static_paths = self._collect_clean_paths()
-
-            for job_id in job_ids:
-                if self.exists(job_id):
-                    self.log(f"Removing job folder {job_id}")
-                    Process.system(f"rm -rf '{self.join(job_id)}'", print=self.log)
-
-            for name in sorted(category_dirs):
-                if self.exists(name):
-                    self.log(f"Removing category folder {name}")
-                    Process.system(f"rm -rf '{self.join(name)}'", print=self.log)
-
-            for name in static_paths:
-                if self.exists(name):
-                    Process.system(f"rm -rf '{self.join(name)}'", print=self.log)
-
             # Job annotations are stored under .emhub/<category>/<job>
-            for name in sorted(category_dirs):
-                annotations_dir = os.path.join(EMHUB_DIR, name)
-                if self.exists(annotations_dir):
-                    Process.system(f"rm -rf '{self.join(annotations_dir)}'", print=self.log)
+            annotation_dirs = [os.path.join(EMHUB_DIR, name)
+                               for name in sorted(category_dirs)]
+            names = ([j for j in job_ids if '/' not in j] + sorted(category_dirs)
+                     + static_paths + annotation_dirs)
+
+            for name in dict.fromkeys(names):  # unique, keep order
+                if self.exists(name):
+                    self.log(f"Removing {name}")
+                    dst = os.path.join(trash, name)
+                    os.makedirs(os.path.dirname(dst), exist_ok=True)
+                    os.rename(self.join(name), dst)
 
             # Keep label definitions, but job ids will be reused
             ProjectLabels(self.join(LABELS_JSON)).clearJobs()
@@ -161,6 +171,9 @@ class ProjectManager(FolderManager):
             self._wf = Workflow()
             self._data = ProjectData(self)
             self._create()
+
+        if os.path.exists(trash):
+            Process.system(f"rm -rf '{trash}'", print=self.log)
 
     def run(self, cmd, jobType, wait=False):
         job = self._createJob(jobType)
@@ -229,21 +242,33 @@ class ProjectManager(FolderManager):
     def _readPipelineWorkflow(self):
         """ Read the workflow from default_pipeline.star (fresh from disk). """
         if self.exists(self.pipeline_star):
-            return RelionStar.pipeline_to_workflow(self.pipeline_star)
+            return self._readPipeline()
         return self._wf
 
     def _jobExistsOnDisk(self, jobId):
         return self._readPipelineWorkflow().hasJob(jobId)
 
     def update(self):
-        """ Update status of the running jobs. """
-        with self._project_write('update project'):
-            self.log("ProjectManager::: Updating project.")
-            t = Timer()
-            updated = self._data.updateWorkflow()
-            if updated:
-                self._persist_workflow()
-            self.log(t.getToc(f"{Color.cyan('Update took')}"))
+        """ Update status of the running jobs.
+
+        The status check is done without locking, so frequent refreshes (e.g.
+        from the web) do not compete with writers. The lock is only taken when
+        there are changes to save. If the project files were modified by
+        someone else meanwhile, the state is reloaded and checked again.
+        """
+        self.log("ProjectManager::: Updating project.")
+        t = Timer()
+        self.reload_from_disk()
+        signature = self._diskSignature()
+        if self._data.updateWorkflow():
+            with ProjectLock(self.path, message='update project'):
+                if self._diskSignature() == signature:
+                    self._persist_workflow()
+                else:
+                    self.reload_from_disk()
+                    if self._data.updateWorkflow():
+                        self._persist_workflow()
+        self.log(t.getToc(f"{Color.cyan('Update took')}"))
 
     def _validateJobInputs(self, jobType, params, job=None, for_schedule=False):
         """Validate that provided values match the job form definition."""
@@ -380,9 +405,10 @@ class ProjectManager(FolderManager):
             return v
 
         while remaining:
+            # Keep the jobDict order (e.g. workflow order) for the new ids
             ready = [
-                jobId for jobId in remaining
-                if jobDict[jobId]['parents'].issubset(newIdsDict)
+                jobId for jobId in jobDict if jobId in remaining
+                and jobDict[jobId]['parents'].issubset(newIdsDict)
             ]
             if not ready:
                 raise Exception(
@@ -416,11 +442,20 @@ class ProjectManager(FolderManager):
 
         return self._instanciateJobs({jobId: _jobInfo(jobId) for jobId in jobIds})
 
-    def exportWorkflow(self, jobIds, output_path):
-        """" Export a subworkflow with the given job ids. """
+    def exportWorkflow(self, jobIds, output_path, in_project=True):
+        """" Export a subworkflow with the given job ids.
+
+        Args:
+            jobIds: ids of the jobs to export, in the given order
+            output_path: JSON file to write the workflow
+            in_project: if True, the file is written in the project folder
+                (only with the output_path name), otherwise in output_path.
+        Returns:
+            The path of the written file.
+        """
         workflow_json = {"jobs": []}
         for jobId in jobIds:
-            job = self._getJob(jobId)
+            job = self._getJob(Path.rmslash(jobId))
             workflow_json['jobs'].append({
                 'jobid': job.id,
                 'jobtype': job['jobtype'],
@@ -428,9 +463,11 @@ class ProjectManager(FolderManager):
             })
 
         # FIXME: For now, let's write all outputs to the project directory
-        output_name = os.path.basename(output_path)  
-        with open(self.join(output_name), 'w') as f:
+        if in_project:
+            output_path = self.join(os.path.basename(output_path))
+        with open(output_path, 'w') as f:
             json.dump(workflow_json, f, indent=4)
+        return output_path
 
     def loadWorkflow(self, **kwargs):
         """ Load a workflow with jobs templates. """
@@ -920,19 +957,25 @@ class ProjectManager(FolderManager):
         return self.join(output_folder)
 
     @staticmethod
-    def _count_gpus_from_relion_params(job_params):
-        """Return GPU count from Relion gpu_ids or the generic gpus param."""
+    def _count_job_gpus(job_params):
+        """Return the number of GPUs of a job, from Relion's native gpu_ids
+        param or from the emwrap gpus param."""
         gpu_ids = job_params.get('gpu_ids')
         if gpu_ids is not None and str(gpu_ids).strip():
-            ids = set()
-            for mpi_part in str(gpu_ids).split(':'):
-                for token in mpi_part.split(','):
-                    if t := token.strip():
-                        ids.add(int(t))
-            if ids:
-                return len(ids)
+            return ProjectManager._count_relion_gpus(gpu_ids)
 
-        return int(job_params.get('gpus', 0))
+        return ProcessingPipeline.count_gpus(job_params.get('gpus', ''))
+
+    @staticmethod
+    def _count_relion_gpus(gpu_ids):
+        """Return the number of different GPU ids in Relion's --gpu syntax,
+        where ':' separates MPI processes and ',' threads (e.g. "0,1:0,1" -> 2)."""
+        ids = set()
+        for mpi_part in str(gpu_ids).split(':'):
+            for token in mpi_part.split(','):
+                if t := token.strip():
+                    ids.add(int(t))
+        return len(ids)
 
     @staticmethod
     def _relionJobIsContinue(job_dir):
@@ -1015,7 +1058,7 @@ class ProjectManager(FolderManager):
 
         script_file = os.path.join(folder_path, 'job.script')
         script_log = os.path.join(folder_path, 'job.log')
-        gpus = self._count_gpus_from_relion_params(job_params)
+        gpus = self._count_job_gpus(job_params)
 
         def _load_cpus(gpus):
             mpi, threads = 1, 1
@@ -1307,6 +1350,11 @@ class ProjectManager(FolderManager):
         g.add_argument('--stop', '-t', metavar='JOB_ID',
                        help="Stop a launched or running job.")
 
+        g.add_argument('--export-workflow', nargs='+', metavar='JOB_ID_OR_OUTPUT',
+                       help="Export the given jobs as a workflow JSON file: "
+                            "[JOB_ID ...] OUTPUT_JSON. If no job id is given, "
+                            "all the project jobs are exported. The workflow can "
+                            "be loaded in other projects with --workflow.")
         g.add_argument('--workflow', '-w', metavar='WORKFLOW_FILE',
                        help="Load a workflow from a JSON file and create its jobs.")
 
@@ -1370,12 +1418,18 @@ class ProjectManager(FolderManager):
         elif args.list is not None:  # only when -l / --list is on the command line
             if args.force:
                 pm.recomputeAllInfos()
-            if inputId := args.list:  # it can be empty string when no value is passed
+            # It can be empty string when no value is passed, and the job id
+            # might have a trailing / (e.g. from the shell autocompletion)
+            if inputId := Path.rmslash(args.list):
                 w = pm.get_workflow()
                 if job := w.getJob(inputId):
                     pm.listJobDetails(job)
-                elif w.hasData(Path.rmslash(inputId)):
-                    pm.listOutputDetails(w.getData(Path.rmslash(inputId)))
+                elif w.hasData(inputId):
+                    pm.listOutputDetails(w.getData(inputId))
+                else:
+                    print(Color.red(f"ERROR: '{inputId}' is not a job or output "
+                                    f"of the project"), file=sys.stderr)
+                    sys.exit(1)
             else:
                 pm.listJobs()
 
@@ -1406,6 +1460,16 @@ class ProjectManager(FolderManager):
 
         elif args.stop:
             pm.stopJob(args.stop)
+
+        elif args.export_workflow:
+            *jobIds, output = args.export_workflow
+            if not output.endswith('.json'):
+                raise Exception("Expecting: --export-workflow [JOB_ID ...] OUTPUT_JSON")
+            if not jobIds:  # export all project jobs
+                jobIds = [job.id for job in pm._readPipelineWorkflow().jobs()]
+            output = os.path.abspath(output)  # relative to the current folder
+            pm.exportWorkflow(jobIds, output, in_project=False)
+            pm.log(f"Exported workflow with {len(jobIds)} job(s) to: {output}")
 
         elif args.workflow:
             if args.clean:

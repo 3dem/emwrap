@@ -25,33 +25,84 @@ from pprint import pprint
 
 from emtools.utils import Color, Timer, Path, Process
 from emtools.metadata import Acquisition, StarFile, RelionStar
-from emtools.jobs import Batch
+from emtools.jobs import Batch, Args
 
 from emwrap.base import ProcessingPipeline
 from .preprocessing import Preprocessing
 
 
 class PreprocessingPipeline(ProcessingPipeline):
-    """ Pipeline to run Preprocessing in batches. """
+    """ Pipeline to run Preprocessing in batches.
+
+    Each batch can be processed in a separate process (e.g. submitted to a
+    cluster) through the 'launcher_preprocessing' script. It receives the
+    project folder and the batch JSON file, and it should setup the
+    environment (EMWRAP_CONFIG with the launchers of MOTIONCOR3, CTFFIND,
+    CRYOLO and RELION) and run: python -m emwrap.mix.preprocessing "$@"
+    """
     name = 'emw-preprocessing'
 
     def __init__(self, input_args, output):
         ProcessingPipeline.__init__(self, input_args, output)
         args = self._args
-        self.gpuList = args['gpu'].split()
+        # One processing thread per GPU group (see get_gpu_groups),
+        # e.g. "0 0 1 1" (two threads per GPU), with the GPU ids
+        # separated by spaces (MotionCor and crYOLO syntax)
+        self.gpuList = [' '.join(str(g) for g in group)
+                        for group in self.get_gpu_groups(args.get('gpus', '1'))]
+        if not self.gpuList:
+            raise Exception("Preprocessing requires at least one GPU (gpus param)")
         self.outputDirs = {}
         self.inputStar = args['in_movies']
-        self.batchSize = args.get('batch_size', 32)
-        self.inputTimeOut = args.get('input_timeout', 3600)
+        self.batchSize = int(args.get('batch_size', 32))
+        self.inputTimeOut = int(args.get('input_timeout', 3600))
+        # Acquisition (including gain and dose per frame) from the input movies
         self.acq = self.loadAcquisition(self.inputStar)
         self._totalInput = self._totalOutput = 0
-        self._pp_args = args
-        self._pp_args['acquisition'] = Acquisition(self.acq)
+        self._pp_args = self._preprocessingArgs()
 
         # Create a lock to estimate the extraction args only once,
         # for the first batch processed
-        self._particle_size = self._pp_args['picking'].get('particle_size', None)
         self._particle_size_lock = threading.Lock()
+
+    def _preprocessingArgs(self):
+        """ Convert the (flat) job params into the args of each
+        Preprocessing step (motioncor, ctf, picking and extract). """
+        args = self._args
+
+        def _float(key):
+            value = args.get(key, '')
+            return None if value in (None, '') else float(value)
+
+        mc_args = {'-FtBin': args.get('motioncor.bin', 1),
+                   '-Patch': args.get('motioncor.patch', '5 5')}
+        if args.get('motioncor.dose_weighting', True) and self.acq.total_dose:
+            # rlnMicrographDoseRate from the input movies (dose per frame)
+            mc_args['-FmDose'] = self.acq.total_dose
+        mc_args.update(Args.fromString(args.get('motioncor.extra_args') or ''))
+
+        ctf_args = {k: v for k, v in args.subset('ctf').items() if v not in (None, '')}
+
+        extract_args = Args.fromString(args.get('extract.extra_args') or '')
+        if scale := args.get('extract.scale'):
+            extract_args['--scale'] = int(scale)
+
+        return {
+            'acquisition': Acquisition(self.acq),
+            # Optional launcher to process each batch (e.g. in a cluster),
+            # 'launcher_batch' is the old name of this param
+            'launcher': (args.get('launcher_preprocessing')
+                         or args.get('launcher_batch') or None),
+            'motioncor': {'extra_args': mc_args},
+            'ctf': ctf_args,
+            'picking': {
+                'particle_size': _float('picking.particle_size'),
+                'threshold': _float('picking.threshold'),
+                'model': args.get('picking.model') or None,
+                'janni_model': args.get('picking.janni_model') or None
+            },
+            'extract': {'extra_args': extract_args}
+        }
 
     @property
     def particle_size(self):
@@ -112,7 +163,8 @@ class PreprocessingPipeline(ProcessingPipeline):
                 pp = Preprocessing(self._pp_args)
                 return pp, pp.process_batch(batch, gpu=gpu,
                                             outputFolder=self.path,
-                                            tmpFolder=self.tmpDir)
+                                            tmpFolder=self.tmpDir,
+                                            scratchDir=self.scratchDir)
             with self._particle_size_lock:
                 if self.particle_size is None:
                     batch.log(f"{Color.warn('Estimating the boxSize.')} "
@@ -131,6 +183,12 @@ class PreprocessingPipeline(ProcessingPipeline):
             return result
 
         return _preprocessing
+
+    def _removeBatchFile(self, batch, fn):
+        """ Remove a batch file merged into the output (unless EMWRAP_CLEAN=0). """
+        if self.do_clean():
+            batch.log(f"Removing {fn}", flush=True)
+            os.remove(fn)
 
     def _output(self, batch):
         """ Update output STAR files. """
@@ -161,8 +219,7 @@ class PreprocessingPipeline(ProcessingPipeline):
                                                               'rlnMicrographName',
                                                               'rlnCtfImage',
                                                               'rlnMicrographCoordinates'))
-                batch.log(f"Removing {micsStarBatch}", flush=True)
-                os.remove(micsStarBatch)
+                self._removeBatchFile(batch, micsStarBatch)
 
                 # Update coordinates.star
                 coordStar, coordStarBatch = _pair('coordinates.star')
@@ -177,8 +234,7 @@ class PreprocessingPipeline(ProcessingPipeline):
                                 sf.writeRow(self.fixOutputRow(row,
                                                               'rlnMicrographName',
                                                               'rlnMicrographCoordinates'))
-                batch.log(f"Removing {coordStarBatch}", flush=True)
-                os.remove(coordStarBatch)
+                self._removeBatchFile(batch, coordStarBatch)
 
                 # Update particles.star
                 partStar, partStarBatch = _pair('particles.star')
@@ -195,8 +251,7 @@ class PreprocessingPipeline(ProcessingPipeline):
                                 i = row.rlnImageName.split('@')[0]
                                 sf.writeRow(row._replace(rlnImageName=f"{i}@{partStack[micName]}",
                                                          rlnMicrographName=self.fixOutputPath(micName)))
-                batch.log(f"Removing {partStarBatch}", flush=True)
-                os.remove(partStarBatch)
+                self._removeBatchFile(batch, partStarBatch)
 
                 batch.info.update({
                     'output_elapsed': str(t.getElapsedTime())
@@ -204,14 +259,15 @@ class PreprocessingPipeline(ProcessingPipeline):
                 self.outputs.update({
                     'Micrographs': {'label': 'Micrographs',
                                     'files': [
-                                        [micsStar, 'MicrographGroupMetadata.star'],
-                                        [coordStar, 'MicrographCoordsGroup.star']]
+                                        [micsStar, 'MicrographGroupMetadata.star.relion.ctf.Micrographs']]
                                     },
                     'Particles': {'label': 'Particles',
                                   'files': [
-                                      [partStar, 'ParticleGroupMetadata.star']]
+                                      [partStar, 'ParticleGroupMetadata.star.relion.Particles']]
                                   },
                 })
+                self.writeRelionOutputNodes(
+                    [f for o in self.outputs.values() for f in o['files']])
                 self.updateBatchInfo(Batch(batch))
 
                 with StarFile(self.inputStar) as sf:
@@ -245,9 +301,5 @@ class PreprocessingPipeline(ProcessingPipeline):
                 self._output(batch)
 
 
-def main():
-    PreprocessingPipeline.main()
-
-
 if __name__ == '__main__':
-    main()
+    PreprocessingPipeline.main()

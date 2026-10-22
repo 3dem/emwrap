@@ -64,7 +64,8 @@ setup(
     install_requires=requirements,
     entry_points={  # Optional
        'console_scripts': [
-           'emw = emwrap.base:ProjectManager.main'
+           'emw = emwrap.base:ProjectManager.main',
+           'emw-otf = emwrap.mix.otf:main'
        ],
 
     }

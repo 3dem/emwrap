@@ -1,0 +1,89 @@
+{
+    "sections": [
+        {
+            "label": "Input",
+            "params": [
+                {
+                    "name": "in_movies",
+                    "label": "Movies pattern",
+                    "paramClass": "FilesPatternParam",
+                    "help": "Pattern to match the input movies (relative to the project folder), e.g. data/Images-Disc*/GridSquare_*/Data/Foil*fractions.tiff",
+                    "default": "data/Images-Disc*/GridSquare_*/Data/Foil*fractions.tiff"
+                },
+                {
+                    "name": "acq.gain",
+                    "label": "Gain file",
+                    "paramClass": "PathParam",
+                    "allowsEmpty": true,
+                    "help": "Gain reference that will be used for motion correction."
+                },
+                {
+                    "label": "Acquisition",
+                    "paramClass": "Group",
+                    "params": [
+                        {
+                            "name": "acq.pixel_size",
+                            "label": "Pixel Size (Å)",
+                            "paramClass": "FloatParam",
+                            "help": ""
+                        },
+                        {
+                            "name": "acq.voltage",
+                            "label": "Voltage (kV)",
+                            "default": 300,
+                            "paramClass": "FloatParam",
+                            "help": ""
+                        },
+                        {
+                            "name": "acq.cs",
+                            "label": "Spherical Aberration (mm)",
+                            "default": 2.7,
+                            "paramClass": "FloatParam",
+                            "help": ""
+                        },
+                        {
+                            "name": "acq.amplitude_contrast",
+                            "label": "Amplitude Contrast",
+                            "default": 0.1,
+                            "paramClass": "FloatParam",
+                            "help": ""
+                        },
+                        {
+                            "name": "acq.dose",
+                            "label": "Dose per frame (e/Å²)",
+                            "paramClass": "FloatParam",
+                            "allowsEmpty": true,
+                            "help": "Dose per frame, used for dose weighting during motion correction."
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "label": "Streaming",
+            "params": [
+                {
+                    "name": "wait.timeout",
+                    "label": "Wait time for new files (s)",
+                    "default": 7200,
+                    "paramClass": "IntParam",
+                    "help": "Wait time (in seconds) after which, if no new files are found, the import will stop."
+                },
+                {
+                    "name": "wait.file_change",
+                    "label": "File change wait time (s)",
+                    "default": 60,
+                    "paramClass": "IntParam",
+                    "help": "Wait this time (in seconds) without modifications in a file to report as new."
+                },
+                {
+                    "name": "wait.sleep",
+                    "label": "Sleep time between checks (s)",
+                    "default": 60,
+                    "paramClass": "IntParam",
+                    "help": "Sleep this time (in seconds) between checks for new files."
+                }
+            ]
+        }
+    ]
+}

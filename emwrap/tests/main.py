@@ -23,10 +23,12 @@ from emtools.utils import Color
 from .test_data import TestData
 from .test_apof_warp import TestApoFWarp
 from .test_apof_aretomo3 import TestAretomo3ApoF
+from .test_spa_betagal import TestSpaBetagal
 
 tests_map = {
     'apof_warp': TestApoFWarp,
-    'apof_aretomo3': TestAretomo3ApoF
+    'apof_aretomo3': TestAretomo3ApoF,
+    'spa_betagal': TestSpaBetagal
 }
 
 

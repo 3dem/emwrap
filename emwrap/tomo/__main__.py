@@ -217,10 +217,15 @@ class EMhubTomo:
         configuration files and 'scripts' folder from the (now up to date)
         shipped templates (previously done via '--config update'). Source
         is updated first so that any newly added/changed script templates
-        are already in place before they are copied into './scripts'.
+        are already in place before they are copied into the 'scripts' folder.
+
+        The configuration step runs in a new Python process, so it uses the
+        code just pulled instead of the (possibly outdated) one already
+        loaded by this process.
         """
         cls._update_source()
-        cls._update_config()
+        subprocess.run([sys.executable, '-m', 'emwrap.tomo', '--update-config'],
+                       check=True)
 
     @classmethod
     def _copy_processing_extras(cls, instance_dir):
@@ -434,6 +439,12 @@ class EMhubTomo:
         # Bypass args parsing and submit a job (Relion external jobs / emhub UI)
         if a == '--submit':
             cls._submit(sys.argv[2:])
+            sys.exit(0)
+
+        # Bypass args parsing and only set up the configuration files and
+        # 'scripts' folder (internal, used by '--update' after pulling)
+        if a == '--update-config':
+            cls._update_config()
             sys.exit(0)
 
         args = p.parse_args()

@@ -25,11 +25,16 @@ from emtools.utils import Color, Timer, Path, Process
 from emtools.jobs import Args
 from emtools.metadata import Table, Column, StarFile, StarMonitor, TextFile
 
+from emwrap.base import ProcessingPipeline
+
 
 class RelionExtract:
     def __init__(self, acq, **kwargs):
+        """ Run relion_preprocess through the RELION launcher
+        (EMWRAP_CONFIG['programs']['RELION']), unless kwargs 'launcher' is given.
+        The launcher receives the Relion program name as first argument. """
         self.acq = acq
-        self.path = '/usr/local/em/scripts/relion_extract.sh'
+        self.path = kwargs.get('launcher') or ProcessingPipeline.get_launcher('RELION')
         self.args = Args(kwargs.get('extra_args', {}))
 
     def process_batch(self, batch, **kwargs):
@@ -45,6 +50,7 @@ class RelionExtract:
         batch.mkdir('Particles')
         
         args = Args({
+            'relion_preprocess': '',
             '--i': 'micrographs.star',
             '--coord_list': 'coordinates.star',
             '--part_star': 'particles.star',
@@ -73,7 +79,7 @@ class RelionExtract:
         bg_radius = np.round(particle_size_pix * 0.7)
 
         if scale := self.args.get('--scale', None):
-            bg_radius *= scale / boxsize
+            bg_radius *= float(scale) / boxsize
 
         self.args.update({
             '--extract_size': boxsize,

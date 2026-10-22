@@ -28,18 +28,20 @@ from pprint import pprint
 
 from emtools.utils import Color, Timer, Path, Process
 from emtools.metadata import Table, Acquisition
-from emtools.jobs import Vars
 
-CTFFIND_PATH = 'CTFFIND_PATH'
-CTFFIND_VERSION = 'CTFFIND_VERSION'
+from emwrap.base import ProcessingPipeline, ProcessingConfig
 
 
 class Ctffind:
+    PROGRAM = 'CTFFIND'
+
     def __init__(self, *args, **kwargs):
+        """ The launcher is taken from EMWRAP_CONFIG['programs']['CTFFIND'],
+        unless kwargs 'launcher' is given (and similar for 'version'). """
         acq = Acquisition(args[0])
-        vars = Vars(kwargs.get('vars', {}))
-        self.path = vars.get(CTFFIND_PATH, is_path=True)
-        self.version = int(vars.get(CTFFIND_VERSION))
+        self.path = kwargs.get('launcher') or ProcessingPipeline.get_launcher(self.PROGRAM)
+        self.version = int(kwargs.get('version')
+                           or ProcessingConfig.get_program(self.PROGRAM).get('version', 5))
         _get = kwargs.get  # shortcut
         self.args = [acq.pixel_size, acq.voltage, acq.cs, acq.amplitude_contrast,
                      _get('window', 512), _get('min_res', 30.0), _get('max_res', 5.0),
@@ -49,6 +51,8 @@ class Ctffind:
             self.args.extend(['no', 'no'])
 
     def process(self, micrograph, **kwargs):
+        """ Run ctffind for a micrograph. If kwargs 'batch' is given, the
+        command (with its standard input) is written to the batch log. """
         verbose = kwargs.get('verbose', False)
         output = kwargs.get('output', './')
         def _path(suffix):
@@ -60,7 +64,15 @@ class Ctffind:
         if verbose:
             print(">>>", Color.green(self.path), Color.bold(' '.join(str(a) for a in args)))
 
-        p = Process(self.path, input='\n'.join(str(a) for a in args))
+        stdin = '\n'.join(str(a) for a in args)
+        p = Process(self.path, input=stdin, doRaise=False)
+        # stdout/stderr are not set if the program could not be started
+        stdout, stderr = getattr(p, 'stdout', ''), getattr(p, 'stderr', '')
+        if batch := kwargs.get('batch'):
+            batch.logCommand([self.path], input=stdin, returncode=p.returncode,
+                             output=(stdout or '') + (stderr or ''))
+        if p.returncode != 0:
+            raise Exception(f"ctffind failed (exit code {p.returncode}): {stderr}")
         for f in ctf_files:
             if not os.path.exists(f):
                 raise Exception(f"Missing expected CTF file: {f}")
@@ -79,7 +91,8 @@ class Ctffind:
             result = {'error': 'Empty input micrograph'}
             if mic is not None:
                 try:
-                    ctf_values, ctf_files = self.process(mic, verbose=kwargs.get('verbose', False))
+                    ctf_values, ctf_files = self.process(mic, verbose=kwargs.get('verbose', False),
+                                                         batch=batch)
                     du, dv, da, score, res = ctf_values
                     astig = abs(float(du) - float(dv))
                     result = {'values': [mic, 1, ctf_files[0], du, dv, astig, da, score, res]}

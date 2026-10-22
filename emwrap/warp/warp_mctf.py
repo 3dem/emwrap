@@ -247,14 +247,13 @@ class WarpMotionCtf(WarpBasePipeline):
             self.write_ts_table(tsName, newTsTable, tsDict['rlnTomoTiltSeriesStarFile'])
             newTsAllTable.addRowValues(**tsDict)
 
-        # Write the corrected_tilt_series.star
-        self.write_ts_table('global', newTsAllTable, newTsStarFile)
-        x, y = (0, 0) if dims is None else (dims[0], dims[1])
-
-        self.writeRelionOutputNodes([[newTsStarFile, 'TomogramGroupMetadata.star.emwrap.TiltSeriesAligned']])
-
         if len(failedTable) > 0:
             self.write_ts_table('global', failedTable, failedStarFile)
+
+        self.checkOutputTs(newTsAllTable, failedTable, 'motion-corrected tilt-series')
+        # Write the corrected_tilt_series.star
+        self.write_ts_table('global', newTsAllTable, newTsStarFile)
+        self.writeRelionOutputNodes([[newTsStarFile, 'TomogramGroupMetadata.star.emwrap.TiltSeriesAligned']])
 
         self.updateBatchInfo(batch)
 

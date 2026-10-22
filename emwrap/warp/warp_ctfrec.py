@@ -90,22 +90,23 @@ class WarpCtfReconstruct(WarpBasePipeline):
             'wrpTomostar'
         ]
         newPs = self.reconstructPs()
+        failedStarFile = batch.join('failed_tilt_series.star')
         newTsAllTable = Table(tsAllTable.getColumnNames() + extraLabels)
-        dims = None
+        failedTable = Table(newTsAllTable.getColumnNames())
         for tsRow in tsAllTable:
             tsDict = tsRow._asdict()
-            ok, tsDims = self.updateCtfRecTsDict(tsDict, newPs)
-            if tsDims is not None:
-                dims = tsDims
+            ok, _ = self.updateCtfRecTsDict(tsDict, newPs)
             if not ok:
                 self.log(f"WARNING: Missing reconstructed tomogram for TS {tsDict['rlnTomoName']}")
-            newTsAllTable.addRowValues(**tsDict)
+            table = newTsAllTable if ok else failedTable
+            table.addRowValues(**tsDict)
 
-        # Write the corrected_tilt_series.star
+        if len(failedTable) > 0:
+            self.write_ts_table('global', failedTable, failedStarFile)
+
+        self.checkOutputTs(newTsAllTable, failedTable, 'tomograms')
         self.write_ts_table('global', newTsAllTable, newTsStarFile)
 
-        N = len(newTsAllTable)
-        x, y, n = dims
         outputNodes = [[newTsStarFile, 'TomogramGroupMetadata.star.relion.tomo.Tomograms']]
         self.writeRelionOutputNodes(outputNodes)
         self.updateBatchInfo(batch)
