@@ -28,8 +28,11 @@ The OTF class is generic and subclasses define the processing type:
     - SpaOTF: single-particle (import movies, preprocessing and 2D)
     - TomoOTF: tomography (import tilt series, Warp and AreTomo3)
 The type is taken from sconfig['otf'][workflow]['emwrap_otf'] or, by default,
-detected from the session data: tomography if there are tilt series mdoc
-files (see OTF.detectType).
+detected from the session data: tomography if there are tilt series (from
+mdoc files or the tilt movie names, found with emtools TomoFiles), SPA if
+there are SPA images ('images_pattern') and no tilt series. If the data is
+not conclusive yet, it waits for it up to 'detect_timeout' seconds (see
+OTF.detectType).
 
 Settings (e.g. 'images_pattern' or 'emwrap_workflow') are read from the
 workflow config or the microscope config (sconfig['acquisition'][microscope]),
@@ -59,7 +62,7 @@ import importlib
 from glob import glob
 
 from emtools.utils import Color, FolderManager, Pretty, Path
-from emtools.metadata import StarFile, Mdoc
+from emtools.metadata import StarFile, Mdoc, TomoFiles
 from emtools.image import Image
 from emtools.jobs import Args
 
@@ -261,40 +264,145 @@ class OTF(FolderManager):
                 return p, files
         return pattern or cls.MDOC_PATTERNS[0], []
 
+    # Detection of the OTF type, see detectType
+    DETECT_MIN_TILTS = 3          # tilts (with different angles) of a tilt series
+    DETECT_MIN_TILT_RANGE = 4.0   # degrees between the min and max tilt angles
+    DETECT_MIN_SPA_IMAGES = 4     # SPA images ('images_pattern') without tilt series
+    DETECT_TIMEOUT = 600          # seconds waiting for conclusive data
+    DETECT_SLEEP = 30             # seconds between checks
+
     @classmethod
-    def detectType(cls, ctx, log=print):
-        """ Detect the OTF type ('spa' or 'tomo') from the session data:
-            - 'tomo' if there are tilt series mdoc files (with more than one
-              ZValue section; SerialEM movies mdoc have FrameSet sections)
-            - 'tomo' if there are mdoc files but not SPA images (e.g. the
-              first tilt series is being acquired)
-            - 'spa' otherwise
-        The mdoc files are found with the 'mdoc_pattern' tomo setting (or
-        MDOC_PATTERNS) and the SPA images with the 'images_pattern' setting.
-        """
+    def _isTiltSeries(cls, angles):
+        """ True if the angles (e.g. from an mdoc or from the movie names)
+        look like a tilt series: enough different tilts over some range. """
+        angles = {round(float(a), 1) for a in angles if a is not None
+                  and -90 <= float(a) <= 90}
+        return (len(angles) >= cls.DETECT_MIN_TILTS
+                and max(angles) - min(angles) >= cls.DETECT_MIN_TILT_RANGE)
+
+    @classmethod
+    def scanData(cls, ctx):
+        """ Collect the evidence to detect the OTF type from the session data
+        folder, using emtools TomoFiles (mdocs in the root or 'mdoc(s)'
+        folders, tilt movies in the root or '*frames*' folders) plus the
+        'mdoc_pattern' (tomo) and 'images_pattern' (spa) settings.
+        Return a dict with the counts and examples of each kind of files. """
         dataPath = ctx['raw']['path']
-        pattern, mdocs = cls.findMdocs(
+        info = {'path': dataPath, 'tilt_mdocs': [], 'movie_mdocs': [],
+                'other_mdocs': [], 'tilt_movies': [], 'movies': 0, 'spa_images': 0,
+                'images_pattern': cls.getSetting(ctx, 'images_pattern', otfType='spa')}
+        if not dataPath or not os.path.isdir(dataPath):
+            return info
+
+        tf = TomoFiles(dataPath)
+        mdocs = dict(tf.mdocs)
+        # Also the mdocs that TomoOTF would import: from the 'mdoc_pattern'
+        # setting or MDOC_PATTERNS (e.g. in other subfolders)
+        _, mdocFiles = cls.findMdocs(
             dataPath, cls.getSetting(ctx, 'mdoc_pattern', otfType='tomo'))
+        for fn in mdocFiles:
+            name = os.path.basename(fn)
+            if name not in mdocs and (m := TomoFiles.parseMdoc(fn)):
+                mdocs[name] = m
 
-        def _detected(otfType, reason):
-            log(f"Detected {Color.bold(otfType)} OTF: {reason}")
-            return otfType
+        for name, m in sorted(mdocs.items()):
+            if cls._isTiltSeries(m['angles']):
+                key = 'tilt_mdocs'
+            elif m['tilts'] <= 1 and os.path.exists(m['path'][:-len('.mdoc')]):
+                # Mdoc of a single movie next to it (e.g. SerialEM SPA)
+                key = 'movie_mdocs'
+            else:  # e.g. a tilt series being acquired
+                key = 'other_mdocs'
+            info[key].append(f"{name} ({m['tilts']} tilts)")
 
-        for fn in mdocs[:5]:
-            try:
-                n = len(Mdoc.parse(fn).zvalues)
-            except Exception:
-                continue
-            if n > 1:
-                return _detected('tomo', f"tilt series mdoc {fn} ({n} tilts)")
+        # Tilt series from the movie names (<TS>_<index>_<angle>...)
+        for ts, movies in sorted(tf.moviesTs.items()):
+            angles = []
+            for fn in movies:
+                if match := TomoFiles.MOVIE_REGEX.match(TomoFiles._stem(fn)):
+                    angles.append(match.group('angle'))
+            if cls._isTiltSeries(angles):
+                info['tilt_movies'].append(f"{ts} ({len(movies)} movies)")
+        info['movies'] = len(tf.movies)
 
-        if mdocs:
-            imagesPattern = cls.getSetting(ctx, 'images_pattern', otfType='spa')
-            if not imagesPattern or not glob(os.path.join(dataPath, imagesPattern)):
-                return _detected('tomo', f"{len(mdocs)} mdoc files ({pattern}) "
-                                         f"and no SPA images ({imagesPattern})")
+        if info['images_pattern']:
+            info['spa_images'] = len(glob(os.path.join(dataPath, info['images_pattern'])))
+        return info
 
-        return _detected('spa', f"no tilt series mdoc files ({pattern})")
+    @classmethod
+    def decideType(cls, info, final=False):
+        """ Decide the OTF type from the scanData info. Return (type, reason),
+        with type None if the data is not conclusive yet (only when not final):
+            - 'tomo' if there are tilt series, from mdoc files or from the
+              names of the movies (at least DETECT_MIN_TILTS tilts over
+              DETECT_MIN_TILT_RANGE degrees)
+            - 'spa' if there are at least DETECT_MIN_SPA_IMAGES SPA images
+              ('images_pattern'), or movies with their own mdoc file (e.g.
+              written by SerialEM for SPA), and no tilt series.
+        When final (e.g. waiting timed out), with partial data: 'tomo' if
+        there are mdoc files and no SPA images, 'spa' if there are SPA images
+        or other movies; None if there is no data at all. """
+        def _examples(items):
+            more = f" and {len(items) - 2} more" if len(items) > 2 else ''
+            return ', '.join(items[:2]) + more
+
+        if items := info['tilt_mdocs']:
+            return 'tomo', f"tilt series mdoc files: {_examples(items)}"
+        if items := info['tilt_movies']:
+            return 'tomo', f"tilt series movies: {_examples(items)}"
+        nSpa = info['spa_images']
+        if nSpa >= cls.DETECT_MIN_SPA_IMAGES:
+            return 'spa', (f"{nSpa} SPA images ({info['images_pattern']}) "
+                           f"and no tilt series")
+        if len(items := info['movie_mdocs']) >= cls.DETECT_MIN_SPA_IMAGES:
+            return 'spa', (f"{len(items)} movies with their own mdoc file "
+                           f"({_examples(items)}) and no tilt series")
+        if not final:
+            return None, None
+
+        others = info['other_mdocs']
+        if others and not nSpa:
+            return 'tomo', (f"mdoc files without complete tilt series yet "
+                            f"({_examples(others)}) and no SPA images")
+        if nSpa or info['movies'] or info['movie_mdocs']:
+            return 'spa', (f"{nSpa} SPA images, {info['movies']} movies, "
+                           f"{len(info['movie_mdocs'])} movie mdocs and no "
+                           f"tilt series")
+        return None, f"no movies or mdoc files in {info['path']}"
+
+    @classmethod
+    def detectType(cls, ctx, log=print, timeout=None, sleep=None):
+        """ Detect the OTF type ('spa' or 'tomo') from the session data (see
+        scanData and decideType). If the data is not conclusive yet (e.g. the
+        first tilt series is being acquired or there are only a few files),
+        check again every 'detect_sleep' seconds, up to 'detect_timeout'
+        seconds (settings, defaults DETECT_SLEEP and DETECT_TIMEOUT), and then
+        decide with the data found. Raise an exception if there is no data.
+        """
+        if timeout is None:
+            timeout = float(cls.getSetting(ctx, 'detect_timeout', cls.DETECT_TIMEOUT))
+        if sleep is None:
+            sleep = float(cls.getSetting(ctx, 'detect_sleep', cls.DETECT_SLEEP))
+        deadline = time.time() + timeout
+
+        while True:
+            info = cls.scanData(ctx)
+            final = time.time() >= deadline
+            otfType, reason = cls.decideType(info, final=final)
+            if otfType:
+                waited = ' (after waiting for conclusive data)' if final else ''
+                log(f"Detected {Color.bold(otfType)} OTF{waited}: {reason}")
+                return otfType
+            if final:
+                raise Exception(f"Could not detect the OTF type: {reason}. Set "
+                                f"'emwrap_otf' ('spa' or 'tomo') in the config "
+                                f"or use --otf.")
+            log(f"OTF type not detected yet in {info['path']} "
+                f"({len(info['other_mdocs'])} mdocs without tilt series, "
+                f"{len(info['movie_mdocs'])} movie mdocs, {info['movies']} "
+                f"movies, {info['spa_images']} SPA images), "
+                f"checking again in {sleep:g} seconds")
+            time.sleep(min(sleep, max(0, deadline - time.time())))
 
     def setupJobs(self, jobs, ctx):
         """ Fill jobs params (jobtype -> params) with the session values. """
@@ -831,6 +939,13 @@ def main():
     g.add_argument('--status', '-s', action='store_true')
     g.add_argument('--stop', action='store_true',
                    help="Stop the OTF runner and the running jobs.")
+    g.add_argument('--detect', metavar='DATA_FOLDER',
+                   help="Print the OTF type ('spa' or 'tomo') detected from "
+                        "the data folder and the files found, without "
+                        "waiting (use --images-pattern for the SPA images).")
+    p.add_argument('--images-pattern', metavar='PATTERN',
+                   help="SPA images pattern, relative to the data folder, "
+                        "used with --detect.")
     p.add_argument('--otf', metavar='TYPE_OR_CLASS',
                    help="OTF type ('spa', 'tomo') or 'module.Class' to "
                         "create the project. By default, it is taken from "
@@ -868,6 +983,19 @@ def main():
 
     elif args.stop:
         OTF.fromSession(path).stop()
+
+    elif args.detect:
+        conf = {'images_pattern': args.images_pattern} if args.images_pattern else {}
+        ctx = {'raw': {'path': os.path.abspath(args.detect)},
+               'wf_conf': conf, 'conf_acq': {}}
+        info = OTF.scanData(ctx)
+        for k, v in info.items():
+            print(f"{k:>15}: {v}")
+        otfType, reason = OTF.decideType(info)
+        if otfType is None:
+            otfType, reason = OTF.decideType(info, final=True)
+            reason = f"not conclusive yet, after waiting: {reason}"
+        print(f"\nDetected: {Color.bold(str(otfType))} ({reason})")
 
 
 if __name__ == '__main__':

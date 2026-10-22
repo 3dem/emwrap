@@ -1,6 +1,6 @@
 {
     "title": "Tomo On-The-Fly",
-    "description": "Tomography on-the-fly processing: import of tilt series (from mdoc files) while they are acquired, and both Warp (motion/CTF, alignment and reconstruction) and AreTomo3 processing from the imported tilt series. Processing jobs monitor the import output for new tilt series (input_timeout). Session specific values (mdoc pattern, acquisition, gain) are filled when the OTF project is created (see emwrap.mix.otf.TomoOTF).",
+    "description": "Tomography on-the-fly processing: import of tilt series (from mdoc files) while they are acquired, and both Warp (motion/CTF, alignment and reconstruction) and AreTomo3 processing from the imported tilt series. Processing jobs monitor the import output for new tilt series (input_timeout). Session specific values (mdoc pattern, acquisition, gain) are filled when the OTF project is created (see emwrap.mix.otf.TomoOTF). A tilt analysis job (emw-tilt-analyze) follows the Warp output for the EMhub on-the-fly CryoET dashboard.",
     "jobs": [
         {
             "jobid": "EMwrap/job001",
@@ -90,6 +90,17 @@
                 "aretomo3.ExtraA3Args": "",
                 "acq.gain": "",
                 "input_timeout": "28800"
+            }
+        },
+        {
+            "jobid": "EMwrap/job004",
+            "jobtype": "emw-tilt-analyze",
+            "params": {
+                "input_tiltseries": "WarpOtf/job002/aligned_tilt_series.star",
+                "medium_jpegs": true,
+                "wait.timeout": "28800",
+                "wait.sleep": "30",
+                "threads": "4"
             }
         }
     ]
