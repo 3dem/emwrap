@@ -13,7 +13,6 @@
 # **************************************************************************
 
 import os
-import re
 import json
 import threading
 
@@ -26,8 +25,9 @@ from emtools.image import Image, Thumbnail
 class TiltThumbnailWriter:
     """ The jpegs, and CTF fit profiles, of the tilts of a tilt series.
 
-    Whatever program processed the tilts, the job that wrote a tilt's
-    average and power spectrum writes them into <job>/tilt_series/thumbnails:
+    The tilt analysis job (emw-tilt-analyze) writes them into its
+    <job>/thumbnails folder, whatever program made the tilt averages and
+    power spectra:
 
         <average>.jpg           filmstrip, and what the image QC measures
         <average>_medium.jpg    a closer look
@@ -37,58 +37,42 @@ class TiltThumbnailWriter:
                                 (written by TiltQualityCuration)
 
     <average> and <ps> are the base names of the MRCs.  Readers (emhub OTF
-    dashboard, TiltQualityCuration) find the folder from the path of the
-    MRC: folder().  The sizes are the callers' (TiltQualityCuration has the
-    ones the image QC was calibrated on).  The tilt images are emtools'
-    Thumbnail.Tilt(), the recipe the image measures were calibrated on
-    (tilt_image()).
+    dashboard, the tilt curation job) get the folder from the analysis
+    job's output (tilt_analysis.star).  The sizes are the callers'
+    (TiltQualityCuration has the ones the image QC was calibrated on).  The
+    tilt images are emtools' Thumbnail.Tilt(), the recipe the image
+    measures were calibrated on (tilt_image()).
 
-    An instance writes them for the job of a pipeline, for any program
-    wrapper: what each wrapper reads from its program's output goes into
-    the RELION tilt-series STAR file, and these files are made from it.
-    Made in the job, right after the program wrote each MRC, so a dashboard
-    never has to read one while acquisition is using the disk.  A failure
-    only logs: a missing thumbnail must not fail the job.
+    An instance writes them for the job of a pipeline.  A failure only
+    logs: a missing thumbnail must not fail the job.
     """
-    FOLDER = os.path.join('tilt_series', 'thumbnails')
+    FOLDER = 'thumbnails'
     QUALITY = 80
-    _JOB_DIR = re.compile(r'^job\d+$')
 
     def __init__(self, pipeline, thumbnailsDir=None):
         """ thumbnailsDir: where to write, by default FOLDER in the
-        pipeline's job folder, where readers look for them (folder()). """
+        pipeline's job folder. """
         self.thumbnailsDir = thumbnailsDir or pipeline.join(self.FOLDER)
         self.log = pipeline.log
 
     # ------------------------------------------------------------------
     # Paths
     # ------------------------------------------------------------------
-    @classmethod
-    def folder(cls, path):
-        """ The thumbnails folder of the job folder (jobNNN) a file is in,
-        relative or absolute as path is; None if it is not in one. """
-        dirs = os.path.normpath(path).split(os.sep)[:-1]
-        for i in range(len(dirs), 0, -1):
-            if cls._JOB_DIR.match(dirs[i - 1]):
-                return os.path.join(os.sep.join(dirs[:i]) or os.sep, cls.FOLDER)
-        return None
+    @staticmethod
+    def _file(srcPath, suffix, folder):
+        """ The thumbnail file of srcPath in folder. """
+        return os.path.join(folder, Path.removeBaseExt(srcPath) + suffix)
 
     @classmethod
-    def _file(cls, srcPath, suffix, folder=None):
-        """ The thumbnail file of srcPath, in folder or its job's, or None. """
-        folder = folder or cls.folder(srcPath)
-        return os.path.join(folder, Path.removeBaseExt(srcPath) + suffix) if folder else None
-
-    @classmethod
-    def tilt_jpeg(cls, avgPath, folder=None, medium=False):
+    def tilt_jpeg(cls, avgPath, folder, medium=False):
         return cls._file(avgPath, '_medium.jpg' if medium else '.jpg', folder)
 
     @classmethod
-    def ps_jpeg(cls, psPath, folder=None):
+    def ps_jpeg(cls, psPath, folder):
         return cls._file(psPath, '_ps.jpg', folder)
 
     @classmethod
-    def ctf_json(cls, psPath, folder=None):
+    def ctf_json(cls, psPath, folder):
         return cls._file(psPath, '_ctf.json', folder)
 
     # ------------------------------------------------------------------
@@ -138,31 +122,25 @@ class TiltThumbnailWriter:
         return os.path.exists(path) and os.path.getmtime(path) >= os.path.getmtime(srcPath)
 
     @classmethod
-    def _required(cls, path, srcPath):
-        if path is None:
-            raise ValueError(f"{srcPath} is not in a job folder: give the thumbnails folder")
-        return path
-
-    @classmethod
-    def write_tilt(cls, avgPath, size, folder=None, medium=False):
+    def write_tilt(cls, avgPath, size, folder, medium=False):
         """ Write the jpeg of a tilt average at size px, <average>.jpg or
         with medium <average>_medium.jpg, unless it is newer than the
         average.  Returns True if written. """
-        path = cls._required(cls.tilt_jpeg(avgPath, folder, medium), avgPath)
+        path = cls.tilt_jpeg(avgPath, folder, medium)
         if cls._current(path, avgPath):
             return False
         cls.save_jpeg(cls.tilt_image(Image.get_array(avgPath), size), path)
         return True
 
     @classmethod
-    def write_ps(cls, psPath, makeView, size, folder=None):
+    def write_ps(cls, psPath, makeView, size, folder):
         """ Write the CTF fit view of a power spectrum, unless it is newer
         than it.  makeView() -> (uint8 array, profile dict): made by each
         program wrapper, as the spectrum and the fit are stored differently
         by each program; the profile has 'k' (1/Å), 'measured',
         'simulated' and 'correlation'.  The view is written at size px.
         Returns True if written. """
-        jpeg = cls._required(cls.ps_jpeg(psPath, folder), psPath)
+        jpeg = cls.ps_jpeg(psPath, folder)
         jsonPath = cls.ctf_json(psPath, folder)
         if cls._current(jpeg, psPath) and cls._current(jsonPath, psPath):
             return False
@@ -172,7 +150,7 @@ class TiltThumbnailWriter:
         return True
 
     @classmethod
-    def read_ctf_correlation(cls, psPath, folder=None):
+    def read_ctf_correlation(cls, psPath, folder):
         """ The CTF profile correlation of a power spectrum, or None. """
         try:
             with open(cls.ctf_json(psPath, folder)) as f:

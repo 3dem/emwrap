@@ -1,17 +1,17 @@
 {
     "name": "emw-tilt-curation",
     "label": "EMwrap Tilt Curation",
-    "help": "Automatically leave out the tilt images of each tilt series that fail the curation rule, and write the result as a new TiltSeries.\n\nEach tilt image is judged on:\n- its image content, measured on its 512 px jpeg: blank (no texture), blacked out (more of the field black than the rest of the tilt series), a different field from the tilt before it, or shifted away from the first tilt;\n- its motion and CTF values from the tilt-series STAR file: accumulated motion, CTF fit resolution, CTF profile correlation, astigmatism and defocus.\nOnce a tilt has lost the field (blank, blacked out, different field or shifted), the tilts acquired after it on the same side of the first tilt can be left out too.\n\nThe image measures are relative to each tilt series, so a tilt series dark or low in contrast throughout is not penalised. The defaults were calibrated on a hand curation of lamella tilt series (EMPIAR-11830) and are the same limits the OTF dashboard uses. Leave a limit empty to not use that check.\n\nOutput: as the subset job (emw-subset-ts) with every tilt series and the failing tilts excluded, a filtered tilt-series STAR file per tilt series. When the input job has a Warp frame-series state, the same tilts are deselected in a copy of it (WarpTools change_selection), so the next Warp jobs do not use them. tilt_curation.csv lists every tilt with its measures, whether it was kept and why not. Tilt series are never left out unless 'Leave out tilt series keeping less than' is set (or no tilt is left).",
+    "help": "Automatically leave out the tilt images of each tilt series that fail the curation rule, and write the result as a new TiltSeries.\n\nThe input is a tilt analysis (emw-tilt-analyze): the rule is applied to its measures, nothing is computed from the images here. Each tilt image is judged on:\n- its image content, measured by the analysis on its 512 px jpeg: blank (no texture), blacked out (more of the field black than the rest of the tilt series), a different field from the tilt before it, or shifted away from the first tilt;\n- its motion and CTF values from the tilt-series STAR file, and the CTF profile correlation of the analysis' CTF fit view.\nOnce a tilt has lost the field (blank, blacked out, different field or shifted), the tilts acquired after it on the same side of the first tilt can be left out too.\n\nThe image measures are relative to each tilt series, so a tilt series dark or low in contrast throughout is not penalised. The defaults were calibrated on a hand curation of lamella tilt series (EMPIAR-11830) and are the same limits the OTF dashboard uses. Leave a limit empty to not use that check.\n\nOutput: as the subset job (emw-subset-ts) of the tilt series the analysis was made on, with every analyzed tilt series and the failing tilts excluded, a filtered tilt-series STAR file per tilt series. When that input job has a Warp frame-series state, the same tilts are deselected in a copy of it (WarpTools change_selection), so the next Warp jobs do not use them. tilt_curation.csv lists every tilt with its measures, whether it was kept and why not. Tilt series are never left out unless 'Leave out tilt series keeping less than' is set (or no tilt is left); tilt series the analysis has not reached are left out.",
     "sections": [
         {
             "label": "Input",
             "params": [
                 {
-                    "name": "input_set",
-                    "label": "Input tilt series:",
+                    "name": "input_analysis",
+                    "label": "Input tilt analysis:",
                     "paramClass": "PathParam",
-                    "pointerClass": "TiltSeries",
-                    "help": "tilt_series.star of motion corrected tilt series (e.g. the output of Warp Motion and CTF), before alignment: individual tilts cannot be deselected in a Warp tilt-series state once it exists."
+                    "pointerClass": "TiltSeriesAnalysis",
+                    "help": "tilt_analysis.star of a tilt analysis job (emw-tilt-analyze) of motion corrected tilt series, before alignment: individual tilts cannot be deselected in a Warp tilt-series state once it exists."
                 }
             ]
         },
@@ -105,7 +105,7 @@
                             "paramClass": "FloatParam",
                             "default": 0.15,
                             "allowsEmpty": true,
-                            "help": "Correlation of the measured and simulated CTF radial profiles, from the <movie>_ctf.json emwrap's Warp Motion and CTF writes beside the jpegs. Below 0.15 the fit failed. Only judged for tilts that have that json (motion corrected by emwrap's Warp wrapper), whether or not the jpegs are made here."
+                            "help": "Correlation of the measured and simulated CTF radial profiles, from the tilt analysis' CTF fit views (made for Warp input). Below 0.15 the fit failed. Only judged for tilts that have one."
                         },
                         {
                             "name": "fom_min",
@@ -151,13 +151,6 @@
         {
             "label": "Compute",
             "params": [
-                {
-                    "name": "threads",
-                    "label": "Threads",
-                    "paramClass": "IntParam",
-                    "default": 4,
-                    "help": "Tilt series processed at the same time (making jpegs and measuring them)."
-                },
                 {
                     "label": "Launchers",
                     "paramClass": "Group",

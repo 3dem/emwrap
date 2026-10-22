@@ -15,7 +15,6 @@
 # **************************************************************************
 
 import os
-import json
 import shutil
 import numpy as np
 from collections import defaultdict
@@ -29,10 +28,6 @@ from emtools.metadata import (StarFile, Table, RelionStar, WarpXml, Imod,
 from emtools.jobs import Batch, Args
 from emtools.image import Image
 from emwrap.base import ProcessingPipeline
-from emwrap.base.tilt_thumbnails import TiltThumbnailWriter
-from emwrap.base.tilt_quality_curation import TiltQualityCuration
-
-from .utils import warpCtfView
 
 
 class WarpBasePipeline(ProcessingPipeline):
@@ -330,7 +325,6 @@ class WarpBasePipeline(ProcessingPipeline):
             self.gain = os.path.basename(gainFile)
         else:
             self.gain = None
-        self.thumbnails = TiltThumbnailWriter(self)
 
     def _importInputs(self, inputFolder, keys=None, dest=None, mutable=False):
         """ Import Warp inputs (see ``importInputs``) from a previous job
@@ -365,7 +359,7 @@ class WarpBasePipeline(ProcessingPipeline):
     def write_ts_table(self, tableName, table, starFile):
         self.log(f"Writing: {starFile}")
         # Written then renamed: the file is read while the job runs (by the
-        # dashboard, for one), and must never be seen half written
+        # on-the-fly jobs after it, for one), and must never be seen half written
         tmpFile = starFile + '.tmp'
         with StarFile(tmpFile, 'w') as sfOut:
             sfOut.writeTable(tableName, table, computeFormat='left', timeStamp=True)
@@ -399,19 +393,6 @@ class WarpBasePipeline(ProcessingPipeline):
         v = (self._args.get('create_settings.bin_angpix', '') or
              self._args.get('mctf.create_settings.bin_angpix', '') or 0)
         return float(v) or inputPs
-
-    @staticmethod
-    def ctfViewMaker(psMrcPath, warpXml):
-        """ The CTF fit view of a tilt (see warpCtfView), as the thumbnail
-        writer takes it: a function returning (image, profile). """
-        def _make():
-            arr, profile = warpCtfView(Image.get_array(psMrcPath),
-                                       warpXml.getDict('Movie', 'CTF', 'Param'),
-                                       warpXml.getDict('Movie', 'OptionsCTF', 'Param'))
-            res = warpXml.get('Movie', '@CTFResolutionEstimate')
-            profile['fitResolution'] = float(res) if res else None
-            return arr, profile
-        return _make
 
     def eerUpsampling(self):
         """ Return the EER upsampling factor (1, 2 or 4) from eerSampling. """
@@ -602,17 +583,11 @@ class WarpBasePipeline(ProcessingPipeline):
             avgMrcPath = frameDict['rlnMicrographName']
             if dims is None and os.path.exists(avgMrcPath):
                 dims = Image.get_dimensions(avgMrcPath)
-            if avgMrcPath:
-                self.thumbnails.tilt(avgMrcPath, TiltQualityCuration.JPEG_SIZE)
-                self.thumbnails.tilt(avgMrcPath, TiltQualityCuration.MEDIUM_JPEG_SIZE, medium=True)
 
             defocusDict = defaultdict(lambda: 0)
 
             # xml and average mrc already validated for whole TS above
             ctf = movieXml.getDict('Movie', 'CTF', 'Param')
-            if psPath := frameDict['rlnCtfPowerSpectrum']:
-                self.thumbnails.ps(psPath, self.ctfViewMaker(psPath, movieXml),
-                                   TiltQualityCuration.PS_JPEG_SIZE)
 
             defocusDict['rlnDefocusU'] = _float(float(ctf['Defocus']) * 10000)  # Convert to Angstroms
             defocusDict['rlnCtfAstigmatism'] = _float(float(ctf['DefocusDelta']) * 10000)  # Convert to Angstroms
@@ -647,12 +622,6 @@ class WarpBasePipeline(ProcessingPipeline):
             self.log(f"ERROR: All tilts are deselected in Warp for TS {tsName}")
             return False, None, dims
 
-        # The image content measures of the tilt series, from its jpegs;
-        # like them, a failure must not fail the job
-        try:
-            TiltQualityCuration.write_table_json(self.thumbnails.thumbnailsDir, tsName, newTsTable)
-        except Exception as e:
-            self.log(f"WARNING: could not write image QC for TS {tsName}: {e}")
         return True, newTsTable, dims
 
     def alignmentPs(self):

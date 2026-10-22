@@ -33,7 +33,7 @@ penalised.  The measures and the walk are the ones calibrated with the
 tomo-data-curation skill on a hand curation (ChlamyBrnA, EMPIAR-11830).
 
 One json per tilt series, <tomoName>_imageqc.json beside the jpegs, written
-by the job that made them (write_table_json).
+by the tilt analysis job (emw-tilt-analyze) that made them (write_table_json).
 
 The curation rule (curate_series) turns the measures and the motion and CTF
 values of the star file into the tilts to leave out: the OTF dashboard
@@ -336,8 +336,8 @@ class TiltQualityCuration:
         """ <tomoName>_imageqc.json of a tilt series in thumbnails_dir, the
         folder its jpegs were written to, from its tilt-series STAR table,
         once the jpegs are all written: see write_series_json. """
-        tilts = cls.tilts_from_star_rows([row._asdict() for row in ts_table],
-                                         ctf_correlation=False, thumbnails=thumbnails_dir)
+        tilts = cls.tilts_from_star_rows([row._asdict() for row in ts_table], thumbnails_dir,
+                                         ctf_correlation=False)
         return cls.write_series_json(cls.json_path(thumbnails_dir, tomo_name), tomo_name, tilts)
 
     # ------------------------------------------------------------------
@@ -354,19 +354,18 @@ class TiltQualityCuration:
         return None if placeholder_zero and v == 0 else v
 
     @classmethod
-    def tilts_from_star_rows(cls, rows, root='', ctf_correlation=True, thumbnails=None):
+    def tilts_from_star_rows(cls, rows, thumbnails, root='', ctf_correlation=True):
         """ The tilts of a tilt series star file as the measures and the rule
         take them: 'movie', 'angle', 'name' (micrograph base name), 'mic' and
         'jpeg' (the tilt average and its jpeg, TiltThumbnailWriter; None
-        without an average, or the jpeg None if the average is not in a job
-        folder), the star values of the rule (placeholder zeros as None) and
-        the CTF profile correlation.
+        without an average), the star values of the rule (placeholder zeros
+        as None) and the CTF profile correlation.
 
-        rows: dicts of the star rows (values as strings or numbers); root: what
-        the paths in them are relative to; ctf_correlation: whether to read
-        the _ctf.json of each tilt; thumbnails: the folder of the jpegs and
-        jsons, by default the one of the job of each file.  Raises ValueError
-        without the movie index or the tilt angle.
+        rows: dicts of the star rows (values as strings or numbers);
+        thumbnails: the folder of the jpegs and jsons (the tilt analysis
+        job's); root: what the paths in the rows are relative to;
+        ctf_correlation: whether to read the _ctf.json of each tilt.  Raises
+        ValueError without the movie index or the tilt angle.
         """
         tilts = []
         for d in rows:
@@ -385,13 +384,13 @@ class TiltQualityCuration:
                 'angle': float(d['rlnTomoNominalStageTiltAngle']),
                 'name': name,
                 'mic': os.path.join(root, mic) if mic else None,
-                'jpeg': os.path.join(root, jpeg) if jpeg else None,
+                'jpeg': jpeg,
                 'motion': cls._star_float(d, 'rlnAccumMotionTotal', True),
                 'ctfResolution': cls._star_float(d, 'rlnCtfMaxResolution', True),
                 'figureOfMerit': cls._star_float(d, 'rlnCtfFigureOfMerit', True),
                 'astigmatism': cls._star_float(d, 'rlnCtfAstigmatism'),
                 'defocus': cls._star_float(d, 'rlnDefocusU'),
-                'ctfCorrelation': (TiltThumbnailWriter.read_ctf_correlation(os.path.join(root, ps), thumbnails)
+                'ctfCorrelation': (TiltThumbnailWriter.read_ctf_correlation(ps, thumbnails)
                                    if ctf_correlation and ps else None),
             })
         return tilts
