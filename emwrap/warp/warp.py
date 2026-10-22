@@ -358,8 +358,12 @@ class WarpBasePipeline(ProcessingPipeline):
 
     def write_ts_table(self, tableName, table, starFile):
         self.log(f"Writing: {starFile}")
-        with StarFile(starFile, 'w') as sfOut:
+        # Written then renamed: the file is read while the job runs (by the
+        # on-the-fly jobs after it, for one), and must never be seen half written
+        tmpFile = starFile + '.tmp'
+        with StarFile(tmpFile, 'w') as sfOut:
             sfOut.writeTable(tableName, table, computeFormat='left', timeStamp=True)
+        os.replace(tmpFile, starFile)
 
     def checkOutputTs(self, goodTable, failedTable, label='tilt-series'):
         """ Validate the output tilt-series of a job: log a warning with the
@@ -604,11 +608,23 @@ class WarpBasePipeline(ProcessingPipeline):
             defocusDict['rlnCtfAstigmatism'] = _float(float(ctf['DefocusDelta']) * 10000)  # Convert to Angstroms
             defocusDict['rlnDefocusV'] = _float(defocusDict['rlnDefocusU'] + defocusDict['rlnCtfAstigmatism'])
             defocusDict['rlnDefocusAngle'] = _float(ctf['DefocusAngle'])
+            # Warp has no figure of merit or ice ring density; those stay 0
+            if ctfRes := movieXml.get('Movie', '@CTFResolutionEstimate'):
+                defocusDict['rlnCtfMaxResolution'] = _float(ctfRes)
+
+            # Warp only has the trajectory: early and late motion are not
+            # reported (0), see WarpXml.getMovieMotion
+            motion = {'rlnAccumMotionTotal': 0, 'rlnAccumMotionEarly': 0, 'rlnAccumMotionLate': 0}
+            try:
+                motion['rlnAccumMotionTotal'] = movieXml.getMovieMotion()
+            except (KeyError, ValueError) as e:
+                # One movie without its motion must not fail the batch; 0
+                # is what readers take as not reported
+                self.log(f"WARNING: no motion for {moviePrefix}: {e}")
 
             for k in extra_cols:
-                if k.startswith('rlnAccumMotion'):
-                    # FIXME: Parse the movie values
-                    frameDict[k] = 0
+                if k in motion:
+                    frameDict[k] = _float(motion[k])
                 elif k.startswith('rlnDefocus') or k.startswith('rlnCtf') and k not in frameDict:
                     frameDict[k] = defocusDict[k]
 

@@ -1,0 +1,57 @@
+{
+    "name": "emw-tilt-analyze",
+    "label": "EMwrap Tilt Analyze",
+    "help": "Analyze the tilts of motion corrected tilt series, on the fly, for the OTF dashboard and the tilt curation job (emw-tilt-curation).\n\nFor each tilt: a 512 px jpeg (filmstrip, and what the image measures use), optionally a 1024 px one (a closer look), and for Warp input the CTF fit view (the measured power spectrum over the simulated one) with its radial profiles and their correlation. For each tilt series: the image content measures of its tilts (texture, black area, match with the tilt before it, field shift), once it is in the input.\n\nThe input is followed while the job that writes it adds tilt series. With Warp input, the jpegs and CTF views of each tilt are made as soon as Warp writes it, before its tilt series is complete.\n\nOutput: tilt_analysis.star (TiltSeriesAnalysis), pointing to this job's thumbnails folder and listing the analyzed tilt series. Open it in the OTF dashboard, or curate it with emw-tilt-curation. Several analysis jobs (and dashboards) can run in the same project.",
+    "sections": [
+        {
+            "label": "Input",
+            "params": [
+                {
+                    "name": "input_tiltseries",
+                    "label": "Input tilt series:",
+                    "paramClass": "PathParam",
+                    "pointerClass": "TiltSeries, TiltSeriesAligned",
+                    "help": "tilt_series.star of motion corrected tilt series (e.g. the output of Warp Motion and CTF, or Warp OTF's aligned_tilt_series.star). To curate the tilts with emw-tilt-curation afterwards, use the motion correction output, before alignment."
+                },
+                {
+                    "name": "medium_jpegs",
+                    "label": "Also make the 1024 px jpegs",
+                    "paramClass": "BooleanParam",
+                    "default": true,
+                    "help": "The larger jpeg the dashboard shows for a closer look at a tilt."
+                }
+            ]
+        },
+        {
+            "label": "Streaming",
+            "params": [
+                {
+                    "name": "wait.timeout",
+                    "label": "Wait time for new tilt series (s)",
+                    "paramClass": "IntParam",
+                    "default": 3600,
+                    "help": "Stop when no new tilt series has been added to the input for this long."
+                },
+                {
+                    "name": "wait.sleep",
+                    "label": "Time between checks (s)",
+                    "paramClass": "IntParam",
+                    "default": 30,
+                    "help": "How often the input, and the Warp tilts, are checked for new items."
+                }
+            ]
+        },
+        {
+            "label": "Compute",
+            "params": [
+                {
+                    "name": "threads",
+                    "label": "Threads",
+                    "paramClass": "IntParam",
+                    "default": 4,
+                    "help": "Tilt series analyzed at the same time."
+                }
+            ]
+        }
+    ]
+}

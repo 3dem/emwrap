@@ -83,7 +83,6 @@ def copy(args):
         raise Exception("Output folder already exists.")
     WarpBasePipeline.importInputs(os.getcwd(), args.output)
 
-
 def main():
     parser = argparse.ArgumentParser(prog='emwrap.warp')
     subparsers = parser.add_subparsers(

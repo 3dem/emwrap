@@ -52,6 +52,16 @@ class ProcessingConfig:
             "label": "EMwrap Subset TS",
             "output": "EMwrap"
         },
+        "emw-tilt-analyze": {
+            "launcher": "emwrap.base.tilt_analyze",
+            "label": "EMwrap Tilt Analyze",
+            "output": "EMwrap"
+        },
+        "emw-tilt-curation": {
+            "launcher": "emwrap.base.tilt_curation",
+            "label": "EMwrap Tilt Curation",
+            "output": "EMwrap"
+        },
         "emw-subset-classes": {
             "launcher": "emwrap.base.subset_classes",
             "label": "EMwrap Subset Classes",

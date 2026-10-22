@@ -144,14 +144,6 @@ class SubsetClassesPipeline(ProcessingPipeline):
 
         self.writeRelionOutputNodes([[outputStar, OUTPUT_NODE_LABELS[outputType]]])
 
-        self.inputs = {
-            'input_set': self.inputSet,
-            'classes': self.classes
-        }
-        self.outputs = {
-            'type': outputType,
-            'count': count
-        }
         self.writeInfo()
 
         self.log(f"Created {outputType} subset with {Color.green(count)} particle(s).")
