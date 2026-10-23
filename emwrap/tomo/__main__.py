@@ -354,6 +354,12 @@ class EMhubTomo:
         'emh-data --create_minimal') and the processing 'extra' files
         shipped with emhub are copied into it.
 
+        Flask is launched directly with the current Python interpreter
+        (sys.executable -m flask), instead of the instance 'run.sh' script,
+        so the server always runs in the same environment as 'emh-tomo'
+        and nothing in the instance folder can override it (e.g. by
+        sourcing another environment).
+
         The server is started on PORT when given, otherwise on a free port
         chosen automatically (see _find_free_port()), announced with a
         visible banner so the port can be used to set up an ssh tunnel if
@@ -364,30 +370,38 @@ class EMhubTomo:
         if not os.path.exists(INSTANCE_DIR):
             print(f">>> Instance not found, creating a minimal instance at: "
                   f"{Color.bold(INSTANCE_DIR)}")
-            subprocess.run(['emh-data', '--create_minimal', INSTANCE_DIR],
-                           check=True)
+            subprocess.run([sys.executable, '-m', 'emhub.data',
+                            '--create_minimal', INSTANCE_DIR], check=True)
             cls._copy_processing_extras(INSTANCE_DIR)
         else:
             print(f">>> Using existing instance at: {Color.bold(INSTANCE_DIR)}")
-
-        run_script = os.path.join(INSTANCE_DIR, 'run.sh')
-        if not os.path.exists(run_script):
-            raise Exception(f"Instance run script not found: {run_script}")
 
         port = cls._resolve_port(port)
         cls._print_port_banner(port)
 
         print(f">>> Running instance: {Color.bold(INSTANCE_DIR)}")
+        print(f">>> Python: {Color.bold(sys.executable)}")
         env = os.environ.copy()
-        # 'flask run' (invoked with no explicit --port in run.sh) reads its
-        # default port from FLASK_RUN_PORT when set.
-        env['FLASK_RUN_PORT'] = str(port)
-        # emhub's '_login_user_from_env' before_request hook (see
-        # emhub/emhub/__init__.py) logs this user in automatically on every
-        # request when EMHUB_LOGGED_USER is set, so no login page is shown
-        # for this local/HPC use case.
-        env['EMHUB_LOGGED_USER'] = RUN_LOGGED_USER
-        sys.exit(subprocess.call(['bash', run_script], env=env))
+        env.update({
+            'FLASK_APP': 'emhub',
+            'EMHUB_INSTANCE': INSTANCE_DIR,
+            'EMHUB_SERVER_URL': f'http://127.0.0.1:{port}',
+            # Same client credentials the minimal instance 'bashrc' sets
+            'EMHUB_USER': 'admin',
+            'EMHUB_PASSWORD': 'admin',
+            # Fall back to the tomography projects list unless the user
+            # chose another default page.
+            'EMHUB_DEFAULT_CONTENT': env.get('EMHUB_DEFAULT_CONTENT',
+                                             'processing_tomo_list'),
+            # emhub's '_login_user_from_env' before_request hook (see
+            # emhub/emhub/__init__.py) logs this user in automatically on
+            # every request when EMHUB_LOGGED_USER is set, so no login page
+            # is shown for this local/HPC use case.
+            'EMHUB_LOGGED_USER': RUN_LOGGED_USER,
+        })
+        cmd = [sys.executable, '-m', 'flask', 'run', '--debug',
+               '--port', str(port)]
+        sys.exit(subprocess.call(cmd, cwd=INSTANCE_DIR, env=env))
 
     @classmethod
     def main(cls):
