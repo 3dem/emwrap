@@ -149,7 +149,7 @@ def cryosparc_prepare(sessionFile, particlesStar):
     movTable = StarFile.getTableFromFile('movies', movStar)
     micTable = StarFile.getTableFromFile('micrographs', micStar)
 
-    r = re.compile('(movie|micrograph)-(\d{6})')
+    r = re.compile(r'(movie|micrograph)-(\d{6})')
 
     def _micKey(fn):
         """ Return movie/micrograph id from the name. """

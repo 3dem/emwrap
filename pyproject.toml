@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "emwrap"
+dynamic = ["version", "dependencies"]
+description = "Utilities for CryoEM data manipulation"
+readme = {file = "README.rst", content-type = "text/x-rst"}
+requires-python = ">=3.10"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+authors = [
+    {name = "J.M. De la Rosa Trevin", email = "delarosatrevin@gmail.com"},
+    {name = "Grigory Sharov", email = "gsharov@mrc-lmb.cam.ac.uk"},
+]
+keywords = ["electron-microscopy", "cryo-em", "structural-biology", "image-processing"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
+]
+
+[project.urls]
+Homepage = "https://github.com/3dem/emwrap"
+"Bug Reports" = "https://github.com/3dem/emwrap/issues"
+Source = "https://github.com/3dem/emwrap"
+
+[project.scripts]
+emw = "emwrap.base:ProjectManager.main"
+emw-otf = "emwrap.mix.otf:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["emwrap*"]
+namespaces = false
+
+[tool.setuptools.dynamic]
+version = {attr = "emwrap.__version__"}
+# Pinned versions tested with Python 3.10 - 3.15
+dependencies = {file = ["requirements.txt"]}
