@@ -44,8 +44,8 @@ class TestMotioncor(unittest.TestCase):
             batch.dump_info()
             info = batch.info
             # Check that there is no failed micrograph
-            self.assertEquals(info['mc_input'], n)
-            self.assertEquals(info['mc_output'], n)
+            self.assertEqual(info['mc_input'], n)
+            self.assertEqual(info['mc_output'], n)
             self.assertFalse(any('error' in r for r in batch['results']))
 
     def test_batch_global(self):

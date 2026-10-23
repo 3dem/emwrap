@@ -41,7 +41,7 @@ class ProcessingPipeline(Pipeline, FolderManager):
     It will also add some helper functions to manipulate file
     paths relative to the working dir.
     """
-    MIC_ID = re.compile('(?P<prefix>\w+)-(?P<id>\d{6})')
+    MIC_ID = re.compile(r'(?P<prefix>\w+)-(?P<id>\d{6})')
 
     def __init__(self, args, output):
         self._args = Args(args)

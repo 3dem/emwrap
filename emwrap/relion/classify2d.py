@@ -95,7 +95,7 @@ class RelionClassify2D:
     @classmethod
     def get_iter_files(cls, batch):
         """ Return results files grouped by iteration from a given folder. """
-        r = re.compile("\w+_it(?P<iter>\d{3})_")
+        r = re.compile(r"\w+_it(?P<iter>\d{3})_")
         iterFiles = defaultdict(lambda: {})
 
         for fn in os.listdir(batch.path):
