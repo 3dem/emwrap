@@ -20,6 +20,25 @@
                     "help": "Symmetry group to apply (e.g. C1, C2, C3, D2, I1, I2, I3, I4). Passed as --sym to relion_image_handler. For asymmetric volumes use C1."
                 }
             ]
+        },
+        {
+            "label": "Compute",
+            "params": [
+                {
+                    "label": "Launchers",
+                    "paramClass": "Group",
+                    "collapsed": true,
+                    "params": [
+                        {
+                            "name": "launcher_relion",
+                            "label": "RELION",
+                            "paramClass": "StringParam",
+                            "allowsEmpty": true,
+                            "help": "Launcher to use for Relion"
+                        }
+                    ]
+                }
+            ]
         }
     ]
 }
