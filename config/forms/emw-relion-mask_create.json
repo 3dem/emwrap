@@ -122,6 +122,25 @@
                     ]
                 }
             ]
+        },
+        {
+            "label": "Compute",
+            "params": [
+                {
+                    "label": "Launchers",
+                    "paramClass": "Group",
+                    "collapsed": true,
+                    "params": [
+                        {
+                            "name": "launcher_relion",
+                            "label": "RELION",
+                            "paramClass": "StringParam",
+                            "allowsEmpty": true,
+                            "help": "Launcher to use for Relion"
+                        }
+                    ]
+                }
+            ]
         }
     ]
 }

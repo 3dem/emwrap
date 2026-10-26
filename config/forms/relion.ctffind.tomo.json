@@ -137,6 +137,25 @@
                     "help": "If positive, lower the maximum resolution used for CTF estimation as accumulated dose increases. A value of 100 e/A2 gives an exp(1) reduction factor at 100 e/A2. Set to zero or a negative value to keep the maximum resolution fixed."
                 }
             ]
+        },
+        {
+            "label": "Compute",
+            "params": [
+                {
+                    "label": "Launchers",
+                    "paramClass": "Group",
+                    "collapsed": true,
+                    "params": [
+                        {
+                            "name": "launcher_relion",
+                            "label": "RELION",
+                            "paramClass": "StringParam",
+                            "allowsEmpty": true,
+                            "help": "Launcher to use for Relion"
+                        }
+                    ]
+                }
+            ]
         }
     ]
 }
