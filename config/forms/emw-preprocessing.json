@@ -1,7 +1,7 @@
 {
     "sections": [
         {
-            "label": "Input",
+            "label": "Motion Correction",
             "params": [
                 {
                     "name": "in_movies",
@@ -11,86 +11,79 @@
                     "help": "movies.star file (e.g. from an Import Movies job). Acquisition, gain and dose per frame are read from its optics table."
                 },
                 {
-                    "label": "Motion correction",
-                    "paramClass": "Group",
-                    "params": [
-                        {
-                            "name": "motioncor.bin",
-                            "label": "Binning factor",
-                            "default": 1,
-                            "paramClass": "FloatParam",
-                            "help": "(-FtBin) Binning performed in Fourier space."
-                        },
-                        {
-                            "name": "motioncor.patch",
-                            "label": "Patches",
-                            "default": "5 5",
-                            "paramClass": "StringParam",
-                            "help": "(-Patch) Number of patches in X and Y for local alignment."
-                        },
-                        {
-                            "name": "motioncor.dose_weighting",
-                            "label": "Dose weighting",
-                            "default": true,
-                            "paramClass": "BooleanParam",
-                            "help": "(-FmDose) Use the dose per frame from the input movies for dose weighting."
-                        },
-                        {
-                            "name": "motioncor.extra_args",
-                            "label": "Extra arguments",
-                            "paramClass": "StringParam",
-                            "allowsEmpty": true,
-                            "help": "Additional MotionCor arguments, e.g. -FlipGain 1 -FmIntFile fmint.txt"
-                        }
-                    ]
+                    "name": "motioncor.bin",
+                    "label": "Binning factor",
+                    "default": 1,
+                    "paramClass": "FloatParam",
+                    "help": "(-FtBin) Binning performed in Fourier space."
                 },
                 {
-                    "label": "CTF estimation (ctffind)",
-                    "paramClass": "Group",
-                    "params": [
-                        {
-                            "name": "ctf.window",
-                            "label": "Window size (px)",
-                            "default": 512,
-                            "paramClass": "IntParam",
-                            "help": ""
-                        },
-                        {
-                            "name": "ctf.min_res",
-                            "label": "Min resolution (Å)",
-                            "default": 30.0,
-                            "paramClass": "FloatParam",
-                            "help": ""
-                        },
-                        {
-                            "name": "ctf.max_res",
-                            "label": "Max resolution (Å)",
-                            "default": 5.0,
-                            "paramClass": "FloatParam",
-                            "help": ""
-                        },
-                        {
-                            "name": "ctf.min_def",
-                            "label": "Min defocus (Å)",
-                            "default": 5000.0,
-                            "paramClass": "FloatParam",
-                            "help": ""
-                        },
-                        {
-                            "name": "ctf.max_def",
-                            "label": "Max defocus (Å)",
-                            "default": 50000.0,
-                            "paramClass": "FloatParam",
-                            "help": ""
-                        },
-                        {
-                            "name": "ctf.step_def",
-                            "label": "Defocus step (Å)",
-                            "default": 100.0,
-                            "paramClass": "FloatParam",
-                            "help": ""
-                        }
-                    ]
+                    "name": "motioncor.patch",
+                    "label": "Patches",
+                    "default": "5 5",
+                    "paramClass": "StringParam",
+                    "help": "(-Patch) Number of patches in X and Y for local alignment."
+                },
+                {
+                    "name": "motioncor.dose_weighting",
+                    "label": "Dose weighting",
+                    "default": true,
+                    "paramClass": "BooleanParam",
+                    "help": "(-FmDose) Use the dose per frame from the input movies for dose weighting."
+                },
+                {
+                    "name": "motioncor.extra_args",
+                    "label": "Extra arguments",
+                    "paramClass": "StringParam",
+                    "allowsEmpty": true,
+                    "help": "Additional MotionCor arguments, e.g. -FlipGain 1 -FmIntFile fmint.txt"
+                }
+            ]
+        },
+        {
+            "label": "CTF Estimation",
+            "params": [
+                {
+                    "name": "ctf.window",
+                    "label": "Window size (px)",
+                    "default": 512,
+                    "paramClass": "IntParam",
+                    "help": ""
+                },
+                {
+                    "name": "ctf.min_res",
+                    "label": "Min resolution (Å)",
+                    "default": 30.0,
+                    "paramClass": "FloatParam",
+                    "help": ""
+                },
+                {
+                    "name": "ctf.max_res",
+                    "label": "Max resolution (Å)",
+                    "default": 5.0,
+                    "paramClass": "FloatParam",
+                    "help": ""
+                },
+                {
+                    "name": "ctf.min_def",
+                    "label": "Min defocus (Å)",
+                    "default": 5000.0,
+                    "paramClass": "FloatParam",
+                    "help": ""
+                },
+                {
+                    "name": "ctf.max_def",
+                    "label": "Max defocus (Å)",
+                    "default": 50000.0,
+                    "paramClass": "FloatParam",
+                    "help": ""
+                },
+                {
+                    "name": "ctf.step_def",
+                    "label": "Defocus step (Å)",
+                    "default": 100.0,
+                    "paramClass": "FloatParam",
+                    "help": ""
                 }
             ]
         },
