@@ -220,4 +220,4 @@ class WarpSubsetTs(WarpBasePipeline):
             )
 
             args = self.changeSelectionArgs(settings, inputList, deselect=True)
-            self.batch_execute(f'change_selection_{key}', batch, args)
+            self.execute_checked(f'change_selection_{key}', batch, args)

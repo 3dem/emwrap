@@ -896,6 +896,25 @@ class WarpBasePipeline(ProcessingPipeline):
             subargs.update(extra)
         return subargs
 
+    def execute_checked(self, label, batch, args, **kwargs):
+        """Run a program and raise if it failed to run or exited non-zero.
+
+        Neither batch.call nor batch.execute raise on failure, so both the
+        batch error and the return code have to be checked here. Otherwise a
+        missing launcher (exit code 127) would silently leave the job state
+        untouched while the job is reported as successful.
+        """
+        returncode = self.batch_execute(label, batch, args, **kwargs)
+
+        if batch.error:
+            raise Exception(f"{label}: failed with error:\n{batch.error}")
+
+        if returncode:
+            raise Exception(f"{label}: failed with exit code {returncode}, "
+                            f"check {self.join('run.out')}")
+
+        return returncode
+
 
 class WarpBasePopulationPipeline(WarpBasePipeline):
     """Base for Warp pipelines that take a single population path and produce
@@ -963,16 +982,7 @@ class WarpBasePopulationPipeline(WarpBasePipeline):
         batch.execute raise on failure, so both have to be checked here for
         the job to be marked as failed.
         """
-        returncode = self.batch_execute(label, batch, args, **kwargs)
-
-        if batch.error:
-            raise Exception(f"{label}: failed with error:\n{batch.error}")
-
-        if returncode:
-            raise Exception(f"{label}: failed with exit code {returncode}, "
-                            f"check {self.join('run.out')}")
-
-        return returncode
+        return self.execute_checked(label, batch, args, **kwargs)
 
     def _validate_population_updated(self, population_file):
         """Fail when the program left the input population untouched."""
