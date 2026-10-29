@@ -38,13 +38,15 @@ from .project_labels import ProjectLabels
 from .project_lock import ProjectLock, read_consistent, file_signature
 
 
-
 class ProjectManager(FolderManager):
     """ Class to manipulate information about a Relion project. """
 
     JOB_CLUSTER_ID_FILE = 'job.id'
     JOB_PROCESS_ID_FILE = 'process.id'
     JOB_SCHEDULE_ID_FILE = 'schedule.id'
+
+    # Seconds after loading the project files before checking if they changed
+    RELOAD_CHECK_DELAY = 1
 
     def __init__(self, path, create=False, verbose=1, force=False):
         """ Create a ProjectManager in that path.
@@ -63,8 +65,13 @@ class ProjectManager(FolderManager):
         if not self.exists():
             raise Exception(f"Project path '{path}' does not exist")
 
+        # Signature of the project files when loaded, to reload only on changes
+        self._loadedSignature = None
+        self._loadedTime = 0
         if self.exists(self.pipeline_star):
             self.log(f"ProjectManager::: Loading project from: {path}")
+            self._loadedSignature = self._diskSignature()
+            self._loadedTime = time.time()
             self._wf = self._readPipeline()
             
         elif create:
@@ -104,6 +111,8 @@ class ProjectManager(FolderManager):
 
     def reload_from_disk(self):
         """Reload pipeline and project.json from disk into memory."""
+        self._loadedSignature = self._diskSignature()
+        self._loadedTime = time.time()
         if self.exists(self.pipeline_star):
             self._wf = self._readPipeline()
         self._data.reload()
@@ -199,6 +208,14 @@ class ProjectManager(FolderManager):
     def getJobAnnotation(self, jobId):
         return self._data.getJobAnnotation(jobId)
 
+    def getJobRuns(self, job):
+        """ Return the runs (start, end, elapsed) of a job, from info.json. """
+        return self._data.getJobRuns(getattr(job, 'id', job))
+
+    def getJobTiming(self, job):
+        """ Return the runs and the pending launch time of a job, from info.json. """
+        return self._data.getJobTiming(getattr(job, 'id', job))
+
     def saveJobAnnotation(self, jobId, runName='', comment=''):
         return self._data.saveJobAnnotation(jobId, runName, comment)
 
@@ -258,8 +275,13 @@ class ProjectManager(FolderManager):
         """
         self.log("ProjectManager::: Updating project.")
         t = Timer()
-        self.reload_from_disk()
-        signature = self._diskSignature()
+        # Reload only if the project files changed since they were loaded,
+        # not checked if just loaded (e.g. a new ProjectManager to update)
+        signature = self._loadedSignature
+        if (time.time() - self._loadedTime > self.RELOAD_CHECK_DELAY
+                and self._diskSignature() != signature):
+            self.reload_from_disk()
+            signature = self._loadedSignature
         if self._data.updateWorkflow():
             with ProjectLock(self.path, message='update project'):
                 if self._diskSignature() == signature:
@@ -364,12 +386,11 @@ class ProjectManager(FolderManager):
 
             self._data.setJobStatus(job.id, ProjectData.STATUS_SAVED)
             self._updateJobInputs(job, job_params)
-            prev_force = self._force
-            self._force = True
-            try:
-                self._data.updateWorkflow()
-            finally:
-                self._force = prev_force
+            # Only the saved job needs to be computed again, forcing all of
+            # them reads every output (minutes on network file systems), and
+            # the files of the other jobs were just checked with the lock
+            self._data.forceJobInfo(job.id)
+            self._data.updateWorkflow(checkFiles=False)
             self._persist_workflow()
 
         return job
@@ -1216,6 +1237,9 @@ class ProjectManager(FolderManager):
     def _runCmd(self, cmd, jobId, wait=False, job_params=None):
         self._saveCmd(cmd, jobId)
         folder_path = self.join(jobId)
+        # Written before launching, the run moves it to its own info
+        ProcessingPipeline.updateJobInfo(os.path.join(folder_path, 'info.json'),
+                                         launched=Pretty.now())
         if submission := self._prepareQueueSubmission(cmd, job_params, folder_path,
                                                       job_id=jobId):
             # FIXME Implement the wait option when submitting to a cluster

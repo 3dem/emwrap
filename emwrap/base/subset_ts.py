@@ -40,6 +40,12 @@ OUTPUT_NODE_LABELS = {
 MODE_EXPLICIT_NAMES = 0  # 'subset_tomo_names': space-separated rlnTomoName list.
 MODE_MATCH_SET = 1       # 'subset_match_set': keep names also found in a 2nd set.
 MODE_RANDOM = 2          # 'subset_random_count' (+ optional 'subset_random_seed').
+MODE_RANDOM_PARTICLES = 3  # 'subset_random_particles' (+ optional 'subset_random_seed'),
+                           # only for TomoCoordinates / TomoParticles inputs.
+
+MODE_LABELS = ("0 (explicit names list), 1 (match a second set), "
+               "2 (random selection of N tomograms) or 3 (random selection "
+               "of M particles)")
 
 
 class SubsetTsPipeline(ProcessingPipeline):
@@ -55,64 +61,77 @@ class SubsetTsPipeline(ProcessingPipeline):
         self.randomCount = None
         self.randomSeed = None
         self.matchSet = ''
+        # Mode 3: number of particles to pick and, once picked, the indexes
+        # (rows of the input particles table) of the selected ones.
+        self.randomParticles = None
+        self.particleIndexes = None
 
         if self.mode == MODE_EXPLICIT_NAMES:
             names = (args.get('subset_tomo_names') or '').replace(',', ' ')
             self.subsetNames = set(names.split())
         elif self.mode == MODE_MATCH_SET:
             self.matchSet = (args.get('subset_match_set') or '').strip()
-        else:  # MODE_RANDOM
-            self.randomCount = self._parseRandomCount(args.get('subset_random_count'))
+        elif self.mode == MODE_RANDOM:
+            self.randomCount = self._parseRandomCount(
+                args.get('subset_random_count'), 'subset_random_count',
+                'tomograms', 2)
+            self.randomSeed = self._parseRandomSeed(args.get('subset_random_seed'))
+        else:  # MODE_RANDOM_PARTICLES
+            self.randomParticles = self._parseRandomCount(
+                args.get('subset_random_particles'), 'subset_random_particles',
+                'particles', 3)
             self.randomSeed = self._parseRandomSeed(args.get('subset_random_seed'))
 
         # 'exclude_tilts' only makes sense when the resulting tomogram names
         # are known ahead of the run: Mode 0 (explicit list) and Mode 1
-        # (matched against a second set). In Mode 2 (random selection) the
-        # names are not known until the job actually runs, so it's ignored
-        # even if a stale value is still present in 'args'.
+        # (matched against a second set). In Modes 2 and 3 (random selection)
+        # the names are not known until the job actually runs, so it's
+        # ignored even if a stale value is still present in 'args'.
         self.excludedTiltsMap = (
-            {} if self.mode == MODE_RANDOM else self._parseExcludeTiltsParam(args))
+            {} if self.mode in (MODE_RANDOM, MODE_RANDOM_PARTICLES)
+            else self._parseExcludeTiltsParam(args))
 
     @staticmethod
     def _parseMode(value):
         """ Parse the 'mode' EnumParam value into an int: 0 (explicit
-        names), 1 (match a second set) or 2 (random selection). """
+        names), 1 (match a second set), 2 (random selection of tomograms)
+        or 3 (random selection of particles). """
         if value is None or str(value).strip() == '':
             return MODE_EXPLICIT_NAMES
         try:
             mode = int(value)
         except (TypeError, ValueError):
             raise Exception(
-                f"Invalid 'mode' value: {value!r}. Expected 0 (explicit "
-                "names list), 1 (match a second set) or 2 (random selection).")
-        if mode not in (MODE_EXPLICIT_NAMES, MODE_RANDOM, MODE_MATCH_SET):
+                f"Invalid 'mode' value: {value!r}. Expected {MODE_LABELS}.")
+        if mode not in (MODE_EXPLICIT_NAMES, MODE_MATCH_SET, MODE_RANDOM,
+                        MODE_RANDOM_PARTICLES):
             raise Exception(
-                f"Invalid 'mode' value: {mode}. Expected 0 (explicit names "
-                "list), 1 (match a second set) or 2 (random selection).")
+                f"Invalid 'mode' value: {mode}. Expected {MODE_LABELS}.")
         return mode
 
     @staticmethod
-    def _parseRandomCount(value):
-        """ Parse 'subset_random_count' (Mode 2) into a positive int. """
+    def _parseRandomCount(value, paramName, itemsLabel, mode):
+        """ Parse 'paramName' ('subset_random_count' in Mode 2 or
+        'subset_random_particles' in Mode 3) into a positive int. """
         if value is None or str(value).strip() == '':
             raise Exception(
-                "Missing or empty parameter 'subset_random_count'. Provide "
-                "the number of tomograms to randomly select (Mode 2)."
+                f"Missing or empty parameter '{paramName}'. Provide "
+                f"the number of {itemsLabel} to randomly select (Mode {mode})."
             )
         try:
             count = int(value)
         except (TypeError, ValueError):
             raise Exception(
-                f"Invalid 'subset_random_count' value: {value!r}. Expected "
+                f"Invalid '{paramName}' value: {value!r}. Expected "
                 "a positive integer.")
         if count <= 0:
             raise Exception(
-                f"'subset_random_count' must be a positive integer, got {count}.")
+                f"'{paramName}' must be a positive integer, got {count}.")
         return count
 
     @staticmethod
     def _parseRandomSeed(value):
-        """ Parse the optional 'subset_random_seed' (Mode 2) into an int,
+        """ Parse the optional 'subset_random_seed' (Modes 2 and 3) into an int,
         or None when left empty (non-reproducible random selection). """
         if value is None or str(value).strip() == '':
             return None
@@ -173,6 +192,16 @@ class SubsetTsPipeline(ProcessingPipeline):
                 f"file: {inputStar}"
             )
         return tomoStar
+
+    def _getParticlesStar(self, inputStar):
+        """Return the particles STAR file of an optimisation_set STAR file."""
+        optRow = RelionStar.readTomoOptimisationSet(inputStar)[0]
+        ptsStar = optRow._asdict().get('rlnTomoParticlesFile', '')
+        if not ptsStar:
+            raise Exception(
+                f"Missing rlnTomoParticlesFile in optimisation_set STAR file: {inputStar}"
+            )
+        return self._absPath(ptsStar)
 
     def _readGlobalTable(self, starPath):
         """Read and validate a RELION tomography global table."""
@@ -331,9 +360,18 @@ class SubsetTsPipeline(ProcessingPipeline):
         return filtered
 
     def _writeFilteredParticlesTable(self, inputStar, outputStar, subsetNames):
-        particlesTable = RelionStar.readTomoParticles(inputStar)
+        """ Copy all tables of 'inputStar' (general, optics...), keeping only
+        the particles of the subset tomograms (and, in Mode 3, only the
+        randomly selected ones, self.particleIndexes). """
+        if not RelionStar.isTomoParticles(inputStar):
+            raise Exception(
+                f"{inputStar} is not a compliant tomography particles STAR file.")
+        tables = StarFile.getTablesDict(inputStar)
+        particlesTable = tables[RelionStar.TOMO_PARTICLES_TABLE]
         filtered = Table(particlesTable.getColumnNames())
-        for row in particlesTable:
+        for i, row in enumerate(particlesTable):
+            if self.particleIndexes is not None and i not in self.particleIndexes:
+                continue
             if row.rlnTomoName in subsetNames:
                 filtered.addRow(row)
 
@@ -345,7 +383,12 @@ class SubsetTsPipeline(ProcessingPipeline):
         self.log(f"Writing {Color.green(len(filtered))} / "
                  f"{Color.bold(len(particlesTable))} particles to {Color.cyan(outputStar)}")
         with StarFile(outputStar, 'w') as sfOut:
-            sfOut.writeTable('particles', filtered, computeFormat='left', timeStamp=True)
+            sfOut.writeTimeStamp()
+            for name, table in tables.items():
+                if name == RelionStar.TOMO_PARTICLES_TABLE:
+                    sfOut.writeTable(name, filtered, computeFormat='left')
+                else:
+                    sfOut.writeTable(name, table, singleRow=(name == 'general'))
         return filtered
 
     def _detectGlobalTableType(self, starPath, globalTable):
@@ -384,16 +427,17 @@ class SubsetTsPipeline(ProcessingPipeline):
         self.writeRelionOutputNodes([[outputStar, outputNode]])
         return inputType, len(filtered)
 
+    def _absPath(self, path):
+        return path if os.path.isabs(path) else os.path.join(self.workingDir, path)
+
     def _subsetOptimisationSet(self, inputStar, subsetNames):
+        """ Subset a TomoCoordinates / TomoParticles optimisation set: its
+        tomograms and their particles, both registered as outputs. """
         optRow = RelionStar.readTomoOptimisationSet(inputStar)[0]
         optValues = optRow._asdict()
 
-        tomoStar = self._getTomogramsStar(inputStar)
-        ptsStar = optValues.get('rlnTomoParticlesFile', '')
-        if not ptsStar:
-            raise Exception(
-                f"Missing rlnTomoParticlesFile in optimisation_set STAR file: {inputStar}"
-            )
+        tomoStar = self._absPath(self._getTomogramsStar(inputStar))
+        ptsStar = self._getParticlesStar(inputStar)
 
         outTomoStar = self.join('tomograms.star')
         outParticlesStar = self.join('particles.star')
@@ -403,7 +447,9 @@ class SubsetTsPipeline(ProcessingPipeline):
         ptsTable = self._writeFilteredParticlesTable(
             ptsStar, outParticlesStar, subsetNames)
 
-        if ptsTable.hasColumn('rlnTomoParticleId'):
+        # Same rule as the project outputs (ProjectData), plus Warp's ids
+        if (ptsTable.hasColumn('rlnTomoParticleName')
+                or ptsTable.hasColumn('rlnTomoParticleId')):
             inputType = 'TomoParticles'
         else:
             inputType = 'TomoCoordinates'
@@ -414,14 +460,17 @@ class SubsetTsPipeline(ProcessingPipeline):
             sfOut.writeTable('optimisation_set', Table.fromDict(optValues),
                              computeFormat='left', timeStamp=True)
 
-        outputNode = OUTPUT_NODE_LABELS[inputType]
-        self.writeRelionOutputNodes([[outOptimisationStar, outputNode]])
+        self.writeRelionOutputNodes([
+            [outOptimisationStar, OUTPUT_NODE_LABELS[inputType]],
+            [outTomoStar, OUTPUT_NODE_LABELS['Tomograms']],
+        ])
         return inputType, len(ptsTable)
 
     def _resolveSubsetNames(self, inputStar):
         """ Compute self.subsetNames according to the selected 'mode':
         Mode 0 (explicit list), Mode 1 (match names present in a second
-        set), or Mode 2 (random selection of N). """
+        set), Mode 2 (random selection of N tomograms) or Mode 3 (random
+        selection of M particles, and the tomograms they belong to). """
         if self.mode == MODE_EXPLICIT_NAMES:
             if not self.subsetNames and not self.excludedTiltsMap:
                 raise Exception(
@@ -473,7 +522,7 @@ class SubsetTsPipeline(ProcessingPipeline):
                      f"has {Color.bold(len(matchNames))} rlnTomoName "
                      "value(s)).")
 
-        else:  # MODE_RANDOM
+        elif self.mode == MODE_RANDOM:
             allNames = self._resolveAllTomoNames(inputStar)
             if self.randomCount > len(allNames):
                 raise Exception(
@@ -486,6 +535,47 @@ class SubsetTsPipeline(ProcessingPipeline):
             seedMsg = f", seed={self.randomSeed}" if self.randomSeed is not None else ""
             self.log(f"Randomly selected {Color.green(len(self.subsetNames))} / "
                      f"{Color.bold(len(allNames))} tomogram(s){seedMsg}.")
+
+        else:  # MODE_RANDOM_PARTICLES
+            self._resolveRandomParticles(inputStar)
+
+    def _resolveRandomParticles(self, inputStar):
+        """ Mode 3: randomly pick self.randomParticles particles of a
+        TomoCoordinates / TomoParticles input (self.particleIndexes) and set
+        self.subsetNames to the tomograms they belong to. """
+        if not RelionStar.isTomoOptimisationSet(inputStar):
+            msg = ("'Random selection of M particles' mode is only valid for "
+                   "TomoCoordinates or TomoParticles inputs (optimisation_set "
+                   f"STAR file), got: {inputStar}")
+            self.log(Color.red(f"ERROR: {msg}"))
+            raise Exception(msg)
+
+        ptsStar = self._getParticlesStar(inputStar)
+        if not RelionStar.isTomoParticles(ptsStar):
+            raise Exception(
+                f"{ptsStar} is not a compliant tomography particles STAR file.")
+        particlesTable = StarFile.getTableFromFile(
+            RelionStar.TOMO_PARTICLES_TABLE, ptsStar)
+        allTomoNames = self._resolveAllTomoNames(inputStar)
+        # Only the particles of tomograms present in the set can be written.
+        candidates = [i for i, row in enumerate(particlesTable)
+                      if row.rlnTomoName in allTomoNames]
+
+        if self.randomParticles > len(candidates):
+            raise Exception(
+                f"'subset_random_particles' ({self.randomParticles}) is greater "
+                "than the number of particles available in the input "
+                f"set ({len(candidates)})."
+            )
+        rng = random.Random(self.randomSeed)
+        self.particleIndexes = set(rng.sample(candidates, self.randomParticles))
+        self.subsetNames = {particlesTable[i].rlnTomoName
+                            for i in self.particleIndexes}
+        seedMsg = f", seed={self.randomSeed}" if self.randomSeed is not None else ""
+        self.log(f"Randomly selected {Color.green(self.randomParticles)} / "
+                 f"{Color.bold(len(candidates))} particle(s){seedMsg}, from "
+                 f"{Color.green(len(self.subsetNames))} / "
+                 f"{Color.bold(len(allTomoNames))} tomogram(s).")
 
     # ------------------------------------------------------------------
     # The deselection: what each subset job decides its own way.

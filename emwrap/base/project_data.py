@@ -15,6 +15,7 @@
 # **************************************************************************
 
 import os
+import re
 import json
 from datetime import datetime
 
@@ -61,12 +62,53 @@ class ProjectData(FolderManager):
         'RELION_JOB_EXIT_ABORTED': STATUS_ABORTED
     }
 
+    # Job files that invalidate the cached job info (see _getJobInfo)
+    JOB_INFO_FILES = ('job.star', 'RELION_OUTPUT_NODES.star', 'info.json',
+                      *JOB_STATUS_FILES.keys())
+    # Job files checked on every update (also for the job status)
+    JOB_FILES = (*JOB_INFO_FILES, 'schedule.id')
+
     JOB_STATUS_ACTIVE = [STATUS_LAUNCHED, STATUS_RUNNING, STATUS_SCHEDULED]
 
     JOB_STATUS_TERMINAL = [STATUS_SUCCEEDED, STATUS_FAILED, STATUS_ABORTED]
 
     # Emwrap-specific statuses Relion stores as Scheduled in default_pipeline.star
     JOB_STATUS_EMWRAP = [STATUS_SAVED, STATUS_LAUNCHED]
+
+    # Version of the cached output info (stored with each output in
+    # project.json): increase it when the computed info changes, and list
+    # the outputs whose info changed in OUTPUT_INFO_CHANGED, so their info
+    # cached by previous versions is computed again (see _loadOutputs).
+    # Computing all outputs again is slow for large projects.
+    OUTPUT_INFO_VERSION = 2
+    # Version 2: Relion optimiser files are Classes{dim}D (were all Classes2D)
+    OUTPUT_INFO_CHANGED = re.compile(r'_optimiser\.star$')
+
+    # Relion iterative jobs whose outputs are resolved from the files of the
+    # last completed iteration, instead of the nodes registered in the pipeline,
+    # which might be placeholders never written (e.g. run_optimisation_set.star).
+    # Resolved on every update while running, and from the cache once finished.
+    RELION_ITER_JOBTYPES = ('relion.class3d', 'relion.class3d.tomo',
+                            'relion.refine3d', 'relion.refine3d.tomo',
+                            'relion.initialmodel', 'relion.initialmodel.tomo')
+    # Version of the outputs cached for these jobs, cached outputs of other
+    # versions are resolved again from the files (see _getJobInfo)
+    # Version 2: Refine3D and InitialModel jobs (were the pipeline nodes)
+    RELION_ITER_OUTPUTS_VERSION = 2
+
+    # Files of an iteration that are outputs, in the order they are listed.
+    # Refine3D iterations only have half maps (half1 is listed, as Relion does)
+    RELION_ITER_OUTPUTS = ('initial_model', 'optimiser.star',
+                           'optimisation_set.star', 'data.star', 'class', 'half1')
+    RELION_ITER_FILE = re.compile(
+        r'^run(?:_ct\d+)?_it(\d+)_(optimiser\.star|optimisation_set\.star'
+        r'|data\.star|class\d+\.mrc|half1_class\d+\.mrc)$')
+    # Final files written after the last iteration: Refine3D results (from
+    # the converged iteration, they replace the iteration files once the final
+    # optimiser is written) and the InitialModel map (with the iteration files)
+    RELION_FINAL_FILE = re.compile(
+        r'^(?:run(?:_ct\d+)?_(optimiser\.star|optimisation_set\.star|data\.star'
+        r'|class\d+\.mrc|half1_class\d+_unfil\.mrc)|(initial_model\.mrc))$')
 
     # Check terminal RELION markers before RUNNING; stale RUNNING must not
     # mask EXIT_* files left by a finished or aborted worker process.
@@ -82,6 +124,14 @@ class ProjectData(FolderManager):
         self._project = project
         self._project_json_path = self.join(PROJECT_JSON)
         self._labels = ProjectLabels(self.join(LABELS_JSON))
+        self._jobParamsCache = {}  # {job_id: (job.star mtime, params)}
+        self._computedJobs = set()  # Jobs with info computed in the last update
+        self._forcedJobs = set()  # Jobs with info to compute in the next update
+        self._outputsComputed = False  # Output info computed in the last update
+        self._jobFilesCache = {}  # {job_id: {filename: mtime}}
+        self._jobFilesChanged = False  # Job files to be saved in project.json
+        self._jobFilesFresh = False
+        self._annotatedJobsCache = None  # See _annotatedJobs
         self._wf = project.get_workflow()  # FIXME: It might be the other way around, i.e. the project has the workflow and the data manager has the project
 
         self._data = {'jobs': {}, 'outputs': {}}
@@ -94,11 +144,13 @@ class ProjectData(FolderManager):
                 self._debug(f"Error loading project data from {Color.bold(self._project_json_path)}: {e}")
 
         self._jobs = self._data.get('jobs', {})
-        self._outputs = self._data.get('outputs', {})
+        self._outputs = self._loadOutputs()
+        self._jobFiles = self._data.setdefault('job_files', {})
         self.restoreJobStatuses()
 
     def reload(self):
         """Reload project.json from disk and re-sync workflow job statuses."""
+        self._annotatedJobsCache = None
         self._wf = self._project.get_workflow()
         self._data = {'jobs': {}, 'outputs': {}}
 
@@ -111,15 +163,68 @@ class ProjectData(FolderManager):
                     f"Error loading project data from {Color.bold(self._project_json_path)}: {e}")
 
         self._jobs = self._data.get('jobs', {})
-        self._outputs = self._data.get('outputs', {})
+        self._outputs = self._loadOutputs()
+        self._jobFiles = self._data.setdefault('job_files', {})
         self.restoreJobStatuses()
 
+    def _loadOutputs(self):
+        """ Return the cached outputs info, without the info of the outputs
+        that changed (OUTPUT_INFO_CHANGED) cached by previous versions
+        (OUTPUT_INFO_VERSION), to be computed again. """
+        outputs = self._data.setdefault('outputs', {})
+        for output_id in [k for k, v in outputs.items()
+                          if v.get('version', 1) < self.OUTPUT_INFO_VERSION
+                          and self.OUTPUT_INFO_CHANGED.search(k)]:
+            del outputs[output_id]
+        return outputs
+
+    def _jobFilesMtimes(self, job_id):
+        """ Return {filename: mtime} of the existing job files (JOB_FILES),
+        and the job folder ('.'), missing if the folder does not exist.
+        Each file is checked once (stat is slow on network file systems) and
+        the result kept until the next update (see _clearJobFilesCache).
+        The files are also stored in project.json ('job_files') and only
+        checked again if the job folder or job.star changed: the other files
+        are always created, removed or renamed (e.g. info.json), changing
+        the folder mtime. """
+        mtimes = self._jobFilesCache.get(job_id)
+        if mtimes is None:
+            def _mtime(*paths):
+                try:
+                    return os.stat(self.join(*paths)).st_mtime
+                except OSError:
+                    return None
+
+            dir_mtime = _mtime(job_id)
+            stored = self._jobFiles.get(job_id)
+            if dir_mtime is None:
+                mtimes = {}
+            elif (stored and stored.get('.') == dir_mtime
+                    and stored.get('job.star') == _mtime(job_id, 'job.star')):
+                mtimes = stored
+            else:
+                mtimes = {'.': dir_mtime}
+                for fn in self.JOB_FILES:
+                    if (t := _mtime(job_id, fn)) is not None:
+                        mtimes[fn] = t
+                self._jobFiles[job_id] = mtimes
+                self._jobFilesChanged = True
+            self._jobFilesCache[job_id] = mtimes
+        return mtimes
+
+    def _clearJobFilesCache(self, job_id=None):
+        if job_id is None:
+            self._jobFilesCache = {}
+        else:
+            self._jobFilesCache.pop(job_id, None)
+
     def _isScheduledJob(self, job_id):
-        return self.exists(job_id, 'schedule.id')
+        return 'schedule.id' in self._jobFilesMtimes(job_id)
 
     def _statusFromRelionFiles(self, job_id):
+        mtimes = self._jobFilesMtimes(job_id)
         for statusFile in self.JOB_STATUS_FILE_ORDER:
-            if self.exists(job_id, statusFile):
+            if statusFile in mtimes:
                 return self.JOB_STATUS_FILES[statusFile]
         return None
 
@@ -161,6 +266,7 @@ class ProjectData(FolderManager):
         return pipeline_status
 
     def _clearJobStatusFiles(self, job_id):
+        self._clearJobFilesCache(job_id)
         for statusFile in self.JOB_STATUS_FILES:
             path = self.join(job_id, statusFile)
             if os.path.exists(path):
@@ -175,6 +281,7 @@ class ProjectData(FolderManager):
 
     def _writeJobRelionStatus(self, job_id, suffix):
         """Replace RELION job status markers with a single terminal marker."""
+        self._clearJobFilesCache(job_id)
         job_dir = self.join(job_id)
         if os.path.isdir(job_dir):
             ProcessingPipeline.output_file(suffix, job_dir)
@@ -204,6 +311,7 @@ class ProjectData(FolderManager):
 
         if job_id in self._jobs:
             del self._jobs[job_id]
+        self._jobFiles.pop(job_id, None)
 
         for output_id in list(self._outputs.keys()):
             if output_id == job_id or output_id.startswith(job_prefix):
@@ -217,7 +325,7 @@ class ProjectData(FolderManager):
         """Remove pipeline jobs whose on-disk folder no longer exists."""
         removed = []
         for job in list(self._wf.jobs()):
-            if not self.exists(job.id):
+            if '.' not in self._jobFilesMtimes(job.id):
                 self._project.log(
                     f"Removing job {job.id} from pipeline (missing folder)")
                 self.removeJobFromWorkflow(job)
@@ -274,6 +382,9 @@ class ProjectData(FolderManager):
 
     def restoreJobStatuses(self):
         """ Apply statuses from project.json after loading the Relion pipeline."""
+        # The job files checked here are reused by the next update
+        self._clearJobFilesCache()
+        self._jobFilesFresh = True
         for job in self._wf.jobs():
             job['status'] = self._resolveJobStatus(job)
 
@@ -493,7 +604,10 @@ class ProjectData(FolderManager):
                 info = f'Error: {str(e)}'
 
         if info == 'No-info':
-            datatype = self._outputTypeFromRelionNodes(output_id) or 'File'
+            # Only emwrap datatypes (capitalized), not Relion keywords (e.g. class3d)
+            datatype = self._outputTypeFromRelionNodes(output_id) or ''
+            if not datatype[:1].isupper():
+                datatype = 'File'
             return self._fileNoInfo(output_id, filepath, datatype=datatype)
 
         return {
@@ -532,7 +646,7 @@ class ProjectData(FolderManager):
         an emwrap datatype (capitalized, e.g. 'Particles'), not a lowercase
         Relion keyword (e.g. 'relion' in 'ParticleGroupMetadata.star.relion'). """
         if filepath.endswith('_optimiser.star'):
-            return self._classes2dInfo(filepath)
+            return self._classesInfo(filepath)
 
         nodeType = self._outputTypeFromRelionNodes(output_id) or ''
 
@@ -555,20 +669,59 @@ class ProjectData(FolderManager):
                     return {'type': datatype, 'info': info}
         return None
 
-    def _classes2dInfo(self, optimiserStar):
-        """ Info of 2D classes from a Relion optimiser STAR file, with the
+    def _classesInfo(self, optimiserStar):
+        """ Info of 2D/3D classes from a Relion optimiser STAR file, with the
         model and data STAR files of the same iteration (in the same folder). """
         modelStar = optimiserStar.replace('_optimiser.star', '_model.star')
         dataStar = optimiserStar.replace('_optimiser.star', '_data.star')
+        # Refine3D iterations only have the models of the half sets
+        halfStars = []
+        if not os.path.exists(modelStar):
+            halfStars = [optimiserStar.replace('_optimiser.star', f'_half{i}_model.star')
+                         for i in (1, 2)]
+            modelStar = halfStars[0]
 
         with StarFile(modelStar) as sf:
             n = sf.getTableSize('model_classes')
-            ps = float(sf.getTable('model_general')[0].rlnPixelSize)
+            general = sf.getTable('model_general')[0]
+            ps = float(general.rlnPixelSize)
+            dim = int(getattr(general, 'rlnReferenceDimensionality', 2))
+            particles = self._modelParticles(sf)
+        # Auto-refine models only have the particles of a half set: the two
+        # half models of an iteration are added, the final model is not used
+        if particles is not None and self._isAutoRefine(optimiserStar):
+            half2 = None
+            if halfStars:
+                with StarFile(halfStars[1]) as sf:
+                    half2 = self._modelParticles(sf)
+            particles = particles + half2 if half2 is not None else None
         info = f'{n} classes'
-        if os.path.exists(dataStar):
+        # The data STAR file is big (slow to read on network file systems),
+        # only counted if the model does not have the particles per group
+        if particles is None and os.path.exists(dataStar):
             with StarFile(dataStar) as sf:
-                info += f', {sf.getTableSize("particles")} particles'
-        return {'type': 'Classes2D', 'info': f'{info}, {ps:0.3f} Å/px'}
+                particles = sf.getTableSize('particles')
+        if particles is not None:
+            info += f', {particles} particles'
+        return {'type': f'Classes{dim}D', 'info': f'{info}, {ps:0.3f} Å/px'}
+
+    @staticmethod
+    def _isAutoRefine(optimiserStar):
+        """ True if the Relion optimiser STAR file is from an auto-refine
+        (Refine3D), whose models are computed from the two half sets. """
+        with StarFile(optimiserStar) as sf:
+            general = sf.getTable('optimiser_general', guessType=False)
+            return (general.hasColumn('rlnDoAutoRefine')
+                    and general[0].rlnDoAutoRefine.strip() == '1')
+
+    @staticmethod
+    def _modelParticles(sf):
+        """ Number of particles of a Relion model STAR file, from its groups
+        table (rlnGroupNrParticles), or None if not available. """
+        groups = sf.getTable('model_groups') if 'model_groups' in sf else None
+        if not groups or not groups.hasColumn('rlnGroupNrParticles'):
+            return None
+        return sum(int(row.rlnGroupNrParticles) for row in groups) or None
 
     @staticmethod
     def _multiClasses2dInfo(sf):
@@ -594,20 +747,23 @@ class ProjectData(FolderManager):
                 if output_id not in outputs:
                     outputs.append(output_id)
 
-        _add(*(o.id for o in job.outputs))
-        _add(*self._relionOutputNodes(job_id))
-        _add(*self._jobs.get(job_id, {}).get('outputs', []))
+        if self._isRelionIterJob(job):
+            # Only the files written so far. The nodes registered by Relion
+            # (e.g. run_it025_*, run_optimisation_set.star) are ignored, since
+            # some might not be written and the others are not written until
+            # the last iteration
+            _add(*self._relionIterOutputs(job_id))
+        else:
+            _add(*(o.id for o in job.outputs))
+            _add(*self._relionOutputNodes(job_id))
+            _add(*self._jobs.get(job_id, {}).get('outputs', []))
 
         # Infer expected outputs from downstream job parameter references.
         job_prefix = f'{job_id}/'
         for other in self._wf.jobs():
             if other.id == job_id:
                 continue
-            job_star = self.join(other.id, 'job.star')
-            if not os.path.exists(job_star):
-                continue
-            params = RelionStar.read_jobstar(job_star)
-            for value in params.values():
+            for value in self._jobParams(other.id).values():
                 if not isinstance(value, str):
                     continue
                 rel_value = self._outputId(value, job_id)
@@ -616,13 +772,94 @@ class ProjectData(FolderManager):
 
         return outputs
 
+    def _isRelionIterJob(self, job):
+        return job['jobtype'] in self.RELION_ITER_JOBTYPES
+
+    def _jobNodeTypes(self, job, outputs):
+        """ Relion node types of the job outputs, kept apart from our datatypes.
+        For Relion iterative jobs, the types registered by the pipeliner in
+        job_pipeline.star (for the last iteration) are used for the outputs
+        of any iteration with the same suffix (e.g. class001.mrc). """
+        if not self._isRelionIterJob(job):
+            return {self._outputId(name, job.id): label
+                    for name, label in self._relionOutputNodes(job.id).items()
+                    if RelionStar.isNodeTypeLabel(label)}
+
+        job_pipeline = self.join(job.id, 'job_pipeline.star')
+        if not os.path.exists(job_pipeline):
+            return {}
+
+        def _suffix(path):
+            fn = os.path.basename(path)
+            if m := self.RELION_ITER_FILE.match(fn):
+                return m.group(2)
+            if m := self.RELION_FINAL_FILE.match(fn):
+                return m.group(1) or m.group(2)
+            return None
+
+        table = StarFile.getTableFromFile('pipeline_nodes', job_pipeline) or []
+        labels = {_suffix(row.rlnPipeLineNodeName): row.rlnPipeLineNodeTypeLabel
+                  for row in table
+                  if row.rlnPipeLineNodeName.startswith(f'{job.id}/')
+                  and RelionStar.isNodeTypeLabel(row.rlnPipeLineNodeTypeLabel)}
+        return {o: labels[_suffix(o)] for o in outputs if _suffix(o) in labels}
+
+    def _relionIterOutputs(self, job_id):
+        """ Return the outputs of the last completed iteration of a Relion
+        iterative job (the optimiser STAR file is written last), or its final
+        files once written (see RELION_FINAL_FILE). """
+        job_dir = self.join(job_id)
+        if not os.path.isdir(job_dir):
+            return []
+
+        iterations = {}
+        final = {}
+        for fn in os.listdir(job_dir):
+            if m := self.RELION_ITER_FILE.match(fn):
+                iterations.setdefault(int(m.group(1)), []).append((m.group(2), fn))
+            elif m := self.RELION_FINAL_FILE.match(fn):
+                final[m.group(1) or m.group(2)] = fn
+
+        completed = [it for it, files in iterations.items()
+                     if any(s == 'optimiser.star' for s, _ in files)]
+        if 'optimiser.star' in final:
+            files = list(final.items())
+        else:
+            files = iterations[max(completed)] if completed else []
+            files += [(s, fn) for s, fn in final.items() if s == 'initial_model.mrc']
+
+        def _order(item):
+            suffix, fn = item
+            index = next(i for i, s in enumerate(self.RELION_ITER_OUTPUTS)
+                         if suffix.startswith(s))
+            return index, fn
+
+        return [os.path.join(job_id, fn) for _, fn in sorted(files, key=_order)]
+
+    def _jobParams(self, job_id):
+        """ Return the params of the job.star file of a job, read once
+        while the file does not change (they are needed for every job when
+        inferring the outputs referenced by other jobs). """
+        # The job.star mtime is already checked with the job files
+        if (mtime := self._jobFilesMtimes(job_id).get('job.star')) is None:
+            return {}
+        job_star = self.join(job_id, 'job.star')
+        cached = self._jobParamsCache.get(job_id)
+        if cached is None or cached[0] != mtime:
+            cached = (mtime, RelionStar.read_jobstar(job_star))
+            self._jobParamsCache[job_id] = cached
+        return cached[1]
+
     def _extendJobInfoOutputs(self, job_id, jobInfo, job=None):
         """Merge the latest output ids for an active job without invalidating cache."""
+        job = job or self._wf.getJob(job_id)
         outputs = self._collectJobOutputIds(job_id, job=job)
         if outputs == jobInfo.get('outputs'):
             return jobInfo
         extended = dict(jobInfo)
         extended['outputs'] = outputs
+        if self._isRelionIterJob(job):
+            extended['nodetypes'] = self._jobNodeTypes(job, outputs)
         return extended
 
     def _optimisationSetLinkedFiles(self, optimisation_set_path):
@@ -688,6 +925,8 @@ class ProjectData(FolderManager):
     def _computeJobInfo(self, jobId, jobFiles):
         jobStarFile = jobFiles[0]
 
+        self._computedJobs.add(jobId)
+
         if not os.path.exists(jobStarFile):
             return {
                 'inputs': [],
@@ -717,18 +956,50 @@ class ProjectData(FolderManager):
         # Compute outputs info
         outputs = self._collectJobOutputIds(jobId, job=job)
 
+        nodetypes = self._jobNodeTypes(job, outputs)
+
         # Resolve status: RELION marker files, then project.json, then pipeline
         status = self._resolveJobStatus(job)
         job['status'] = status
 
-        return {
+        info = {
             'inputs': inputs,
             'outputs': outputs,
+            'nodetypes': nodetypes,
+            **self._readJobTiming(jobId),
             'status': status
         }
+        if self._isRelionIterJob(job):
+            info['iterOutputsVersion'] = self.RELION_ITER_OUTPUTS_VERSION
+        return info
+
+    def _readJobTiming(self, job_id):
+        """ Runs (launched, start, end, elapsed, status) and the pending
+        launch time (not started yet) from the job info.json file, kept in
+        the job info to not read all the info.json files on every load. """
+        info = ProcessingPipeline.readJobInfo(self.join(job_id, 'info.json')) or {}
+        return {
+            'runs': info.get('runs') or [],
+            'launched': info.get('launched')
+        }
+
+    def getJobTiming(self, job_id):
+        """ Return the runs and the pending launch time of a job from its
+        cached info. """
+        info = self._jobs.get(job_id)
+        if info is None or 'runs' not in info:
+            return self._readJobTiming(job_id)
+        return {'runs': info['runs'], 'launched': info.get('launched')}
+
+    def getJobRuns(self, job_id):
+        """ Return the runs of a job from its cached info. """
+        return self.getJobTiming(job_id)['runs']
 
     def _set_info(self, info_dict, item_id, info):
         info['ts'] = datetime.now().timestamp()
+        if info_dict is self._outputs:
+            info['version'] = self.OUTPUT_INFO_VERSION
+            self._outputsComputed = True
         self._debug(f"Setting info for {item_id}, ts: {Pretty.timestamp(info['ts'])}")
         info_dict[item_id] = info
 
@@ -773,6 +1044,11 @@ class ProjectData(FolderManager):
                 self.getOutputInfo(data.id)
         self.save()
 
+    def _canPruneOutputs(self, job):
+        """ Outputs of active jobs might not be listed yet, except for Relion
+        iterative jobs, resolved from the files of the last iteration. """
+        return not self.isActiveJob(job) or self._isRelionIterJob(job)
+
     def _updateJob(self, job, jobInfo, prune_outputs=False):
         """ Update the job data base on the updated info. """
         def _update_data(data, data_id):
@@ -807,14 +1083,25 @@ class ProjectData(FolderManager):
 
         outputs = jobInfo.get('outputs', [])
         output_ids = set(outputs)
+        # Info cached before Relion node types and runs were stored: add them
+        filled = 'nodetypes' not in jobInfo or 'runs' not in jobInfo
+        if 'nodetypes' not in jobInfo:
+            jobInfo['nodetypes'] = self._jobNodeTypes(job, outputs)
+        if 'runs' not in jobInfo:
+            jobInfo.update(self._readJobTiming(job.id))
+        nodetypes = jobInfo['nodetypes']
         for o in outputs:
             data = job.getOutput(o) if job.hasOutput(o) else job.registerOutput(o)
             _update_data(data, o)
+            if nodetype := nodetypes.get(o):
+                data['nodetype'] = nodetype
 
-        if prune_outputs and not self.isActiveJob(job):
+        pruned = False
+        if prune_outputs and self._canPruneOutputs(job):
             for output in list(job.outputs):
                 if output.id not in output_ids and not output.childs:
                     self._removeJobOutput(job, output.id)
+                    pruned = True
 
         status = self._resolveJobStatus(job)
         cached = self._jobs.get(job.id, {})
@@ -834,25 +1121,40 @@ class ProjectData(FolderManager):
             info['status'] = status
             self._set_info(self._jobs, job.id, info)
             return True
-        return False
+        # Pruned nodes need to be removed from default_pipeline.star
+        return pruned or filled
 
-    def updateWorkflow(self):
+    def updateWorkflow(self, checkFiles=True):
+        """ Update the jobs info and status. If checkFiles is False, the job
+        files checked in the previous update are reused (e.g. updating again
+        while holding the project lock, after changing a job). """
+        self._computedJobs = set()
+        self._outputsComputed = False
+        # Check the job files again, unless just checked when loading
+        if checkFiles and not self._jobFilesFresh:
+            self._clearJobFilesCache()
+        self._jobFilesFresh = False
         updated = bool(self.removeMissingJobs())
         for job in self._wf.jobs():
             info, computed = self._getJobInfo(job.id)
             active = self.isActiveJob(job)
-            if active or not info.get('outputs'):
+            if active:
                 extended = self._extendJobInfoOutputs(job.id, info, job=job)
                 if extended['outputs'] != info.get('outputs'):
                     info = extended
                     computed = True
-            if (self._updateJob(job, info, prune_outputs=computed and not active)
+            # Outputs of Relion iterative jobs are only the cached ones, so
+            # nodes added to the pipeline by Relion are always pruned
+            prune = computed or self._isRelionIterJob(job)
+            if (self._updateJob(job, info, prune_outputs=prune)
                     or computed):
                 updated = True
             else:
                 self._debug(f"{Color.cyan('JOB')}: Info for {Color.bold(job.id)} is up to date")
 
-        return updated
+        # Computed output info (and checked job files) also needs to be saved,
+        # otherwise it is computed again on every load (slow for large files)
+        return updated or self._outputsComputed or self._jobFilesChanged
 
     def _getJobInfo(self, job_id):
         self._debug(f"{Color.cyan('JOB')}: Getting info for {Color.bold(job_id)}")
@@ -860,11 +1162,33 @@ class ProjectData(FolderManager):
         # such as default_pipeline.star and project.json change whenever any job
         # is updated, which would otherwise recompute and prune inactive jobs while
         # another job is running and the GUI auto-refreshes.
-        jobFiles = [self.join(job_id, fn) for fn in [
-            'job.star', 'RELION_OUTPUT_NODES.star', 'info.json',
-            *self.JOB_STATUS_FILES.keys(),
-        ]]
-        return self._get_info(self._jobs, job_id, jobFiles, self._computeJobInfo)
+        cached = self._jobs.get(job_id)
+        # Outputs of Relion iterative jobs cached before they were resolved
+        # from the files (of this version) might be placeholders
+        if (cached and 'outputs' in cached
+                and cached.get('iterOutputsVersion') != self.RELION_ITER_OUTPUTS_VERSION
+                and (job := self._wf.getJob(job_id, None))
+                and self._isRelionIterJob(job)):
+            cached = None
+
+        mtimes = self._jobFilesMtimes(job_id)
+        if (cached and not self._project.force
+                and job_id not in self._forcedJobs
+                and all(mtimes.get(fn, 0) <= cached['ts']
+                        for fn in self.JOB_INFO_FILES)):
+            return cached, False
+
+        jobFiles = [self.join(job_id, fn) for fn in self.JOB_INFO_FILES]
+        info = self._computeJobInfo(job_id, jobFiles)
+        self._set_info(self._jobs, job_id, info)
+        self._forcedJobs.discard(job_id)
+        return info, True
+
+    def forceJobInfo(self, job_id):
+        """ Compute the info of this job in the next update, even if its
+        files did not change (e.g. job.star saved in the same second). """
+        self._forcedJobs.add(job_id)
+        self._clearJobFilesCache(job_id)
 
     def getJobInfo(self, job_id):
         info, computed = self._getJobInfo(job_id)
@@ -881,10 +1205,24 @@ class ProjectData(FolderManager):
     def _annotationPath(self, jobId):
         return self.join(EMHUB_DIR, Path.rmslash(jobId), 'annotation.json')
 
+    def _annotatedJobs(self):
+        """ Return the ids of the jobs with a folder in .emhub (that might
+        have an annotation), listing the folder once instead of checking
+        the annotation file of every job (slow on network file systems). """
+        if self._annotatedJobsCache is None:
+            jobs = set()
+            emhub_dir = self.join(EMHUB_DIR)
+            for entry in os.scandir(emhub_dir) if os.path.isdir(emhub_dir) else []:
+                if entry.is_dir():
+                    jobs.update(f'{entry.name}/{job}' for job in os.listdir(entry.path))
+            self._annotatedJobsCache = jobs
+        return self._annotatedJobsCache
+
     def getJobAnnotation(self, jobId):
         """Return run name and comment stored for a workflow job."""
         path = self._annotationPath(jobId)
-        if not os.path.isfile(path):
+        if (Path.rmslash(jobId) not in self._annotatedJobs()
+                or not os.path.isfile(path)):
             return {'runName': '', 'comment': ''}
 
         try:
@@ -914,12 +1252,22 @@ class ProjectData(FolderManager):
             'comment': str(comment or ''),
         }
         atomic_write_json(path, payload, indent=2)
+        if self._annotatedJobsCache is not None:
+            self._annotatedJobsCache.add(jobId)
         return payload
 
     def getOutputInfo(self, output_id):
         self._debug(f"{Color.warn('OUTPUT')}: Getting info for {Color.bold(output_id)}")
         job = self._outputParentJob(output_id)
         force = self._project.force
+        cached = self._outputs.get(output_id)
+
+        # Outputs of finished jobs do not change unless the job does, so the
+        # cached info is used without checking the files (slow on network FS)
+        if (not force and cached and job is not None
+                and not self.isActiveJob(job)
+                and job.id not in self._computedJobs):
+            return cached
 
         if self._isPendingOutput(output_id):
             if not force:
@@ -955,6 +1303,7 @@ class ProjectData(FolderManager):
     def save(self):
         os.makedirs(os.path.dirname(self._project_json_path), exist_ok=True)
         atomic_write_json(self._project_json_path, self._data)
+        self._jobFilesChanged = False
 
     def isActiveJob(self, job):
         return job['status'] in self.JOB_STATUS_ACTIVE

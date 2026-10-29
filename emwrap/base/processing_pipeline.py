@@ -67,6 +67,8 @@ class ProcessingPipeline(Pipeline, FolderManager):
             'batches': {}
         }
         self.infoFile = self.join('info.json')
+        # (runInfo, timer) of the run in progress, see __endRun
+        self._currentRun = None
         # Lock used when requiring single thread running output generation code
         self.outputLock = threading.Lock()
 
@@ -203,8 +205,30 @@ class ProcessingPipeline(Pipeline, FolderManager):
         self.output_file(suffix, self.path)
 
     def __abort(self, signum, frame):
+        self.__endRun('aborted')
         self.__file('EXIT_ABORTED')
         sys.exit(0)
+
+    def __endRun(self, status):
+        """ Store end time, elapsed and status of the current run in
+        info.json, also when the run fails or is aborted. """
+        if self._currentRun is None:
+            return
+        runInfo, t = self._currentRun
+        self._currentRun = None
+        runInfo['end'] = Pretty.now()
+        runInfo['elapsed'] = str(t.getElapsedTime())
+        runInfo['status'] = status
+        try:
+            self.readInfo()
+            runs = self.info['runs']
+            if runs and runs[-1].get('start') == runInfo['start']:
+                runs[-1] = runInfo
+            else:
+                runs.append(runInfo)
+            self.writeInfo()
+        except Exception as e:
+            self.log(f"WARNING: Could not store the run time in {self.infoFile}: {e}")
 
     @staticmethod
     def do_clean():
@@ -293,8 +317,13 @@ class ProcessingPipeline(Pipeline, FolderManager):
                 'end': None,
                 'elapsed': None
             }
+            # The pending launch time (written by the ProjectManager when
+            # launching) belongs to this run, to report its time in the queue
+            if launched := self.info.pop('launched', None):
+                runInfo['launched'] = launched
             self.info['runs'].append(runInfo)
             self.writeInfo()
+            self._currentRun = (runInfo, t)
             self.__file('RUNNING')
             self.__create_tmp()
             self.prerun()
@@ -312,15 +341,11 @@ class ProcessingPipeline(Pipeline, FolderManager):
                       f"{Color.bold('rm -rf %s' % self.tmpDir)}")
 
             # Update info.json file with end time
-            self.readInfo()
-            self.info['runs'][-1] = runInfo
-            runInfo['end'] = Pretty.now()
-            runInfo['elapsed'] = str(t.getElapsedTime())
-            self.writeInfo()
-
+            self.__endRun('finished')
             self.__file('EXIT_SUCCESS')
 
         except Exception as e:
+            self.__endRun('failed')
             self.__file('EXIT_FAILURE')
             traceback.print_exc()
 
@@ -428,17 +453,32 @@ class ProcessingPipeline(Pipeline, FolderManager):
         except (OSError, json.JSONDecodeError):
             return default
 
+    @staticmethod
+    def writeJobInfo(info_file, info):
+        """ Write a job info.json file atomically. """
+        tmpFile = f'{info_file}.tmp'
+        with open(tmpFile, 'w') as f:
+            json.dump(info, f, indent=4)
+        os.replace(tmpFile, info_file)
+
+    @staticmethod
+    def updateJobInfo(info_file, **kwargs):
+        """ Update some keys of a job info.json file, e.g. the 'launched'
+        time written when the job is launched, moved to the run when it starts. """
+        info = ProcessingPipeline.readJobInfo(info_file, default=None) or {}
+        info.update(kwargs)
+        ProcessingPipeline.writeJobInfo(info_file, info)
+
     def readInfo(self):
         info = self.readJobInfo(self.infoFile, default=None)
         if info is not None:
-            self.info = info
+            # Keep the default keys, info.json might only have the
+            # 'launched' time written when the job was launched
+            self.info.update(info)
 
     def writeInfo(self):
         """ Write file with internal information to info.json. """
-        tmpFile = f'{self.infoFile}.tmp'
-        with open(tmpFile, 'w') as f:
-            json.dump(self.info, f, indent=4)
-        os.replace(tmpFile, self.infoFile)
+        self.writeJobInfo(self.infoFile, self.info)
 
     def writeRelionOutputNodes(self, outputs):
         """ Write expected file by relion in case the jobs are launched

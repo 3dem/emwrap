@@ -67,7 +67,8 @@ class SubsetClassesPipeline(ProcessingPipeline):
     def _writeParticles(self, inputStar, outputStar):
         """ Copy all tables from 'inputStar', keeping only the rows of the
         'particles' table that belong to the selected classes. """
-        tables = StarFile.getTablesDict(inputStar)
+        # Values as strings, written back exactly as in the input
+        tables = StarFile.getTablesDict(inputStar, guessType=False)
         particles = tables.get('particles')
         if not particles:
             raise Exception(f"Could not read 'particles' table from {inputStar}")
