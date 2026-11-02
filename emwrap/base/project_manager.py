@@ -315,6 +315,14 @@ class ProjectManager(FolderManager):
                             for pid in ids)
                 )
 
+        if not ProcessingConfig.validate_paths():
+            # Paths outside the project may only exist on the compute nodes
+            skip_parents = skip_path_exists
+            skip_path_exists = lambda value: (
+                self._is_external_path(value)
+                or bool(skip_parents and skip_parents(value))
+            )
+
         errors = JobForm.validate_params(
             jobForm, params,
             project_path=self.path,
@@ -323,7 +331,18 @@ class ProjectManager(FolderManager):
         if errors:
             raise JobValidationError(errors)
 
-    
+    def _is_external_path(self, param_value):
+        """Return True when a param value is an absolute path outside the project."""
+        if not isinstance(param_value, str):
+            return False
+
+        value = param_value.strip()
+        if not os.path.isabs(value):
+            return False
+
+        project = os.path.abspath(self.path)
+        return os.path.commonpath([project, os.path.abspath(value)]) != project
+
     def _param_references_job(self, param_value, job_id):
         """Return True when a param value points at a job folder or its outputs."""
         if not isinstance(param_value, str):

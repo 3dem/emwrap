@@ -258,6 +258,15 @@ class ProcessingConfig:
         return cls._get_config().get('scratch')
 
     @classmethod
+    def validate_paths(cls):
+        """ Return whether job paths outside the project folder (e.g. models,
+        scratch or launcher scripts) must exist on the machine validating the
+        job (EMWRAP_CONFIG['validate_paths'], True by default). Set it to false
+        when jobs run on compute nodes with paths not visible on the server.
+        Paths inside the project folder are always validated. """
+        return bool(cls._get_config().get('validate_paths', True))
+
+    @classmethod
     def get_testdata_path(cls, name, validate=False):
         from emwrap.tests.test_data import TestData
         return TestData.get_dataset_path(name, validate=validate)
