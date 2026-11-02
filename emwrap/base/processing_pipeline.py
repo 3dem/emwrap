@@ -50,7 +50,11 @@ class ProcessingPipeline(Pipeline, FolderManager):
         Pipeline.__init__(self, debug=args.get('debug', False))
         self.workingDir = self.__validate(workingDir, 'working')
         self.outputDir = self.__validate(output, 'output')
-        self.scratchDir = self.__validate(scratchDir, 'scratch') if scratchDir else None
+        # The scratch might only exist in the compute nodes running the
+        # batches (EMWRAP_CONFIG['validate_paths'] = false)
+        if scratchDir and ProcessingConfig.validate_paths():
+            self.__validate(scratchDir, 'scratch')
+        self.scratchDir = scratchDir or None
 
         # Relative prefix from the working dir to output dir
         self.outputPrefix = os.path.relpath(self.outputDir, self.workingDir)
@@ -114,7 +118,7 @@ class ProcessingPipeline(Pipeline, FolderManager):
     def __create_tmp(self):
         self.__clean_tmp()
 
-        if self.scratchDir:
+        if self.scratchDir and os.path.exists(self.scratchDir):
             scratchTmp = tempfile.mkdtemp(dir=self.scratchDir)
             Process.system(f"ln -s {scratchTmp} {self.tmpDir}")
         else:
