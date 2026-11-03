@@ -1,6 +1,17 @@
 {
     "name": "emw-relion-mask_create",
     "help": "Create a 3D mask using relion_mask_create. Two modes: (1) From volume — binarize an input map with a threshold; (2) De novo — create a spherical/circular mask from box size and radii.",
+    "wizards": [
+        {
+            "id": "mask_create",
+            "label": "Mask creation wizard",
+            "adaptor": "emwrap.relion.wizards.RelionMaskCreateAdaptor",
+            "params": ["relion_mask_create.volume.ini_threshold",
+                       "relion_mask_create.volume.extend_inimask",
+                       "relion_mask_create.volume.width_soft_edge",
+                       "relion_mask_create.volume.lowpass"]
+        }
+    ],
     "sections": [
         {
             "label": "Mask creation",

@@ -2,6 +2,14 @@
     "name": "relion.refine3d.tomo",
     "label": "Relion Tomo Refine",
     "help": "RELION 3D auto-refine for subtomogram averaging (Refine3D, tomography). Matches RelionJob::initialiseAutorefineJob with is_tomo=true: relion_refine --auto_refine --split_random_halves --ios, optional direct tomography inputs, and gold-standard FSC refinement.",
+    "wizards": [
+        {
+            "id": "mask",
+            "label": "Mask wizard",
+            "adaptor": "emwrap.relion.wizards.RelionReferenceMaskAdaptor",
+            "params": ["fn_mask", "particle_diameter"]
+        }
+    ],
     "sections": [
         {
             "label": "I/O",
@@ -71,7 +79,7 @@
                             "name": "fn_mask",
                             "label": "Reference mask (optional):",
                             "paramClass": "PathParam",
-                            "pointerClass": "Volume",
+                            "pointerClass": "VolumeMask",
                             "allowsEmpty": true,
                             "help": "If no mask is provided, a soft spherical mask based on the particle diameter will be used.\n\nOtherwise, provide a Spider/mrc map containing a (soft) mask with the same dimensions as the reference(s), and values between 0 and 1, with 1 being 100% protein and 0 being 100% solvent. The reconstructed reference map will be multiplied by this mask.\n\nIn some cases, for example for non-empty icosahedral viruses, it is also useful to use a second mask. For all white (value 1) pixels in this second mask the corresponding pixels in the reconstructed map are set to the average value of these pixels. Thereby, for example, the higher density inside the virion may be set to a constant. Note that this second mask should have one-values inside the virion and zero-values in the capsid and the solvent areas. To use a second mask, use the additional option --solvent_mask2, which may given in the Additional arguments line."
                         },

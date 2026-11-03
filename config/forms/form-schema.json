@@ -13,6 +13,34 @@
         "$ref": "#/$defs/section"
       },
       "minItems": 1
+    },
+    "wizards": {
+      "type": "array",
+      "description": "Wizards that set some params of the form (see emwrap docs/wizards.md)",
+      "items": {
+        "type": "object",
+        "required": ["id", "adaptor", "params"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Wizard id, unique in the form"
+          },
+          "label": {
+            "type": "string",
+            "description": "Title of the wizard dialog and tooltip of its button"
+          },
+          "adaptor": {
+            "type": "string",
+            "description": "Full name of the WizardAdaptor class, e.g. emwrap.warp.wizards.WarpExportParticlesAdaptor"
+          },
+          "params": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Names of the params that show the wizard button"
+          }
+        },
+        "additionalProperties": false
+      }
     }
   },
   "$defs": {

@@ -127,8 +127,8 @@
                 "gpus": "2",
                 "input_tomograms": "WarpCtfRec/job004/tomograms.star",
                 "pytom.angular-search": "20",
-                "pytom.mask": "PyTom/job008/emd_15854_mask.mrc",
-                "pytom.template": "PyTom/job008/emd_15854.mrc",
+                "pytom.mask": "PyTom/job008/emd_15854_template_mask.mrc",
+                "pytom.template": "PyTom/job008/emd_15854_template.mrc",
                 "do_queue": false,
                 "pytom.extra_args": "--rng-seed 1000",
                 "launcher": ""

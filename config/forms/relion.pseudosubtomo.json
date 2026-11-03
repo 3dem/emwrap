@@ -1,6 +1,14 @@
 {
     "name": "relion.pseudosubtomo",
     "label": "Relion Extract Subtomograms",
+    "wizards": [
+        {
+            "id": "export_box",
+            "label": "Box and pixel size wizard",
+            "adaptor": "emwrap.relion.wizards.RelionPseudoSubtomoAdaptor",
+            "params": ["box_size_angst", "binned_size_pix"]
+        }
+    ],
     "sections": [
         {
             "label": "I/O",

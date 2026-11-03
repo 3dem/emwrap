@@ -2,6 +2,14 @@
     "name": "emw-warp-export_particles",
     "label": "Warp - Export Particles",
     "help": "Warp wrapper to export particle images (2D or 3D) from tilt-series for subtomogram averaging. It will run the following program:\n\n*REFERENCES*:\n[[https://warpem.github.io/warp/reference/warptools/api/tilt_series/?h=ts_export_particles#ts_export_particles][ts_export_particles]]",
+    "wizards": [
+        {
+            "id": "export_box",
+            "label": "Box and pixel size wizard",
+            "adaptor": "emwrap.warp.wizards.WarpExportParticlesAdaptor",
+            "params": ["ts_export_particles.output_angpix", "ts_export_particles.box"]
+        }
+    ],
     "sections": [
         {
             "label": "General",

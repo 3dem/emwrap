@@ -258,3 +258,25 @@ This object sets default values for `--tomogram-ctf-model` and `--rng-seed`.
 ### Empty Objects
 
 An empty object `{}` can be used as a spacer in the UI to create a visual separation between parameters.
+
+---
+
+## Wizards
+
+A form can declare `wizards`: dialogs that set some of its params
+interactively (e.g. the box and pixel size of exported particles). Each one
+names the `WizardAdaptor` class that maps the params, and the params that
+show the wizard button:
+
+```json
+"wizards": [
+    {
+        "id": "export_box",
+        "label": "Box and pixel size wizard",
+        "adaptor": "emwrap.warp.wizards.WarpExportParticlesAdaptor",
+        "params": ["ts_export_particles.output_angpix", "ts_export_particles.box"]
+    }
+]
+```
+
+See [docs/wizards.md](../../docs/wizards.md) for the architecture and how to add a wizard.
