@@ -2,6 +2,14 @@
     "name": "relion.refine3d.tomo",
     "label": "Relion Tomo Refine",
     "help": "RELION 3D auto-refine for subtomogram averaging (Refine3D, tomography). Matches RelionJob::initialiseAutorefineJob with is_tomo=true: relion_refine --auto_refine --split_random_halves --ios, optional direct tomography inputs, and gold-standard FSC refinement.",
+    "wizards": [
+        {
+            "id": "mask",
+            "label": "Mask wizard",
+            "adaptor": "emwrap.relion.wizards.RelionReferenceMaskAdaptor",
+            "params": ["fn_mask", "particle_diameter"]
+        }
+    ],
     "sections": [
         {
             "label": "I/O",

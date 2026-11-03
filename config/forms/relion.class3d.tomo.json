@@ -2,6 +2,14 @@
     "name": "relion.class3d.tomo",
     "label": "Relion Tomo 3D Classification",
     "help": "RELION 3D classification for subtomogram averaging (Class3D, tomography). Matches RelionJob::initialiseClass3DJob with is_tomo=true: relion_refine with --ios or direct tomography inputs, a reference map, and optional mask.",
+    "wizards": [
+        {
+            "id": "mask",
+            "label": "Mask wizard",
+            "adaptor": "emwrap.relion.wizards.RelionReferenceMaskAdaptor",
+            "params": ["fn_mask", "particle_diameter"]
+        }
+    ],
     "sections": [
         {
             "label": "I/O",

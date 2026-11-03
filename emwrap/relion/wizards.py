@@ -17,6 +17,7 @@
 """ Wizard adaptors of the Relion job forms (see emwrap.base.wizards). """
 
 from emwrap.base.wizards import (WizardAdaptor, ExportTomoParticlesWizard,
+                                 VolumeMaskWizard,
                                  tomograms_from_optimisation_set,
                                  to_bool, to_float)
 
@@ -61,3 +62,25 @@ class RelionPseudoSubtomoAdaptor(WizardAdaptor):
             'box_size_angst': boxAngst,
             'binned_size_pix': outBox
         }
+
+
+class RelionReferenceMaskAdaptor(WizardAdaptor):
+    """ relion.class3d.tomo, relion.refine3d.tomo <-> VolumeMaskWizard
+
+    The volume is the reference map (fn_ref) and the mask is the reference
+    mask (fn_mask). Without a mask, the wizard shows the spherical mask of
+    the mask diameter (particle_diameter), which OK sets back.
+    """
+    wizard = VolumeMaskWizard
+
+    def toWizard(self, params):
+        return {
+            'volume': params.get('fn_ref'),
+            'mask': params.get('fn_mask'),
+            'diameter': params.get('particle_diameter')
+        }
+
+    def fromWizard(self, outputs, params):
+        if outputs['mask_type'] == 'map':
+            return {}
+        return {'particle_diameter': outputs['diameter']}

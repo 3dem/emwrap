@@ -9,9 +9,13 @@ back into the form.
 Wizards never save or launch the job. OK only fills form params; the user
 still clicks Save or Launch, so the usual validation applies.
 
-The first wizard is `ExportTomoParticlesWizard` (box and pixel size of the
-particles exported from tilt-series), used by Warp `emw-warp-export_particles`
-and Relion `relion.pseudosubtomo`.
+The wizards so far:
+
+- `ExportTomoParticlesWizard`: box and pixel size of the particles exported
+  from tilt-series, used by Warp `emw-warp-export_particles` and Relion
+  `relion.pseudosubtomo`.
+- `VolumeMaskWizard`: the mask of a map (a mask map or a sphere), used by
+  Relion `relion.class3d.tomo` and `relion.refine3d.tomo`.
 
 ## Architecture
 
@@ -218,14 +222,36 @@ them) and emflow displays them.
   form has no diameter: the wizard uses half of the box and OK does not save
   it.
 
+## Example: VolumeMaskWizard
+
+- **Wizard** (`emwrap/base/wizards.py`): inputs `volume` (required), `mask`
+  (a mask map, optional) and `diameter` (Å, the spherical mask). The map and
+  the mask must exist and have the same dimensions (`read_volume_header`,
+  from the MRC header). A mask map takes precedence over the sphere; the
+  diameter defaults to 80% of the box. `data.volume` and `data.mask` are
+  `{kind: 'volume', path, dimensions, voxelSize}`. On OK, a sphere needs a
+  positive diameter (a warning if it is larger than the box); with a mask
+  map the diameter is not changed. Outputs: `mask_type`, `mask`, `diameter`.
+- **Volumes in the data**: a data item with `kind: 'volume'` is a volume the
+  UI shows. EMhub's `/api/wizard_open` adds `density` to it (the request of
+  its density grid, `volume_density_source`), which emflow's VolumeViewer
+  loads. Other wizards that show volumes can use the same convention.
+- **UI** (`VolumeMaskWizard.tsx`): a VolumeViewer with the Slices and 3D
+  volume tabs and the mask (map or sphere) drawn over both. The sphere
+  diameter is changed in the viewer's mask panel (px and Å).
+- **Relion adaptor** (`RelionReferenceMaskAdaptor`, Class3D and Refine3D):
+  the volume is `fn_ref`, the mask `fn_mask` and the diameter
+  `particle_diameter`. The wand is on `fn_mask` and `particle_diameter`.
+  Without a mask, OK sets `particle_diameter`; with one, it sets nothing.
+
 ## Tests
 
 ```bash
 python -m unittest emwrap.tests.test_wizards
 ```
 
-The tests build a temporary project with STAR files and check form tagging,
-both adaptors, and the error cases. Add a test for each new wizard and
+The tests build a temporary project with STAR and MRC files and check form
+tagging, the adaptors, and the error cases. Add a test for each new wizard and
 adaptor.
 
 ## Adding a wizard: checklist

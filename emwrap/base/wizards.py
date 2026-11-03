@@ -356,3 +356,110 @@ class ExportTomoParticlesWizard(Wizard):
             },
             'warnings': warnings
         }
+
+
+# ---------------------- Volume helpers -------------------------------------
+
+def read_volume_header(path):
+    """ Dimensions [X, Y, Z] and voxel size (A, or None if unknown) of an
+    MRC volume, from its header. """
+    import mrcfile
+    try:
+        with mrcfile.mmap(path, mode='r', permissive=True) as mrc:
+            shape = mrc.data.shape
+            angpix = float(mrc.voxel_size.x)
+    except Exception as e:
+        raise WizardError(f"Could not read the volume {path}: {e}")
+    if len(shape) < 3:
+        raise WizardError(f"{path} is not a volume (dimensions: {shape}).")
+    zdim, ydim, xdim = shape[-3:]
+    return [int(xdim), int(ydim), int(zdim)], (angpix if angpix > 0 else None)
+
+
+class VolumeMaskWizard(Wizard):
+    """ Check the mask of a volume: a map (a mask file) or a sphere (its
+    diameter). With a mask map, it takes precedence over the sphere.
+
+    The volume and the mask are shown in emflow's VolumeViewer (Slices and
+    3D volume). The data items with 'kind': 'volume' are the volumes to show;
+    the host adds the request of their density ('density') to them.
+
+    Inputs (from the adaptor):
+        volume: the volume (required)
+        mask: mask map, optional; on the same box as the volume
+        diameter: diameter of the spherical mask (A), optional; by default
+            80% of the box
+
+    Outputs (from the UI):
+        diameter (A), only changed with the spherical mask
+    """
+    ui = 'VolumeMaskWizard'
+    label = 'Mask'
+
+    def _volume(self, path, label):
+        full = self.join(path)
+        if not os.path.exists(full):
+            raise WizardError(f"The {label} was not found: {path}")
+        dims, angpix = read_volume_header(full)
+        return {'kind': 'volume', 'path': path, 'dimensions': dims,
+                'voxelSize': angpix}
+
+    def prepare(self, inputs):
+        if not inputs.get('volume'):
+            raise WizardError("Select the input map before opening the wizard.")
+        volume = self._volume(inputs['volume'], 'map')
+        mask = self._volume(inputs['mask'], 'mask') if inputs.get('mask') else None
+        if mask and mask['dimensions'] != volume['dimensions']:
+            raise WizardError(
+                f"The mask ({' x '.join(map(str, mask['dimensions']))}) and the "
+                f"map ({' x '.join(map(str, volume['dimensions']))}) have "
+                f"different dimensions.")
+
+        angpix = volume['voxelSize']
+        warnings = []
+        if not angpix:
+            warnings.append("The map has no pixel size in its header, "
+                            "the diameter is shown only in pixels.")
+        boxAngst = min(volume['dimensions']) * (angpix or 1)
+        diameter = to_float(inputs.get('diameter'))
+        if not diameter or diameter <= 0:
+            diameter = round(0.8 * boxAngst, 2)
+        if mask:
+            warnings.append("The mask map is used, the spherical mask "
+                            "(diameter) is not shown.")
+
+        return {
+            'inputs': {
+                'mask_type': 'map' if mask else 'sphere',
+                'diameter': diameter
+            },
+            'data': {
+                'volume': volume,
+                'mask': mask,
+                'angpix': angpix,
+                'box_angst': boxAngst
+            },
+            'warnings': warnings
+        }
+
+    def finalize(self, outputs, prepared):
+        maskType = 'map' if prepared['data']['mask'] else 'sphere'
+        diameter = to_float(outputs.get('diameter'))
+        warnings = []
+        if maskType == 'sphere':
+            if not diameter or diameter <= 0:
+                raise WizardError("The mask diameter should be a positive number.")
+            boxAngst = prepared['data']['box_angst']
+            if diameter > boxAngst:
+                warnings.append(f"The mask diameter ({diameter:g} A) is larger "
+                                f"than the box ({boxAngst:g} A).")
+        else:
+            diameter = prepared['inputs']['diameter']
+        return {
+            'outputs': {
+                'mask_type': maskType,
+                'mask': prepared['data']['mask'],
+                'diameter': round(diameter, 2)
+            },
+            'warnings': warnings
+        }

@@ -48,6 +48,8 @@ _rlnTomoTomogramsFile Tomograms/job001/tomograms.star
 
 WARP = 'emw-warp-export_particles'
 RELION = 'relion.pseudosubtomo'
+CLASS3D = 'relion.class3d.tomo'
+REFINE3D = 'relion.refine3d.tomo'
 
 
 class TestWizards(unittest.TestCase):
@@ -149,6 +151,69 @@ class TestWizards(unittest.TestCase):
         result = Wizards.open(self.project, RELION, 'export_box', params)
         self.assertEqual(result['inputs']['out_angpix'], 1.5)
         self.assertIsNone(result['inputs']['diameter'])  # No box, no diameter
+
+    def _write_mrc(self, rel, shape, angpix=2.0):
+        import mrcfile
+        import numpy as np
+        fn = self.project.join(rel)
+        os.makedirs(os.path.dirname(fn), exist_ok=True)
+        with mrcfile.new(fn, overwrite=True) as mrc:
+            mrc.set_data(np.zeros(shape, dtype=np.float32))
+            mrc.voxel_size = angpix
+
+    def test_class3d_mask(self):
+        self._write_mrc('Refine3D/job010/run_class001.mrc', (40, 40, 40))
+        self._write_mrc('MaskCreate/job011/mask.mrc', (40, 40, 40))
+        self._write_mrc('MaskCreate/job012/mask.mrc', (32, 32, 32))
+        ref = 'Refine3D/job010/run_class001.mrc'
+
+        # Without a mask map: a sphere of the mask diameter
+        params = {'fn_ref': ref, 'fn_mask': '', 'particle_diameter': '60'}
+        result = Wizards.open(self.project, CLASS3D, 'mask', params)
+        self.assertEqual(result['ui'], 'VolumeMaskWizard')
+        self.assertEqual(result['inputs'], {'mask_type': 'sphere', 'diameter': 60})
+        volume = result['data']['volume']
+        self.assertEqual(volume['kind'], 'volume')
+        self.assertEqual(volume['dimensions'], [40, 40, 40])
+        self.assertEqual(volume['voxelSize'], 2)
+        self.assertIsNone(result['data']['mask'])
+
+        result = Wizards.apply(self.project, CLASS3D, 'mask', params,
+                               {'diameter': 72.5})
+        self.assertEqual(result['params'], {'particle_diameter': 72.5})
+        result = Wizards.apply(self.project, CLASS3D, 'mask', params,
+                               {'diameter': 100})
+        self.assertEqual(len(result['warnings']), 1)  # Larger than the box
+        with self.assertRaises(WizardError):
+            Wizards.apply(self.project, CLASS3D, 'mask', params, {'diameter': 0})
+
+        # Without a diameter: 80% of the box
+        params['particle_diameter'] = ''
+        result = Wizards.open(self.project, CLASS3D, 'mask', params)
+        self.assertEqual(result['inputs']['diameter'], 64)
+
+        # The mask map takes precedence, OK changes nothing
+        params['fn_mask'] = 'MaskCreate/job011/mask.mrc'
+        result = Wizards.open(self.project, CLASS3D, 'mask', params)
+        self.assertEqual(result['inputs']['mask_type'], 'map')
+        self.assertEqual(result['data']['mask']['path'], params['fn_mask'])
+        result = Wizards.apply(self.project, CLASS3D, 'mask', params,
+                               {'diameter': 50})
+        self.assertEqual(result['params'], {})
+
+        # A mask of another box, a missing mask or no map
+        for p in [{'fn_mask': 'MaskCreate/job012/mask.mrc'},
+                  {'fn_mask': 'missing.mrc'}, {'fn_ref': ''}]:
+            with self.assertRaises(WizardError):
+                Wizards.open(self.project, CLASS3D, 'mask', {**params, **p})
+
+        # Refine3D has the same params and adaptor
+        params = {'fn_ref': ref, 'fn_mask': '', 'particle_diameter': '60'}
+        result = Wizards.open(self.project, REFINE3D, 'mask', params)
+        self.assertEqual(result['inputs'], {'mask_type': 'sphere', 'diameter': 60})
+        result = Wizards.apply(self.project, REFINE3D, 'mask', params,
+                               {'diameter': 50})
+        self.assertEqual(result['params'], {'particle_diameter': 50})
 
     def test_errors(self):
         with self.assertRaises(WizardError):
