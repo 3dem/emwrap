@@ -113,8 +113,8 @@ class MyWizard(Wizard):
         return {'data': {...}, 'warnings': []}
 ```
 
-A preview runs on every change the UI sends (after a short delay), so keep
-it fast: `MaskCreateWizard` works on the map downscaled to about 100 px.
+The UI decides when to ask for a preview (`MaskCreateWizard`: a
+Re-calculate button), but keep it fast: `MaskCreateWizard` works on the map downscaled to about 100 px.
 
 Keep the wizard's input and output names **tool-agnostic** (units included in
 the name or the docstring), so another job type only needs a new adaptor.
@@ -287,7 +287,9 @@ them) and emflow displays them.
   and slider over the map values, lowpass, extend, soft edge, invert) and
   the map in a VolumeViewer (3D volume first, with the surface at the first
   threshold, and Slices) with the tentative mask over it. A new mask is
-  asked 400 ms after the values stop changing; older answers are ignored.
+  asked with the Re-calculate button (not on each change), greyed out until
+  a value changes and highlighted in orange then, with a spinner
+  and a loading overlay on the viewer while it is computed.
 - **Relion adaptor** (`RelionMaskCreateAdaptor`): only for masks from a
   volume (De novo creation refuses to open it). It maps
   `relion_mask_create.volume.*`: `i`, `ini_threshold`, `lowpass` (-1: none),
