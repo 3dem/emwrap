@@ -6,7 +6,10 @@
 # *
 # * Default backend uses Relion's .relion_lock layout so emwrap, Relion GUI
 # * and emw CLI coordinate on NFS-friendly directory locks. Additional backends
-# * (fcntl, noop, future server/redis) can be selected via EMWRAP_PROJECT_LOCK.
+# * (redis, fcntl, noop) can be selected via EMWRAP_PROJECT_LOCK. The redis
+# * backend uses the Redis server of the EMhub instance (redis.conf in
+# * $EMHUB_INSTANCE) and does no file IO, but it does not coordinate with
+# * Relion's .relion_lock.
 # *
 # * Only writers take the lock. Readers do not lock: files written by emwrap
 # * are replaced atomically, and files that Relion rewrites in place are read
@@ -17,6 +20,7 @@
 import errno
 import json
 import os
+import random
 import shutil
 import socket
 import threading
@@ -28,6 +32,8 @@ from datetime import datetime, timezone
 
 DEFAULT_PIPELINE = 'default_pipeline.star'
 DEFAULT_STALE_SECONDS = 30
+# Lock directories without lock file (left behind, nobody owns them)
+DEFAULT_EMPTY_STALE_SECONDS = 5
 DEFAULT_HEARTBEAT_SECONDS = 5
 DEFAULT_MAX_HOLD_SECONDS = 3600
 DEFAULT_POLL_INTERVAL = 0.5
@@ -128,6 +134,18 @@ def read_consistent(path, reader, retries=5, delay=0.2):
     if error is not None:
         raise error
     return reader(path)
+
+
+def _lock_dir_entries(lock_dir):
+    """Files in a lock directory, without NFS temporary files (.nfsXXXX, kept
+    until a removed file is closed by everybody). None if it does not exist."""
+    try:
+        # listdir revalidates the directory with the server (unlike stat)
+        return [e for e in os.listdir(lock_dir) if not e.startswith('.nfs')]
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return []
 
 
 def relion_lock_paths(project_path, pipeline_name=DEFAULT_PIPELINE):
@@ -255,16 +273,24 @@ class RelionDirLockBackend(ProjectLockBackend):
       * re-entrant within the same thread (other threads of the process
         wait like any other process).
     Staleness is measured with the filesystem (NFS server) clock, and stale
-    locks are broken with an atomic rename, so only one process wins.
+    locks are broken with an atomic rename, so only one process wins. Lock
+    directories without any lock file (left behind, e.g. by a failed rmdir)
+    are stale after empty_stale_seconds, instead of stale_seconds.
     """
+
+    RMDIR_RETRIES = 20
+    RMDIR_RETRY_DELAY = 0.1
 
     def __init__(self, pipeline_name=DEFAULT_PIPELINE,
                  stale_seconds=None, heartbeat_seconds=None,
-                 max_hold_seconds=None):
+                 max_hold_seconds=None, empty_stale_seconds=None):
         self._pipeline_name = pipeline_name
         self._stale_seconds = (stale_seconds if stale_seconds is not None else
                                _env_float('EMWRAP_LOCK_STALE_SECONDS',
                                           DEFAULT_STALE_SECONDS))
+        self._empty_stale_seconds = (
+            empty_stale_seconds if empty_stale_seconds is not None else
+            _env_float('EMWRAP_LOCK_EMPTY_STALE_SECONDS', DEFAULT_EMPTY_STALE_SECONDS))
         self._heartbeat_seconds = (
             heartbeat_seconds if heartbeat_seconds is not None else
             _env_float('EMWRAP_LOCK_HEARTBEAT_SECONDS', DEFAULT_HEARTBEAT_SECONDS))
@@ -306,12 +332,18 @@ class RelionDirLockBackend(ProjectLockBackend):
             if not _pid_alive(pid):
                 return True
 
+        stale_seconds = self._stale_seconds
         mtime = _fresh_mtime(lock_file)
         if mtime is None:
             mtime = _fresh_mtime(lock_dir)
+            # Owners write the lock file right after creating the directory,
+            # so an empty one that is not brand new has no owner. If the file
+            # was there after all, break_stale() puts the lock back.
+            if mtime is not None and not _lock_dir_entries(lock_dir):
+                stale_seconds = min(stale_seconds, self._empty_stale_seconds)
         if mtime is None:  # Lock vanished, let the caller retry
             return False
-        return server_now(project_path) - mtime >= self._stale_seconds
+        return server_now(project_path) - mtime >= stale_seconds
 
     def break_stale(self, project_path):
         """Remove the project lock if it is stale. Return True if the lock
@@ -478,11 +510,28 @@ class RelionDirLockBackend(ProjectLockBackend):
             os.remove(held.lock_file)
         except FileNotFoundError:
             pass
-        try:
-            os.rmdir(held.lock_dir)
-        except OSError:
-            # Another lock file may exist; leave directory in place.
-            pass
+        self._remove_lock_dir(held.lock_dir)
+
+    def _remove_lock_dir(self, lock_dir):
+        """Remove the lock directory after removing our lock file. On NFS, if
+        another process or thread still has the lock file open (e.g. waiters
+        reading it), it is renamed to a hidden .nfsXXXX file until closed, so
+        rmdir fails for a moment. Retry, otherwise an empty lock directory
+        would be left behind and everybody would wait until it is stale."""
+        for _ in range(self.RMDIR_RETRIES):
+            try:
+                os.rmdir(lock_dir)
+                return
+            except FileNotFoundError:
+                return
+            except OSError:
+                # Do not wait if there is another real lock file
+                if _lock_dir_entries(lock_dir):
+                    break
+            time.sleep(self.RMDIR_RETRY_DELAY)
+        print(f"WARNING: could not remove project lock directory {lock_dir} "
+              f"({_lock_dir_entries(lock_dir) or 'only NFS temporary files'}), "
+              f"it will be broken as stale", flush=True)
 
 
 def wait_project_lock_free(project_path, timeout=DEFAULT_TIMEOUT):
@@ -492,23 +541,268 @@ def wait_project_lock_free(project_path, timeout=DEFAULT_TIMEOUT):
                                            timeout=timeout)
 
 
-class ServerLockBackend(ProjectLockBackend):
-    """Placeholder for a future central lock service (Redis, emhub worker, etc.)."""
+def redis_lock_client(config=None):
+    """Redis client for project locks, created like EMhub does: host and port
+    from the redis.conf file of the EMhub instance ($EMHUB_INSTANCE), unless
+    another config file is given (e.g. in tests)."""
+    if not config:
+        instance = os.environ.get('EMHUB_INSTANCE')
+        if not instance:
+            raise RuntimeError(
+                'Redis project lock needs EMHUB_INSTANCE (with redis.conf) to be set.')
+        config = os.path.join(instance, 'redis.conf')
+    if not os.path.exists(config):
+        raise RuntimeError(f"Redis config file not found: {config}")
+
+    # Redis defaults, used if not specified in the config file
+    host, port, password = '127.0.0.1', 6379, None
+    with open(config) as f:
+        for line in f:
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            if parts[0] == 'bind':
+                host = parts[1]
+            elif parts[0] == 'port':
+                port = int(parts[1])
+            elif parts[0] == 'requirepass':
+                password = parts[1]
+
+    import redis
+    # Unlike EMhub workers, lock commands never block in Redis, so use a read
+    # timeout to fail instead of hanging if the server stops responding
+    client = redis.StrictRedis(host, port, password=password,
+                               encoding="utf-8", decode_responses=True,
+                               socket_connect_timeout=5, socket_timeout=10)
+    try:
+        client.ping()
+    except redis.exceptions.RedisError as e:
+        raise RuntimeError(
+            f"Could not connect to Redis at {host}:{port} (from {config}) for "
+            f"the project lock: {e}\nStart Redis or set "
+            f"EMWRAP_PROJECT_LOCK=relion_dir to use file locks.") from None
+    return client
+
+
+class _HeldRedisLock:
+    """State of a Redis lock held by this process (re-entrant, heartbeated)."""
+
+    def __init__(self, key, token):
+        self.key = key
+        self.token = token
+        self.depth = 1
+        self.lost = False
+        self.stop = threading.Event()
+        self.thread = None
+
+
+class RedisLockBackend(ProjectLockBackend):
+    """Project lock stored in Redis (usually the one of the EMhub instance),
+    so taking or waiting for the lock does not do any file IO on NFS.
+
+    The lock is a key with a random token and an expiration time (ttl):
+      * a heartbeat thread extends the expiration while the lock is held, so
+        locks of crashed processes expire after ttl seconds;
+      * release and extend are done with Lua scripts that check the token, so
+        a process never removes or extends a lock taken by someone else;
+      * re-entrant within the same thread (other threads of the process
+        wait like any other process).
+
+    It does NOT coordinate with Relion's .relion_lock: all processes writing
+    a project (EMhub server, workers, emw CLI) must use this backend.
+    """
+
+    KEY_PREFIX = 'emwrap:project_lock:'
+    MIN_POLL_INTERVAL = 0.01
+    MAX_POLL_INTERVAL = 0.2
+
+    # Delete or extend the lock (and its info key) only if we own it
+    _RELEASE_SCRIPT = """
+if redis.call('get', KEYS[1]) == ARGV[1] then
+    redis.call('del', KEYS[2])
+    return redis.call('del', KEYS[1])
+end
+return 0
+"""
+    _EXTEND_SCRIPT = """
+if redis.call('get', KEYS[1]) == ARGV[1] then
+    redis.call('pexpire', KEYS[2], ARGV[2])
+    return redis.call('pexpire', KEYS[1], ARGV[2])
+end
+return 0
+"""
+
+    def __init__(self, redis=None, ttl_seconds=None, heartbeat_seconds=None,
+                 max_hold_seconds=None, key_prefix=None):
+        self._redis = redis
+        self._ttl_seconds = (ttl_seconds if ttl_seconds is not None else
+                             _env_float('EMWRAP_LOCK_STALE_SECONDS',
+                                        DEFAULT_STALE_SECONDS))
+        self._heartbeat_seconds = (
+            heartbeat_seconds if heartbeat_seconds is not None else
+            _env_float('EMWRAP_LOCK_HEARTBEAT_SECONDS', DEFAULT_HEARTBEAT_SECONDS))
+        self._max_hold_seconds = (
+            max_hold_seconds if max_hold_seconds is not None else
+            _env_float('EMWRAP_LOCK_MAX_HOLD_SECONDS', DEFAULT_MAX_HOLD_SECONDS))
+        self._key_prefix = key_prefix or self.KEY_PREFIX
+        self._scripts = None
+        self._held = {}
+        self._mutex = threading.RLock()
+
+    @property
+    def redis(self):
+        """Redis client, connected on first use (not when the backend is created)."""
+        if self._redis is None:
+            self._redis = redis_lock_client()
+        return self._redis
+
+    def _script(self, name):
+        if self._scripts is None:
+            self._scripts = {
+                'release': self.redis.register_script(self._RELEASE_SCRIPT),
+                'extend': self.redis.register_script(self._EXTEND_SCRIPT),
+            }
+        return self._scripts[name]
+
+    def lock_key(self, project_path):
+        return self._key_prefix + os.path.realpath(project_path)
+
+    def _ttl_ms(self):
+        return int(self._ttl_seconds * 1000)
+
+    def _lock_payload(self, message, token):
+        return json.dumps({
+            'pid': os.getpid(),
+            'hostname': _hostname(),
+            'timestamp': _utc_now(),
+            'token': token,
+            'message': message or 'emwrap project lock',
+        })
+
+    def _read_lock_payload(self, key):
+        try:
+            text = self.redis.get(key + ':info')
+            return json.loads(text) if text else {}
+        except Exception:
+            return {}
+
+    def _try_acquire(self, key, message, token):
+        if not self.redis.set(key, token, nx=True, px=self._ttl_ms()):
+            return False
+        self.redis.set(key + ':info', self._lock_payload(message, token),
+                       px=self._ttl_ms())
+        return True
+
+    def _extend(self, held):
+        return self._script('extend')(keys=[held.key, held.key + ':info'],
+                                      args=[held.token, self._ttl_ms()])
+
+    def _heartbeat(self, held):
+        started = time.time()
+        while not held.stop.wait(self._heartbeat_seconds):
+            if time.time() - started > self._max_hold_seconds:
+                print(f"WARNING: project lock {held.key} held for more "
+                      f"than {self._max_hold_seconds}s, stop refreshing it",
+                      flush=True)
+                return
+            try:
+                extended = self._extend(held)
+            except Exception as e:
+                # The lock is still valid until it expires, retry next beat
+                print(f"WARNING: could not refresh project lock {held.key}: {e}",
+                      flush=True)
+                continue
+            if not extended:
+                held.lost = True
+                print(f"WARNING: project lock {held.key} expired or was taken "
+                      f"by another process", flush=True)
+                return
 
     def acquire(self, project_path, message='', timeout=DEFAULT_TIMEOUT):
-        raise NotImplementedError(
-            'ServerLockBackend is not implemented yet. '
-            'Set EMWRAP_PROJECT_LOCK=relion_dir or fcntl.')
+        key_held = (project_path, threading.get_ident())
+        with self._mutex:
+            if held := self._held.get(key_held):
+                held.depth += 1
+                return held.key
+
+        key = self.lock_key(project_path)
+        token = uuid.uuid4().hex
+        deadline = time.time() + timeout
+        delay = self.MIN_POLL_INTERVAL
+        warned = False
+
+        while not self._try_acquire(key, message, token):
+            now = time.time()
+            if not warned and (now + 10) >= deadline:
+                payload = self._read_lock_payload(key)
+                print(f"WARNING: waiting for project lock {key} "
+                      f"({payload or 'no lock info'})", flush=True)
+                warned = True
+
+            if now >= deadline:
+                raise TimeoutError(
+                    f"Timed out waiting for Redis project lock: {key} "
+                    f"({self._read_lock_payload(key) or 'no lock info'}). "
+                    f"It expires {self._ttl_seconds}s after its owner dies.")
+
+            # Exponential backoff with jitter, so waiters do not poll in sync
+            time.sleep(min(delay, max(deadline - now, 0)) *
+                       random.uniform(0.5, 1.0))
+            delay = min(delay * 2, self.MAX_POLL_INTERVAL)
+
+        held = _HeldRedisLock(key, token)
+        if self._heartbeat_seconds > 0:
+            held.thread = threading.Thread(target=self._heartbeat, args=(held,),
+                                           name='emwrap-lock-heartbeat',
+                                           daemon=True)
+            held.thread.start()
+
+        with self._mutex:
+            self._held[key_held] = held
+        return key
+
+    def is_lost(self, project_path):
+        """True if the lock held for this project expired or was taken by another process."""
+        held = self._held.get((project_path, threading.get_ident()))
+        return bool(held and held.lost)
 
     def release(self, project_path):
-        raise NotImplementedError('ServerLockBackend is not implemented yet.')
+        key_held = (project_path, threading.get_ident())
+        with self._mutex:
+            held = self._held.get(key_held)
+            if held is None:
+                return
+            held.depth -= 1
+            if held.depth > 0:
+                return
+            del self._held[key_held]
+
+        held.stop.set()
+        if held.thread is not None:
+            held.thread.join(timeout=self._heartbeat_seconds + 1)
+
+        released = self._script('release')(keys=[held.key, held.key + ':info'],
+                                           args=[held.token])
+        if not released:
+            print(f"WARNING: project lock {held.key} is not owned by this "
+                  f"process anymore, leaving it in place", flush=True)
+
+    def wait_until_free(self, project_path, timeout=DEFAULT_TIMEOUT):
+        """Wait until nobody holds the project lock (expired locks are gone)."""
+        key = self.lock_key(project_path)
+        deadline = time.time() + timeout
+        while self.redis.exists(key):
+            if time.time() >= deadline:
+                raise TimeoutError(
+                    f"Timed out waiting for project lock to be released: {key}")
+            time.sleep(DEFAULT_POLL_INTERVAL)
 
 
 _BACKENDS = {
     'noop': NoopLockBackend,
     'fcntl': FcntlLockBackend,
     'relion_dir': RelionDirLockBackend,
-    'server': ServerLockBackend,
+    'redis': RedisLockBackend,
 }
 
 

@@ -402,6 +402,12 @@ class ProjectData(FolderManager):
             datatype = self._wf.getData(output_id).get('datatype', datatype)
         return {'type': datatype, 'info': 'Pending'}
 
+    @staticmethod
+    def _sameInfo(cached, info):
+        """ True if the cached info has the same values as info (ignoring
+        the keys added when storing it, e.g. 'ts'). """
+        return bool(cached) and all(cached.get(k) == v for k, v in info.items())
+
     def _isPendingOutput(self, output_id):
         job = self._outputParentJob(output_id)
         filepath = self.join(output_id)
@@ -1295,7 +1301,11 @@ class ProjectData(FolderManager):
                     if cached and not str(cached.get('info', '')).startswith('Error:'):
                         return cached
                 pending = self._pendingOutputInfo(output_id)
-                if job and self.isActiveJob(job):
+                # Only store it if it changed: storing marks the outputs as
+                # computed, so the project would be saved on every update
+                # while an active job has a pending output
+                if (job and self.isActiveJob(job)
+                        and not self._sameInfo(cached, pending)):
                     self._set_info(self._outputs, output_id, pending)
                 return pending
 
