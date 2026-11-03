@@ -440,12 +440,19 @@ class ProjectData(FolderManager):
             return f'{Path.rmslash(job_id)}/{rest}'
         return path
 
+    # Relion keywords of node type labels that are one of our datatypes
+    NODE_TYPE_DATATYPES = {'mask3d': 'VolumeMask'}
+    # Jobs whose outputs were cached as Volume before masks were VolumeMask
+    MASK_JOBTYPES = ('emw-relion-mask_create', 'emw-pytom-create_template')
+
     def _outputTypeFromRelionNodes(self, output_id):
         """Return the output type declared in RELION_OUTPUT_NODES.star, if any.
 
         The type is the last part of the node type label, e.g. the label
         'TomogramGroupMetadata.star.relion.tomo.MissAlignmentModelDir'
-        gives the 'MissAlignmentModelDir' type.
+        gives the 'MissAlignmentModelDir' type, and 'mask3d' (a 3D mask)
+        gives 'VolumeMask' (see NODE_TYPE_DATATYPES). Jobs without that file
+        (e.g. older runs) use the node type of the output in the pipeline.
         """
         if (job := self._outputParentJob(output_id)) is None:
             return None
@@ -453,10 +460,17 @@ class ProjectData(FolderManager):
         if (target := self._jobRelPath(output_id, job.id)) is None:
             return None
 
+        label = None
         for name, type_label in self._relionOutputNodes(job.id).items():
             if self._jobRelPath(name, job.id) == target and type_label:
-                return type_label.split('.')[-1]
-        return None
+                label = type_label
+                break
+        else:
+            label = self._wf.getData(output_id).get('nodetype')
+        if not label:
+            return None
+        datatype = label.split('.')[-1]
+        return self.NODE_TYPE_DATATYPES.get(datatype, datatype)
 
     def _isPlaceholderOutputInfo(self, info):
         """Return True for generic cached output info that should be recomputed."""
@@ -591,8 +605,12 @@ class ProjectData(FolderManager):
             try:
                 meta = Image.get_metadata(filepath)
                 if meta:
+                    # A datatype declared by the job (e.g. VolumeMask) first
+                    datatype = self._outputTypeFromRelionNodes(output_id) or ''
+                    if not datatype[:1].isupper():
+                        datatype = meta.get('dataType', 'File')
                     return {
-                        'type': meta.get('dataType', 'File'),
+                        'type': datatype,
                         'info': meta['info'],
                     }
             except Exception as e:
@@ -1266,7 +1284,8 @@ class ProjectData(FolderManager):
         # cached info is used without checking the files (slow on network FS)
         if (not force and cached and job is not None
                 and not self.isActiveJob(job)
-                and job.id not in self._computedJobs):
+                and job.id not in self._computedJobs
+                and not self._isStaleMaskInfo(output_id, job, cached)):
             return cached
 
         if self._isPendingOutput(output_id):
@@ -1280,7 +1299,9 @@ class ProjectData(FolderManager):
                     self._set_info(self._outputs, output_id, pending)
                 return pending
 
-        if force or self._shouldRefreshOutputInfo(output_id, job):
+        if (force or self._shouldRefreshOutputInfo(output_id, job)
+                or (cached and job is not None
+                    and self._isStaleMaskInfo(output_id, job, cached))):
             info = self._computeOutputTypeInfo(
                 output_id, self._outputInfoFilesForId(output_id))
             self._set_info(self._outputs, output_id, info)
@@ -1296,6 +1317,12 @@ class ProjectData(FolderManager):
                 and str(info.get('info', '')).startswith('Error:')):
             return self._pendingOutputInfo(output_id)
         return info
+
+    def _isStaleMaskInfo(self, output_id, job, cached):
+        """ True for a mask cached as a Volume (before masks were VolumeMask). """
+        return (cached.get('type') == 'Volume'
+                and job['jobtype'] in self.MASK_JOBTYPES
+                and self._outputTypeFromRelionNodes(output_id) == 'VolumeMask')
 
     def setOutputInfo(self, output_id, output_info):
         self._set_info(self._outputs, output_id, output_info)

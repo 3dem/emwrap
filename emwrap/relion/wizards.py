@@ -16,8 +16,9 @@
 
 """ Wizard adaptors of the Relion job forms (see emwrap.base.wizards). """
 
-from emwrap.base.wizards import (WizardAdaptor, ExportTomoParticlesWizard,
-                                 VolumeMaskWizard,
+from emwrap.base.wizards import (WizardAdaptor, WizardError,
+                                 ExportTomoParticlesWizard, VolumeMaskWizard,
+                                 MaskCreateWizard,
                                  tomograms_from_optimisation_set,
                                  to_bool, to_float)
 
@@ -84,3 +85,37 @@ class RelionReferenceMaskAdaptor(WizardAdaptor):
         if outputs['mask_type'] == 'map':
             return {}
         return {'particle_diameter': outputs['diameter']}
+
+
+class RelionMaskCreateAdaptor(WizardAdaptor):
+    """ emw-relion-mask_create (from volume) <-> MaskCreateWizard
+
+    Only for the masks created from a volume: the de novo masks have no
+    map to threshold. A lowpass of -1 (or empty) is none.
+    """
+    wizard = MaskCreateWizard
+    PREFIX = 'relion_mask_create.volume.'
+
+    def toWizard(self, params):
+        if to_bool(params.get('relion_mask_create.denovo', False)):
+            raise WizardError("The wizard creates masks from a volume: "
+                              "turn off 'De novo creation'.")
+        p = lambda name: params.get(self.PREFIX + name)
+        return {
+            'volume': p('i'),
+            'threshold': p('ini_threshold'),
+            'lowpass': p('lowpass'),
+            'extend': p('extend_inimask'),
+            'soft_edge': p('width_soft_edge'),
+            'invert': p('invert'),
+            'angpix': p('angpix')
+        }
+
+    def fromWizard(self, outputs, params):
+        return {
+            self.PREFIX + 'ini_threshold': round(outputs['threshold'], 6),
+            self.PREFIX + 'lowpass': outputs['lowpass'] or -1,
+            self.PREFIX + 'extend_inimask': outputs['extend'],
+            self.PREFIX + 'width_soft_edge': outputs['soft_edge'],
+            self.PREFIX + 'invert': outputs['invert']
+        }

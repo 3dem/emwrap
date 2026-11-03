@@ -62,7 +62,7 @@ class TestApoFWarp(TestApoF):
 
     expected_outputs = {
         'emw-import-ts': 'tilt_series.star',
-        'emw-pytom-create_template': ['emd_15854.mrc', 'emd_15854_mask.mrc'],
+        'emw-pytom-create_template': ['emd_15854_template.mrc', 'emd_15854_template_mask.mrc'],
         'emw-warp-mctf': 'tilt_series.star',
         'emw-warp-tsalign': 'aligned_tilt_series.star',
         'emw-warp-ctfrec': 'tomograms.star',

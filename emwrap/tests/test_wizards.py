@@ -50,6 +50,7 @@ WARP = 'emw-warp-export_particles'
 RELION = 'relion.pseudosubtomo'
 CLASS3D = 'relion.class3d.tomo'
 REFINE3D = 'relion.refine3d.tomo'
+MASK_CREATE = 'emw-relion-mask_create'
 
 
 class TestWizards(unittest.TestCase):
@@ -152,14 +153,76 @@ class TestWizards(unittest.TestCase):
         self.assertEqual(result['inputs']['out_angpix'], 1.5)
         self.assertIsNone(result['inputs']['diameter'])  # No box, no diameter
 
-    def _write_mrc(self, rel, shape, angpix=2.0):
+    def _write_mrc(self, rel, shape, angpix=2.0, data=None):
         import mrcfile
         import numpy as np
         fn = self.project.join(rel)
         os.makedirs(os.path.dirname(fn), exist_ok=True)
         with mrcfile.new(fn, overwrite=True) as mrc:
-            mrc.set_data(np.zeros(shape, dtype=np.float32))
+            mrc.set_data(np.zeros(shape, dtype=np.float32) if data is None else data)
             mrc.voxel_size = angpix
+
+    def test_mask_create(self):
+        import numpy as np
+        from emwrap.base.volume_mask import load_binned_map, compute_mask
+
+        # A ball of radius 40 px in a 200 px box: downscaled by 2 to 100 px
+        n = 200
+        z, y, x = np.mgrid[:n, :n, :n]
+        r = np.sqrt((x - 100) ** 2 + (y - 100) ** 2 + (z - 100) ** 2)
+        self._write_mrc('Refine3D/job020/run_class001.mrc', (n, n, n),
+                        angpix=1.5, data=(r < 40).astype(np.float32))
+        binned = load_binned_map(self.project.join('Refine3D/job020/run_class001.mrc'))
+        self.assertEqual(binned.binning, 2)
+        self.assertEqual(binned.data.shape, (100, 100, 100))
+
+        def radius(mask):  # Of the mask > 0.5, in full-size px
+            return ((mask > 0.5).sum() * 8 * 3 / (4 * np.pi)) ** (1 / 3)
+
+        self.assertAlmostEqual(radius(compute_mask(binned, 0.5)), 40, delta=1)
+        self.assertAlmostEqual(radius(compute_mask(binned, 0.5, extend=10)), 50, delta=2)
+        self.assertAlmostEqual(radius(compute_mask(binned, 0.5, extend=-10)), 30, delta=2)
+        soft = compute_mask(binned, 0.5, soft_edge=10)
+        self.assertTrue(((soft > 0.05) & (soft < 0.95)).any())
+        self.assertAlmostEqual(compute_mask(binned, 0.5, invert=True).mean(),
+                               1 - compute_mask(binned, 0.5).mean())
+
+        prefix = 'relion_mask_create.volume.'
+        params = {'relion_mask_create.denovo': False,
+                  prefix + 'i': 'Refine3D/job020/run_class001.mrc',
+                  prefix + 'ini_threshold': '0.5', prefix + 'lowpass': '-1',
+                  prefix + 'extend_inimask': '4', prefix + 'width_soft_edge': '6',
+                  prefix + 'invert': False, prefix + 'angpix': '-1'}
+        result = Wizards.open(self.project, MASK_CREATE, 'mask_create', params)
+        self.assertEqual(result['ui'], 'MaskCreateWizard')
+        self.assertEqual(result['inputs'], {'threshold': 0.5, 'lowpass': None,
+                                            'extend': 4, 'soft_edge': 6,
+                                            'invert': False})
+        self.assertEqual(result['data']['angpix'], 1.5)
+        self.assertEqual(result['data']['mask']['shape'], [100, 100, 100])
+        self.assertEqual(result['data']['mask']['binning'], 2)
+
+        # A threshold above the map: an empty mask, with a warning
+        result = Wizards.preview(self.project, MASK_CREATE, 'mask_create', params,
+                                 {**result['inputs'], 'threshold': 2})
+        self.assertEqual(result['data']['mask_fraction'], 0)
+        self.assertEqual(len(result['warnings']), 1)
+
+        result = Wizards.apply(self.project, MASK_CREATE, 'mask_create', params,
+                               {'threshold': 0.3, 'lowpass': 15, 'extend': 2,
+                                'soft_edge': 8, 'invert': True})
+        self.assertEqual(result['params'], {
+            prefix + 'ini_threshold': 0.3, prefix + 'lowpass': 15,
+            prefix + 'extend_inimask': 2, prefix + 'width_soft_edge': 8,
+            prefix + 'invert': True})
+
+        # De novo masks have no map; a negative soft edge is an error
+        with self.assertRaises(WizardError):
+            Wizards.open(self.project, MASK_CREATE, 'mask_create',
+                         {**params, 'relion_mask_create.denovo': True})
+        with self.assertRaises(WizardError):
+            Wizards.apply(self.project, MASK_CREATE, 'mask_create', params,
+                          {'threshold': 0.3, 'soft_edge': -1})
 
     def test_class3d_mask(self):
         self._write_mrc('Refine3D/job010/run_class001.mrc', (40, 40, 40))

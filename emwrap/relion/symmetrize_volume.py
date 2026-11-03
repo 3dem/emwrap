@@ -43,9 +43,8 @@ class RelionSymmetrizeVolume(RelionBasePipeline):
         self.log(f"Symmetry: {Color.green(sym)}")
         self.log(f"Output volume: {Color.bold(outVolLocal)}")
 
-        # relion_align_symmetry is single-process (no MPI)
         args = Args({
-            'relion_align_symmetry': 1,  # No MPI
+            'relion_align_symmetry': '',
             '--i': inVolLocal,
             '--o': outVolLocal,
             '--sym': sym,

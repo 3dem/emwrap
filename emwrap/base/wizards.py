@@ -20,8 +20,10 @@ A wizard has three parts (see docs/wizards.md):
 
   - Wizard: the tool-agnostic logic. prepare() validates the inputs and
     resolves the data shown in the UI when the wizard is opened, finalize()
-    validates the values selected by the user when OK is pressed. Its 'ui'
-    names the emflow component that renders it.
+    validates the values selected by the user when OK is pressed, and the
+    optional preview() computes new data for the values being selected
+    (e.g. a tentative mask). Its 'ui' names the emflow component that
+    renders it.
   - WizardAdaptor: maps the params of a given job type to the wizard
     inputs (toWizard) and the wizard outputs back to params (fromWizard).
   - The 'wizards' entry of the job form JSON, that tells which adaptor to
@@ -33,6 +35,8 @@ form params, the user still saves or launches the job.
 
 import importlib
 import os
+
+import numpy as np
 
 from emtools.metadata import StarFile, RelionStar
 
@@ -69,6 +73,8 @@ class Wizard:
     """ Base class of the wizards. """
     ui = None  # Name of the emflow component that renders the wizard
     label = ''
+    # The data of preview() for the first values is sent when it opens
+    preview_on_open = False
 
     def __init__(self, project):
         """ project: the ProjectManager (or any FolderManager) of the job,
@@ -88,6 +94,17 @@ class Wizard:
             warnings: list of messages shown in the dialog
         """
         return {'inputs': inputs, 'data': {}, 'warnings': []}
+
+    def preview(self, outputs, prepared):
+        """ Compute data for the values being selected in the UI (outputs),
+        while the wizard is open; prepared is the result of prepare().
+        Raise WizardError if the values are not valid.
+
+        Return a dict with:
+            data: values merged into the data of the UI
+            warnings: list of messages
+        """
+        raise WizardError(f"The wizard '{self.label}' has no preview.")
 
     def finalize(self, outputs, prepared):
         """ Validate the values selected in the UI when OK is pressed.
@@ -191,13 +208,31 @@ class Wizards:
         of the form (not saved yet). """
         spec, adaptor, wizard, prepared = cls._prepare(
             project, jobType, wizardId, params)
+        data = dict(prepared.get('data', {}))
+        warnings = prepared.get('warnings', []) + adaptor.warnings
+        if wizard.preview_on_open:
+            preview = wizard.preview(prepared.get('inputs', {}), prepared)
+            data.update(preview.get('data', {}))
+            warnings += preview.get('warnings', [])
         return {
             'id': wizardId,
             'label': spec.get('label', wizard.label),
             'ui': wizard.ui,
             'inputs': prepared.get('inputs', {}),
-            'data': prepared.get('data', {}),
-            'warnings': prepared.get('warnings', []) + adaptor.warnings
+            'data': data,
+            'warnings': warnings
+        }
+
+    @classmethod
+    def preview(cls, project, jobType, wizardId, params, outputs):
+        """ Called while the wizard is open, with the values being selected
+        (outputs): new data for the UI (see Wizard.preview). """
+        spec, adaptor, wizard, prepared = cls._prepare(
+            project, jobType, wizardId, params)
+        result = wizard.preview(outputs or {}, prepared)
+        return {
+            'data': result.get('data', {}),
+            'warnings': result.get('warnings', [])
         }
 
     @classmethod
@@ -463,3 +498,123 @@ class VolumeMaskWizard(Wizard):
             },
             'warnings': warnings
         }
+
+
+class MaskCreateWizard(Wizard):
+    """ Parameters of a 3D mask created from a map (as relion_mask_create):
+    lowpass, initial threshold, extend and soft edge, with a tentative mask
+    computed with numpy (emwrap.base.volume_mask) on the map downscaled to
+    about 100 px. The tentative mask is only a guide: it is coarser and its
+    edges are approximate.
+
+    Inputs (from the adaptor):
+        volume: the input map (required)
+        threshold: initial binarization threshold (map units)
+        lowpass: lowpass (A) before the threshold (None or <= 0: none)
+        extend: pixels to extend (negative: shrink) the binary mask
+        soft_edge: width (px) of the soft edge
+        invert: invert the mask
+        angpix: pixel size (A) of the lowpass (None or <= 0: the header one)
+
+    Outputs (from the UI): threshold, lowpass, extend, soft_edge, invert
+    Preview data: mask (VolumeDensity of the tentative mask), mask_fraction
+    """
+    ui = 'MaskCreateWizard'
+    label = 'Mask'
+    preview_on_open = True
+
+    def prepare(self, inputs):
+        from .volume_mask import load_binned_map
+
+        if not inputs.get('volume'):
+            raise WizardError("Select the input volume before opening the wizard.")
+        path = self.join(inputs['volume'])
+        if not os.path.exists(path):
+            raise WizardError(f"The input volume was not found: {inputs['volume']}")
+        dims, headerAngpix = read_volume_header(path)
+        try:
+            binned = load_binned_map(path)
+        except Exception as e:
+            raise WizardError(f"Could not read the volume {inputs['volume']}: {e}")
+
+        angpix = to_float(inputs.get('angpix'))
+        angpix = angpix if angpix and angpix > 0 else headerAngpix
+        warnings = []
+        if not angpix:
+            warnings.append("The volume has no pixel size, the lowpass is not "
+                            "applied (set the pixel size).")
+        values = binned.data
+        lo, hi = (float(v) for v in np.percentile(values, [0.1, 99.9]))
+        threshold = to_float(inputs.get('threshold'))
+        if threshold is None:
+            threshold = float(values.mean() + 3 * values.std())
+        lowpass = to_float(inputs.get('lowpass'))
+
+        return {
+            'inputs': {
+                'threshold': threshold,
+                'lowpass': lowpass if lowpass and lowpass > 0 else None,
+                'extend': to_int(inputs.get('extend')) or 0,
+                'soft_edge': to_int(inputs.get('soft_edge')) or 0,
+                'invert': to_bool(inputs.get('invert', False))
+            },
+            'data': {
+                'volume': {'kind': 'volume', 'path': inputs['volume'],
+                           'dimensions': dims, 'voxelSize': headerAngpix},
+                'angpix': angpix,
+                'binning': binned.binning,
+                'value_range': [lo, hi],
+                'value_stats': {'min': float(values.min()),
+                                'max': float(values.max()),
+                                'mean': float(values.mean()),
+                                'std': float(values.std())}
+            },
+            'warnings': warnings
+        }
+
+    def _values(self, outputs):
+        """ The validated values of the outputs. """
+        threshold = to_float(outputs.get('threshold'))
+        lowpass = to_float(outputs.get('lowpass'))
+        extend = to_int(outputs.get('extend')) or 0
+        softEdge = to_int(outputs.get('soft_edge')) or 0
+        errors = []
+        if threshold is None:
+            errors.append("The initial threshold should be a number.")
+        if softEdge < 0:
+            errors.append("The soft edge width should not be negative.")
+        if errors:
+            raise WizardError(errors)
+        return {
+            'threshold': threshold,
+            'lowpass': lowpass if lowpass and lowpass > 0 else None,
+            'extend': extend,
+            'soft_edge': softEdge,
+            'invert': to_bool(outputs.get('invert', False))
+        }
+
+    def preview(self, outputs, prepared):
+        from .volume_mask import load_binned_map, compute_mask, density_from_array
+
+        values = self._values(outputs)
+        data = prepared['data']
+        binned = load_binned_map(self.join(data['volume']['path']))
+        mask = compute_mask(binned, values['threshold'], values['lowpass'],
+                            values['extend'], values['soft_edge'],
+                            values['invert'], angpix=data['angpix'])
+        fraction = float(mask.mean())
+        warnings = []
+        if fraction == 0:
+            warnings.append("The mask is empty: lower the threshold.")
+        elif fraction == 1:
+            warnings.append("The mask covers the whole box: raise the threshold.")
+        return {
+            'data': {
+                'mask': density_from_array(mask, binned.binning),
+                'mask_fraction': round(fraction, 4)
+            },
+            'warnings': warnings
+        }
+
+    def finalize(self, outputs, prepared):
+        return {'outputs': self._values(outputs), 'warnings': []}

@@ -6,6 +6,9 @@ from the project (e.g. the pixel size of the input tilt-series), lets the
 user choose values with immediate feedback, and on **OK** writes new values
 back into the form.
 
+A wizard may also compute new data while it is open (`preview`), e.g. a
+tentative mask for the values being chosen.
+
 Wizards never save or launch the job. OK only fills form params; the user
 still clicks Save or Launch, so the usual validation applies.
 
@@ -16,6 +19,9 @@ The wizards so far:
   `relion.pseudosubtomo`.
 - `VolumeMaskWizard`: the mask of a map (a mask map or a sphere), used by
   Relion `relion.class3d.tomo` and `relion.refine3d.tomo`.
+- `MaskCreateWizard`: the parameters of a mask created from a map, with a
+  tentative mask computed on the server (preview), used by
+  `emw-relion-mask_create`.
 
 ## Architecture
 
@@ -45,6 +51,12 @@ EMhub only exposes two endpoints, and emflow renders the dialog.
                                                                   adaptor.fromWizard(outputs, params)
    set returned params in the form ◄── {errors} or {params, warnings}
    (not saved)
+
+ while open, if the wizard has a preview:
+   svc.previewWizard(params, outputs) ► /api/wizard_preview ──► Wizards.preview()
+                                                                  wizard.prepare(...)
+                                                                  wizard.preview(outputs, prepared)
+   merged into the component's data ◄── {errors} or {data, warnings}
 ```
 
 ### Rules
@@ -93,7 +105,16 @@ class MyWizard(Wizard):
         # outputs: what the UI component reported with onChange
         # prepared: the result of prepare(), computed again on the server
         return {'outputs': {...}, 'warnings': []}
+
+    # Optional: new data while the wizard is open (UI prop `preview`)
+    preview_on_open = False    # True: preview(inputs) data comes with open()
+
+    def preview(self, outputs, prepared):
+        return {'data': {...}, 'warnings': []}
 ```
+
+A preview runs on every change the UI sends (after a short delay), so keep
+it fast: `MaskCreateWizard` works on the map downscaled to about 100 px.
 
 Keep the wizard's input and output names **tool-agnostic** (units included in
 the name or the docstring), so another job type only needs a new adaptor.
@@ -177,6 +198,8 @@ openWizard?(projectId, protocolId | null, protocolClassName, wizardId, params)
   -> { errors } | { id, label, ui, inputs, data, warnings }
 applyWizard?(projectId, protocolId | null, protocolClassName, wizardId, params, outputs)
   -> { errors } | { params, warnings }
+previewWizard?(projectId, protocolId | null, protocolClassName, wizardId, params, outputs)
+  -> { errors } | { data, warnings }       // given to the component as `preview`
 ```
 
 EMhub (`templates/project_widget_svc.html` → `blueprints/api.py`):
@@ -185,6 +208,7 @@ EMhub (`templates/project_widget_svc.html` → `blueprints/api.py`):
 | --- | --- | --- |
 | `POST /api/wizard_open` | project args, `run_id` (null for a new job), `job_type`, `wizard_id`, `params` | `Wizards.open(...)` |
 | `POST /api/wizard_apply` | same + `outputs` | `Wizards.apply(...)` |
+| `POST /api/wizard_preview` | same + `outputs` | `Wizards.preview(...)` |
 
 A `WizardError` is a `JobValidationError`, so `_handle_item` answers
 `{errors: [...], status: 1}`. The svc returns these errors (it does not show
@@ -243,6 +267,32 @@ them) and emflow displays them.
   the volume is `fn_ref`, the mask `fn_mask` and the diameter
   `particle_diameter`. The wand is on `fn_mask` and `particle_diameter`.
   Without a mask, OK sets `particle_diameter`; with one, it sets nothing.
+
+## Example: MaskCreateWizard
+
+- **Wizard** (`emwrap/base/wizards.py`): inputs `volume` (required),
+  `threshold`, `lowpass` (Å), `extend` and `soft_edge` (px of the map),
+  `invert` and `angpix`. `prepare()` reads the map downscaled by an integer
+  block mean to at most 100 px (`volume_mask.load_binned_map`, cached) and
+  sends its value range for the threshold slider; without a threshold it
+  starts at mean + 3σ. `preview()` (also on open) computes the tentative
+  mask with numpy (`volume_mask.compute_mask`: lowpass with a raised cosine
+  edge, threshold, extend or shrink by dilation with a ball through FFT
+  convolutions, soft edge from dilations in half-pixel steps, invert) and
+  sends it inline (`data.mask`, a VolumeDensity) with the share of the box
+  it covers (`mask_fraction`); an empty or full mask adds a warning.
+  It is a guide only: coarser, with approximate edges; the job still runs
+  `relion_mask_create`.
+- **UI** (`MaskCreateWizard.tsx`): the values on the left (threshold field
+  and slider over the map values, lowpass, extend, soft edge, invert) and
+  the map in a VolumeViewer (3D volume first, with the surface at the first
+  threshold, and Slices) with the tentative mask over it. A new mask is
+  asked 400 ms after the values stop changing; older answers are ignored.
+- **Relion adaptor** (`RelionMaskCreateAdaptor`): only for masks from a
+  volume (De novo creation refuses to open it). It maps
+  `relion_mask_create.volume.*`: `i`, `ini_threshold`, `lowpass` (-1: none),
+  `extend_inimask`, `width_soft_edge`, `invert` and `angpix`. The wand is on
+  the threshold, extend, soft edge and lowpass.
 
 ## Tests
 
