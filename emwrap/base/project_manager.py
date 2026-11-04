@@ -16,6 +16,7 @@
 
 import os
 import sys
+import re
 import shlex
 import json
 import string
@@ -420,11 +421,48 @@ class ProjectManager(FolderManager):
         job_params = self._readJobParams(job, extraParams=params)
         self.saveJob(job['jobtype'], job_params)
 
-    def _instanciateJobs(self, jobDict):
+    # A param pointing at a job folder or its files: <JobType>/jobNNN[/...]
+    _JOB_REF_RE = re.compile(r'^([^/\s]+/job\d+)(?:/|$)')
+
+    def _external_job_ref(self, param_value, jobIds):
+        """ Return the job id referenced by param_value when it is a job
+        not in jobIds, otherwise None. """
+        if not isinstance(param_value, str) or not param_value:
+            return None
+        value = param_value
+        if os.path.isabs(value):
+            value = self.relpath(value)
+        if m := self._JOB_REF_RE.match(value):
+            return None if m.group(1) in jobIds else m.group(1)
+        return None
+
+    def _instanciateJobs(self, jobDict, external_inputs='keep', cleared=None):
         """
         Instanciate jobs in jobDict giving new Ids and preserving dependencies.
         This method can be called from duplicateJobs or from loadWorkflow
+
+        Args:
+            external_inputs: what to do with the params referencing jobs
+                not in jobDict: 'keep' them (same project, e.g. duplicate)
+                or 'clear' them (jobs coming from another project, whose
+                job ids mean other jobs here).
+            cleared: optional list, filled with {'jobid', 'param', 'value'}
+                of each cleared param (jobid is the one in jobDict).
         """
+        if external_inputs not in ('keep', 'clear'):
+            raise Exception(f"Invalid external_inputs: {external_inputs}")
+
+        if external_inputs == 'clear':
+            for jobId, jobInfo in jobDict.items():
+                params = dict(jobInfo.get('params') or {})
+                for key, value in params.items():
+                    if self._external_job_ref(value, jobDict):
+                        params[key] = ''
+                        if cleared is not None:
+                            cleared.append({'jobid': jobId, 'param': key,
+                                            'value': value})
+                jobInfo['params'] = params
+
         # Compute graph with dependencies
         for jobId, jobInfo in jobDict.items():
             for key, value in (jobInfo.get('params') or {}).items():
@@ -482,6 +520,19 @@ class ProjectManager(FolderManager):
 
         return self._instanciateJobs({jobId: _jobInfo(jobId) for jobId in jobIds})
 
+    def getWorkflowJobs(self, jobIds):
+        """ Return the workflow {'jobs': [{jobid, jobtype, params}]} of the
+        given job ids, in that order (see exportWorkflow, loadWorkflow). """
+        jobs = []
+        for jobId in jobIds:
+            job = self._getJob(Path.rmslash(jobId))
+            jobs.append({
+                'jobid': job.id,
+                'jobtype': job['jobtype'],
+                'params': self._readJobParams(job),
+            })
+        return {'jobs': jobs}
+
     def exportWorkflow(self, jobIds, output_path, in_project=True):
         """" Export a subworkflow with the given job ids.
 
@@ -493,14 +544,7 @@ class ProjectManager(FolderManager):
         Returns:
             The path of the written file.
         """
-        workflow_json = {"jobs": []}
-        for jobId in jobIds:
-            job = self._getJob(Path.rmslash(jobId))
-            workflow_json['jobs'].append({
-                'jobid': job.id,
-                'jobtype': job['jobtype'],
-                'params': self._readJobParams(job),
-            })
+        workflow_json = self.getWorkflowJobs(jobIds)
 
         # FIXME: For now, let's write all outputs to the project directory
         if in_project:
@@ -509,8 +553,10 @@ class ProjectManager(FolderManager):
             json.dump(workflow_json, f, indent=4)
         return output_path
 
-    def loadWorkflow(self, **kwargs):
-        """ Load a workflow with jobs templates. """
+    def loadWorkflow(self, external_inputs='keep', cleared=None, **kwargs):
+        """ Load a workflow with jobs templates (workflow_file, workflow_id
+        or the workflow dict). See _instanciateJobs for external_inputs
+        and cleared (e.g. 'clear' for jobs copied from another project). """
         if 'workflow_file' in kwargs:
             workflow_file = kwargs['workflow_file']
             if not os.path.exists(workflow_file):
@@ -531,7 +577,9 @@ class ProjectManager(FolderManager):
                 'parents': set(),
                 'children': set()
             }
-        return self._instanciateJobs({e['jobid']: _jobInfo(e) for e in workflow['jobs']})
+        return self._instanciateJobs(
+            {Path.rmslash(e['jobid']): _jobInfo(e) for e in workflow['jobs']},
+            external_inputs=external_inputs, cleared=cleared)
 
     def runJob(self, jobTypeOrId, params=None, clean=False, wait=False, update=True):
         """ Run a job.

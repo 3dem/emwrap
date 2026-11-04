@@ -22,7 +22,7 @@ An OTF project is an emwrap project created from a workflow template
 and then launched, each one when its input has some data.
 The workflow template is taken from (first found): the --workflow option,
 sconfig['otf'][workflow]['emwrap_workflow'] or the OTF class default
-(e.g. config/workflows/spa-otf.json), and its full path is printed.
+(e.g. config/workflows/internal/spa-otf.json), and its full path is printed.
 
 The OTF class is generic and subclasses define the processing type:
     - SpaOTF: single-particle (import movies, preprocessing and 2D)
@@ -447,7 +447,7 @@ class OTF(FolderManager):
     @classmethod
     def getWorkflowTemplateFile(cls, workflow=None):
         """ Return the full path of the workflow template, either from a
-        workflow id (from the emwrap config/workflows folder) or from a
+        workflow id (emwrap config/workflows or its internal folder) or from a
         JSON file path. By default, cls.WORKFLOW is used. """
         workflow = workflow or cls.WORKFLOW
         if workflow.endswith('.json'):
@@ -701,7 +701,7 @@ class SpaOTF(OTF):
     """ Single-particle On-The-Fly processing of an EMhub session.
 
     The project is created from the 'spa-otf' workflow template
-    (config/workflows/spa-otf.json) with the following jobs:
+    (config/workflows/internal/spa-otf.json) with the following jobs:
         - emw-import-movies: import movies while they are acquired
         - emw-preprocessing: MotionCor, ctffind, crYOLO and extraction in batches
         - emw-rln2d: Relion 2D classification in batches
@@ -830,7 +830,7 @@ class TomoOTF(OTF):
     """ Tomography On-The-Fly processing of an EMhub session.
 
     The project is created from the 'tomo-otf' workflow template
-    (config/workflows/tomo-otf.json) with the following jobs:
+    (config/workflows/internal/tomo-otf.json) with the following jobs:
         - emw-import-ts: import tilt series (from mdoc files) while acquired
         - emw-warp-otf: Warp motion/CTF, alignment and reconstruction
         - emw-aretomo3: AreTomo3 motion/CTF, alignment and reconstruction

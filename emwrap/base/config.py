@@ -31,6 +31,9 @@ _CODE_DIR = os.path.dirname(os.path.dirname(_BASE_DIR))
 _DEFAULT_CONFIG_DIR = os.path.join(_CODE_DIR, 'config')
 _DEFAULT_FORMS_DIR = os.path.join(_DEFAULT_CONFIG_DIR, 'forms')
 _DEFAULT_WORKFLOWS_DIR = os.path.join(_DEFAULT_CONFIG_DIR, 'workflows')
+# Workflows used by the code (OTF: spa-otf, tomo-otf) and the tests, not
+# offered to users: get_workflows() does not list them
+_INTERNAL_WORKFLOWS_DIR = os.path.join(_DEFAULT_WORKFLOWS_DIR, 'internal')
 _DEFAULT_SCRIPTS_TEMPLATES_DIR = os.path.join(_DEFAULT_CONFIG_DIR, 'scripts')
 
 
@@ -203,7 +206,7 @@ class ProcessingConfig:
     }
 
     # AVAILABLE SINGLE-PARTICLE (SPA) JOBS, kept apart from the tomography ones.
-    # They are used by the SPA OTF workflow (see config/workflows/spa-otf.json)
+    # They are used by the SPA OTF workflow (see config/workflows/internal/spa-otf.json)
     _spa_jobs = {
         "emw-import-movies": {
             "launcher": "emwrap.base.import_movies",
@@ -321,12 +324,21 @@ class ProcessingConfig:
         return None
 
     @classmethod
-    def get_workflow_file(cls, workflowId):
-        return os.path.join(cls.get_workflows_dir(), f'{workflowId}.json')
+    def get_workflow_file(cls, workflowId, internal=True):
+        """ Return the file of a workflow: from the workflows folder or,
+        with internal=True, from its 'internal' sub-folder (code and tests
+        only). Returns the path in the workflows folder when not found. """
+        fn = f'{workflowId}.json'
+        workflowFile = os.path.join(cls.get_workflows_dir(), fn)
+        if internal and not os.path.exists(workflowFile):
+            internalFile = os.path.join(cls.get_internal_workflows_dir(), fn)
+            if os.path.exists(internalFile):
+                return internalFile
+        return workflowFile
 
     @classmethod
-    def get_workflow(cls, workflowId):
-        workflowFile = cls.get_workflow_file(workflowId)
+    def get_workflow(cls, workflowId, internal=True):
+        workflowFile = cls.get_workflow_file(workflowId, internal=internal)
         if not os.path.exists(workflowFile):
             raise Exception(f"Workflow file: {Color.red(workflowFile)} does not exists.")
             
@@ -337,6 +349,12 @@ class ProcessingConfig:
     def get_workflows_dir(cls):
         """Return the workflows directory, shipped alongside the code."""
         return _DEFAULT_WORKFLOWS_DIR
+
+    @classmethod
+    def get_internal_workflows_dir(cls):
+        """Return the folder of the internal workflows (used by the code
+        and tests, e.g. spa-otf, not listed by get_workflows())."""
+        return _INTERNAL_WORKFLOWS_DIR
 
     @classmethod
     def get_config_dir(cls):
@@ -358,7 +376,8 @@ class ProcessingConfig:
 
     @classmethod
     def get_workflows(cls):
-        """Return title and description metadata for each available workflow."""
+        """Return title and description metadata for each workflow offered
+        to users (the internal ones are not listed)."""
         workflows_dir = cls.get_workflows_dir()
         if not workflows_dir or not os.path.exists(workflows_dir):
             return []
