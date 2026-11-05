@@ -20,6 +20,31 @@ import re
 import ast
 
 
+def iter_param_strings(value):
+    """ Yield the strings of a param value, also the ones nested in lists
+    and dicts (e.g. a 'sources' list of {'name', 'warp_folder'}). """
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for v in value.values():
+            yield from iter_param_strings(v)
+    elif isinstance(value, (list, tuple)):
+        for v in value:
+            yield from iter_param_strings(v)
+
+
+def map_param_strings(value, func):
+    """ Return a copy of a param value with func applied to every string,
+    also the ones nested in lists and dicts. """
+    if isinstance(value, str):
+        return func(value)
+    if isinstance(value, dict):
+        return {k: map_param_strings(v, func) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [map_param_strings(v, func) for v in value]
+    return value
+
+
 class JobValidationError(Exception):
     """Raised when job parameter values fail form validation."""
 

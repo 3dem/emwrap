@@ -99,6 +99,63 @@ class TestWorkflowImport(unittest.TestCase):
         # Outside the project: not a job of this project, kept
         self.assertEqual(params['other'], '/data/projects/source/Import/job002/movies.star')
 
+    def test_nested_job_reference(self):
+        """ Job references inside lists of dicts (e.g. M 'sources') are
+        remapped, or cleared when external, without changing the input. """
+        workflow = {'jobs': [
+            {'jobid': 'Export/job006', 'jobtype': 'Export', 'params': {}},
+            {'jobid': 'Population/job022', 'jobtype': 'Population',
+             'params': {'sources': [
+                 {'name': 'A', 'warp_folder': 'Export/job006'},
+                 {'name': 'B', 'warp_folder': 'Other/job003/sub'}],
+                 'gpus': '1'}},
+        ]}
+        pm = _fake_pm()
+        cleared = []
+        id_map = pm.loadWorkflow(workflow=workflow, external_inputs='clear',
+                                 cleared=cleared)
+        self.assertEqual(id_map, {'Export/job006': 'Export/job100',
+                                  'Population/job022': 'Population/job101'})
+        params = pm.saved[1][1]
+        self.assertEqual(params['sources'],
+                         [{'name': 'A', 'warp_folder': 'Export/job100'},
+                          {'name': 'B', 'warp_folder': ''}])
+        self.assertEqual(params['gpus'], '1')
+        self.assertEqual(cleared, [{'jobid': 'Population/job022',
+                                    'param': 'sources',
+                                    'value': 'Other/job003/sub'}])
+        sources = workflow['jobs'][1]['params']['sources']
+        self.assertEqual(sources[0]['warp_folder'], 'Export/job006')
+        self.assertEqual(sources[1]['warp_folder'], 'Other/job003/sub')
+
+    def test_nested_reference_order(self):
+        """ A nested reference is a dependency: the job is created after
+        its parent, even when listed before it. """
+        workflow = {'jobs': [
+            {'jobid': 'Population/job022', 'jobtype': 'Population',
+             'params': {'sources': [{'warp_folder': 'Export/job006'}]}},
+            {'jobid': 'Export/job006', 'jobtype': 'Export', 'params': {}},
+        ]}
+        pm = _fake_pm()
+        id_map = pm.loadWorkflow(workflow=workflow)
+        self.assertEqual(id_map['Export/job006'], 'Export/job100')
+        self.assertEqual(pm.saved[1][1]['sources'],
+                         [{'warp_folder': 'Export/job100'}])
+
+    def test_apof_tutorial_part1(self):
+        """ The Warp ApoF tutorial part 1: the M population source points
+        at the new export particles job. """
+        import os
+        here = os.path.dirname(os.path.abspath(__file__))
+        wf_file = os.path.join(here, '..', '..', 'config', 'workflows',
+                               'apof-warp-tutorial-part1.json')
+        pm = _fake_pm()
+        id_map = pm.loadWorkflow(workflow_file=wf_file)
+        saved = dict(pm.saved)
+        pop = saved[id_map['WarpMCreatePopulation/job022']]
+        self.assertEqual(pop['sources'][0]['warp_folder'],
+                         id_map['WarpExportParticles/job006'])
+
     def test_invalid_option(self):
         with self.assertRaises(Exception):
             _fake_pm().loadWorkflow(workflow=WORKFLOW, external_inputs='drop')

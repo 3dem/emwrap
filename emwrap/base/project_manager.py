@@ -32,7 +32,8 @@ from emtools.jobs import BatchManager, Workflow
 from emtools.metadata import Table, StarFile, RelionStar
 
 from .config import ProcessingConfig
-from .job_form import JobForm, JobValidationError
+from .job_form import (JobForm, JobValidationError,
+                       iter_param_strings, map_param_strings)
 from .processing_pipeline import ProcessingPipeline
 from .project_data import ProjectData, PROJECT_JSON, LABELS_JSON, EMHUB_DIR
 from .project_labels import ProjectLabels
@@ -302,13 +303,12 @@ class ProjectManager(FolderManager):
         skip_path_exists = None
         if for_schedule and job is not None:
             parent_ids = {inp.parent.id for inp in job.inputs}
-            for v in (params or {}).values():
-                if not isinstance(v, str):
-                    continue
-                for job2 in self._wf.jobs():
-                    if (job2.id != job.id
-                            and self._param_references_job(v, job2.id)):
-                        parent_ids.add(job2.id)
+            for value in (params or {}).values():
+                for v in iter_param_strings(value):
+                    for job2 in self._wf.jobs():
+                        if (job2.id != job.id
+                                and self._param_references_job(v, job2.id)):
+                            parent_ids.add(job2.id)
             if parent_ids:
                 skip_path_exists = lambda value, ids=parent_ids: (
                     isinstance(value, str)
@@ -358,10 +358,8 @@ class ProjectManager(FolderManager):
         # Clear jobs inputs and add new ones
         job.clearInputs()
         for k, v in params.items():
-            values = v if isinstance(v, list) else [v]
-            for item in values:
-                if not isinstance(item, str):
-                    continue
+            # Also references nested in lists and dicts (e.g. table params)
+            for item in iter_param_strings(v):
                 for job2 in self._wf.jobs():
                     if self._param_references_job(item, job2.id):
                         data = job2.getOutput(item)
@@ -456,18 +454,25 @@ class ProjectManager(FolderManager):
             for jobId, jobInfo in jobDict.items():
                 params = dict(jobInfo.get('params') or {})
                 for key, value in params.items():
-                    if self._external_job_ref(value, jobDict):
-                        params[key] = ''
-                        if cleared is not None:
-                            cleared.append({'jobid': jobId, 'param': key,
-                                            'value': value})
+                    def _clear(s, key=key):
+                        if self._external_job_ref(s, jobDict):
+                            if cleared is not None:
+                                cleared.append({'jobid': jobId, 'param': key,
+                                                'value': s})
+                            return ''
+                        return s
+                    # A copy, the given workflow is not modified
+                    params[key] = map_param_strings(value, _clear)
                 jobInfo['params'] = params
 
-        # Compute graph with dependencies
+        # Compute graph with dependencies (also from nested values)
         for jobId, jobInfo in jobDict.items():
             for key, value in (jobInfo.get('params') or {}).items():
+                strings = list(iter_param_strings(value))
                 for jobId2 in jobDict:
-                    if jobId2 != jobId and self._param_references_job(value, jobId2):
+                    if jobId2 != jobId and any(
+                            self._param_references_job(s, jobId2)
+                            for s in strings):
                         jobInfo['parents'].add(jobId2)
                         jobDict[jobId2]['children'].add(jobId)
 
@@ -476,11 +481,14 @@ class ProjectManager(FolderManager):
         newIdsDict = {}  # Map old ids to new ids
         remaining = set(jobDict.keys())
 
-        def _new_value(v, parents):
+        def _new_string(v, parents):
             for p in sorted(parents, key=len, reverse=True):
                 if self._param_references_job(v, p):
                     return v.replace(p, newIdsDict[p], 1) if p in newIdsDict else ''
             return v
+
+        def _new_value(v, parents):
+            return map_param_strings(v, lambda s: _new_string(s, parents))
 
         while remaining:
             # Keep the jobDict order (e.g. workflow order) for the new ids
@@ -1121,6 +1129,21 @@ class ProjectManager(FolderManager):
 
         return template.format(**qparams)
 
+    @staticmethod
+    def _queueParams(queue, job_params):
+        """Return the values of the queue params for a job: the defaults of
+        the queue definition (EMWRAP_CONFIG['queues'][i]['params']) updated
+        with the job's 'queue.param.<qname>.<name>' values. Jobs created
+        without the web form (API, MCP, workflows, command line) usually
+        do not have all of them. A missing or None job value takes the
+        default, any other value (also '') overrides it."""
+        qprefix = f"queue.param.{queue['name']}."
+        qparams = {p['name']: p['default'] for p in queue.get('params', [])
+                   if 'name' in p and p.get('default') is not None}
+        qparams.update({k[len(qprefix):]: v for k, v in job_params.items()
+                        if k.startswith(qprefix) and v is not None})
+        return qparams
+
     def _prepareQueueSubmission(self, cmd, job_params, folder_path, job_id=None):
         """Build cluster submission script content and command for a job folder."""
         qname = job_params.get('queue.name', 'NO-NAME')
@@ -1140,9 +1163,7 @@ class ProjectManager(FolderManager):
             eprint(msg)
             return None
 
-        qprefix = f'queue.param.{qname}.'
-        qparams = {k.replace(qprefix, ''): v for k, v in job_params.items()
-                   if k.startswith(qprefix)}
+        qparams = self._queueParams(queue, job_params)
 
         script_file = os.path.join(folder_path, 'job.script')
         script_log = os.path.join(folder_path, 'job.log')

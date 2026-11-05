@@ -27,6 +27,7 @@ from .config import ProcessingConfig
 from .processing_pipeline import ProcessingPipeline
 from .project_lock import atomic_write_json
 from .project_labels import ProjectLabels
+from .job_form import JobForm, iter_param_strings
 
 
 # Hidden folder inside the project where EMhub/emwrap keep their own state
@@ -967,15 +968,23 @@ class ProjectData(FolderManager):
         # Detect inputs not already in the job
         inputs = []
 
-        for key, value in params.items():
-            if not value or not isinstance(value, str):
-                continue
+        # Table and multi-pointer params are JSON strings in job.star,
+        # decode them to also find the job references inside (e.g. the
+        # 'sources' of Warp M create population)
+        job_form = ProcessingConfig.get_job_form(job['jobtype']) if job else None
+        if job_form:
+            params = JobForm.decode_json_params(job_form, params)
 
-            rel_value = self._project.relpath(value) if os.path.isabs(value) else value
+        for key, param_value in params.items():
+            for value in iter_param_strings(param_value):
+                if not value:
+                    continue
 
-            for pid in sorted(all_job_ids, key=len, reverse=True):
-                if self._project._param_references_job(rel_value, pid):                    
-                    inputs.append((pid, rel_value))
+                rel_value = self._project.relpath(value) if os.path.isabs(value) else value
+
+                for pid in sorted(all_job_ids, key=len, reverse=True):
+                    if self._project._param_references_job(rel_value, pid):
+                        inputs.append((pid, rel_value))
 
         # Compute outputs info
         outputs = self._collectJobOutputIds(jobId, job=job)
@@ -1506,17 +1515,16 @@ class ProjectData(FolderManager):
 
         for job in self._wf.jobs():
             params = self._project._readJobParams(job)
-            for k, v in params.items():
-                if not isinstance(v, str):
-                    continue
-                if os.path.isabs(v):
-                    v = self._project.relpath(v)
-                v = Path.rmslash(v)
-                if not self._wf.hasData(v):
-                    continue
-                info = self.getOutputInfo(v)
-                print(format.format(job.id, k, v, info['type'], info['info']))
-                if not job.hasInput(v):
-                    job.addInputs([self._wf.getData(v)])
+            for k, value in params.items():
+                for v in iter_param_strings(value):
+                    if os.path.isabs(v):
+                        v = self._project.relpath(v)
+                    v = Path.rmslash(v)
+                    if not self._wf.hasData(v):
+                        continue
+                    info = self.getOutputInfo(v)
+                    print(format.format(job.id, k, v, info['type'], info['info']))
+                    if not job.hasInput(v):
+                        job.addInputs([self._wf.getData(v)])
 
         self._project._save_workflow_data(message='sync job inputs')
