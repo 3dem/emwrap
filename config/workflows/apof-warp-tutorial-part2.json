@@ -1,6 +1,6 @@
 {
     "name": "ApoF - M Refinements",
-    "description": "M refinement part of the same Warp Apoferritn tutorial.",
+    "description": "M refinement part of the same Warp Apoferritin tutorial.",
     "jobs": [
         {
             "jobid": "WarpMCore/job023",
@@ -17,7 +17,7 @@
                 "mcore.ctf_zernike3": false,
                 "mcore.ctf_zernike4": false,
                 "mcore.ctf_zernike5": false,
-                "mcore.population": "WarpMCreatePopulation/job022/m/ApoF.population",
+                "mcore.population": "",
                 "mcore.refine_doming": false,
                 "mcore.refine_imagewarp": "",
                 "mcore.refine_mag": false,
