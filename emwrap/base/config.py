@@ -315,13 +315,50 @@ class ProcessingConfig:
             jsonFile = cls.get_job_form_file(jobtype)
             if os.path.exists(jsonFile):
                 with open(jsonFile) as f:
-                    return json.load(f)
+                    job_form = json.load(f)
+                cls._validate_enum_orders(job_form, jsonFile)
+                return job_form
             else:
                 Pretty.dprint(Color.red(f"Form file not found: {jsonFile}"))
         else:
             Pretty.dprint(Color.red(f"Job type not found: {jobtype}"))
 
         return None
+
+    @staticmethod
+    def _validate_enum_orders(job_form, form_file):
+        """Reject invalid optional EnumParam display orders when loading forms."""
+        def validate_param(param):
+            if param.get('paramClass') == 'EnumParam' and 'order' in param:
+                order = param['order']
+                choices = param.get('choices')
+                if not isinstance(order, list) or not all(
+                        isinstance(value, str) for value in order):
+                    raise ValueError(
+                        f"Invalid 'order' for EnumParam '{param.get('name', '<unnamed>')}' "
+                        f"in {form_file}: expected a list of choice keys.")
+                if len(order) != len(set(order)):
+                    raise ValueError(
+                        f"Invalid 'order' for EnumParam '{param.get('name', '<unnamed>')}' "
+                        f"in {form_file}: duplicate choice keys are not allowed.")
+
+                choice_keys = (set(choices) if isinstance(choices, dict)
+                               else set(choices) if isinstance(choices, list)
+                               else set())
+                unknown = [value for value in order if value not in choice_keys]
+                if unknown:
+                    raise ValueError(
+                        f"Invalid 'order' for EnumParam '{param.get('name', '<unnamed>')}' "
+                        f"in {form_file}: unknown choice key(s): "
+                        f"{', '.join(unknown)}.")
+
+            if param.get('paramClass') != 'TableParam':
+                for child in param.get('params', []):
+                    validate_param(child)
+
+        for section in job_form.get('sections', []):
+            for param in section.get('params', []):
+                validate_param(param)
 
     @classmethod
     def get_workflow_file(cls, workflowId, internal=True):
