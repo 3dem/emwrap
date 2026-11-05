@@ -15,6 +15,7 @@ pasting jobs copied from another project (no datasets needed):
     python -m unittest emwrap.tests.test_workflow_import
 """
 
+import json
 import unittest
 
 from emwrap.base.project_manager import ProjectManager
@@ -57,7 +58,7 @@ class TestWorkflowImport(unittest.TestCase):
 
     def test_keep_external_inputs(self):
         pm = _fake_pm()
-        id_map = pm.loadWorkflow(workflow=WORKFLOW)
+        id_map = pm.loadWorkflow(workflow=WORKFLOW, external_inputs='keep')
         self.assertEqual(id_map, {'Ctf/job004': 'Ctf/job100',
                                   'Picking/job007': 'Picking/job101'})
         ctf, picking = [p for _, p in pm.saved]
@@ -155,6 +156,85 @@ class TestWorkflowImport(unittest.TestCase):
         pop = saved[id_map['WarpMCreatePopulation/job022']]
         self.assertEqual(pop['sources'][0]['warp_folder'],
                          id_map['WarpExportParticles/job006'])
+
+    def test_clear_by_default(self):
+        """ Loading a workflow clears the external references by default,
+        their ids come from the project where it was made. """
+        pm = _fake_pm()
+        cleared = []
+        pm.loadWorkflow(workflow=WORKFLOW, cleared=cleared)
+        ctf, picking = [p for _, p in pm.saved]
+        self.assertEqual(ctf['input_star'], '')
+        self.assertEqual(picking['model'], '')
+        self.assertEqual(picking['input_star'], 'Ctf/job100/micrographs_ctf.star')
+        self.assertEqual(len(cleared), 2)
+
+    def test_duplicate_keeps_external_inputs(self):
+        """ Duplicating jobs in the same project keeps their inputs from
+        jobs that are not duplicated. """
+        pm = _fake_pm()
+        jobDict = {'Picking/job007': {
+            'jobtype': 'Picking', 'parents': set(), 'children': set(),
+            'params': {'input_star': 'Ctf/job004/micrographs_ctf.star'}}}
+        pm._instanciateJobs(jobDict)
+        self.assertEqual(pm.saved[0][1]['input_star'],
+                         'Ctf/job004/micrographs_ctf.star')
+
+    def test_export_clears_external_inputs(self):
+        """ Exported jobs only keep the references between them, also the
+        nested ones, the others are cleared and reported. """
+        jobs = {
+            'Ctf/job004': ('Ctf', {'input_star': 'Import/job002/movies.star',
+                                   'box': '256'}),
+            'Population/job011': ('Population', {
+                'sources': [{'name': 'A', 'warp_folder': 'Ctf/job004'},
+                            {'name': 'B', 'warp_folder': 'Export/job003'}],
+                'mask': 'External/job010/mask.mrc'}),
+        }
+
+        class _Job(dict):
+            def __init__(self, jobId, jobType):
+                super().__init__(jobtype=jobType)
+                self.id = jobId
+
+        pm = _fake_pm()
+        pm._getJob = lambda jobId: _Job(jobId, jobs[jobId][0])
+        pm._readJobParams = lambda job: jobs[job.id][1]
+        cleared = []
+        wf = pm.getWorkflowJobs(['Ctf/job004', 'Population/job011/'],
+                                clear_external=True, cleared=cleared)
+        ctf, pop = [j['params'] for j in wf['jobs']]
+        self.assertEqual(ctf, {'input_star': '', 'box': '256'})
+        self.assertEqual(pop['sources'],
+                         [{'name': 'A', 'warp_folder': 'Ctf/job004'},
+                          {'name': 'B', 'warp_folder': ''}])
+        self.assertEqual(pop['mask'], '')
+        self.assertEqual(sorted(c['value'] for c in cleared),
+                         ['Export/job003', 'External/job010/mask.mrc',
+                          'Import/job002/movies.star'])
+        # Copying jobs (e.g. to paste them) keeps the references
+        wf = pm.getWorkflowJobs(['Ctf/job004'])
+        self.assertEqual(wf['jobs'][0]['params']['input_star'],
+                         'Import/job002/movies.star')
+
+    def test_templates_have_no_external_refs(self):
+        """ The workflow templates only reference their own jobs. """
+        import glob
+        import os
+        from emwrap.base.job_form import iter_param_strings
+        here = os.path.dirname(os.path.abspath(__file__))
+        wf_dir = os.path.join(here, '..', '..', 'config', 'workflows')
+        pm = _fake_pm()
+        for wf_file in glob.glob(os.path.join(wf_dir, '**', '*.json'),
+                                 recursive=True):
+            with open(wf_file) as f:
+                workflow = json.load(f)
+            ids = {j['jobid'].rstrip('/') for j in workflow.get('jobs', [])}
+            for j in workflow.get('jobs', []):
+                for v in iter_param_strings(j.get('params', {})):
+                    with self.subTest(file=os.path.basename(wf_file),
+                                      job=j['jobid'], value=v):
+                        self.assertIsNone(pm._external_job_ref(v, ids))
 
     def test_invalid_option(self):
         with self.assertRaises(Exception):

@@ -108,6 +108,51 @@ class TestNestedInputs(unittest.TestCase):
             ('Refine3D/job009', 'Refine3D/job009/run_data.star'),
             ('WarpExportParticles/job007', 'WarpExportParticles/job007')])
 
+    def _cachedData(self, wf, cached):
+        """ ProjectData with a job info cached in project.json, newer than
+        the job files (so it would be reused if its version is current). """
+        data = ProjectData.__new__(ProjectData)
+        data._project = unittest.mock.Mock(force=False)
+        data._wf = wf
+        data._jobs = {'WarpMCreatePopulation/job011': cached}
+        data._outputs = {}
+        data._forcedJobs = set()
+        data._debug = lambda *args, **kwargs: None
+        data._jobFilesMtimes = lambda jobId: {'job.star': 1.0}
+        data.join = lambda *p: os.path.join(self.tmp, *p)
+        data._computeJobInfo = unittest.mock.Mock(return_value={
+            'inputs': [('WarpExportParticles/job007',
+                        'WarpExportParticles/job007')],
+            'outputs': [], 'status': 'Succeeded'})
+        return data
+
+    def test_cached_inputs_old_version(self):
+        """ Inputs cached before nested params were detected (no
+        inputsVersion, as in projects processed before) are computed
+        again, although the job files did not change. """
+        jobId = 'WarpMCreatePopulation/job011'
+        data = self._cachedData(_workflow(), {
+            'inputs': [], 'outputs': [], 'status': 'Succeeded', 'ts': 10.0})
+        info, computed = data._getJobInfo(jobId)
+        self.assertTrue(computed)
+        self.assertEqual(info['inputs'][0][0], 'WarpExportParticles/job007')
+        self.assertEqual(info['inputsVersion'], ProjectData.JOB_INPUTS_VERSION)
+        self.assertEqual(data._jobs[jobId]['inputsVersion'],
+                         ProjectData.JOB_INPUTS_VERSION)
+
+        # Cached by the current version: reused while the files don't change
+        data._computeJobInfo.reset_mock()
+        info, computed = data._getJobInfo(jobId)
+        self.assertFalse(computed)
+        data._computeJobInfo.assert_not_called()
+
+    def test_cached_status_only(self):
+        """ A cached status without inputs (e.g. set when saving a job) is
+        not a reason to compute the job info. """
+        data = self._cachedData(_workflow(), {'status': 'Saved', 'ts': 10.0})
+        info, computed = data._getJobInfo('WarpMCreatePopulation/job011')
+        self.assertFalse(computed)
+
 
 if __name__ == '__main__':
     unittest.main()
