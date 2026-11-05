@@ -294,6 +294,12 @@
             }
           ]
         },
+        "order": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true,
+          "description": "Optional display order for choice values; does not change their values. Unlisted choices follow in their original order."
+        },
         "display": {
           "type": "string",
           "enum": ["combo", "hlist", "vlist"],
