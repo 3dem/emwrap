@@ -27,6 +27,8 @@ from .config import ProcessingConfig
 from .processing_pipeline import ProcessingPipeline
 from .project_lock import atomic_write_json
 from .project_labels import ProjectLabels
+from .job_form import JobForm, iter_param_strings
+from . import workflow_refs
 
 
 # Hidden folder inside the project where EMhub/emwrap keep their own state
@@ -95,6 +97,12 @@ class ProjectData(FolderManager):
     # versions are resolved again from the files (see _getJobInfo)
     # Version 2: Refine3D and InitialModel jobs (were the pipeline nodes)
     RELION_ITER_OUTPUTS_VERSION = 2
+
+    # Version of the inputs detected from the job params (cached with each
+    # job info), the info of jobs cached by other versions is computed again
+    # Version 2: references nested in table and multi-pointer params (e.g.
+    # the 'sources' of Warp M create population, a list of dicts)
+    JOB_INPUTS_VERSION = 2
 
     # Files of an iteration that are outputs, in the order they are listed.
     # Refine3D iterations only have half maps (half1 is listed, as Relion does)
@@ -967,15 +975,17 @@ class ProjectData(FolderManager):
         # Detect inputs not already in the job
         inputs = []
 
-        for key, value in params.items():
-            if not value or not isinstance(value, str):
-                continue
+        # Table and multi-pointer params are JSON strings in job.star,
+        # decode them to also find the job references inside (e.g. the
+        # 'sources' of Warp M create population)
+        job_form = ProcessingConfig.get_job_form(job['jobtype']) if job else None
+        if job_form:
+            params = JobForm.decode_json_params(job_form, params)
 
-            rel_value = self._project.relpath(value) if os.path.isabs(value) else value
-
-            for pid in sorted(all_job_ids, key=len, reverse=True):
-                if self._project._param_references_job(rel_value, pid):                    
-                    inputs.append((pid, rel_value))
+        relpath = self._project.relpath
+        for _, value, pid in workflow_refs.job_refs(params, all_job_ids,
+                                                     relpath):
+            inputs.append((pid, workflow_refs.normalize_value(value, relpath)))
 
         # Compute outputs info
         outputs = self._collectJobOutputIds(jobId, job=job)
@@ -1195,6 +1205,11 @@ class ProjectData(FolderManager):
                 and self._isRelionIterJob(job)):
             cached = None
 
+        # Inputs cached before references in nested params were detected
+        if (cached and 'inputs' in cached
+                and cached.get('inputsVersion') != self.JOB_INPUTS_VERSION):
+            cached = None
+
         mtimes = self._jobFilesMtimes(job_id)
         if (cached and not self._project.force
                 and job_id not in self._forcedJobs
@@ -1204,6 +1219,7 @@ class ProjectData(FolderManager):
 
         jobFiles = [self.join(job_id, fn) for fn in self.JOB_INFO_FILES]
         info = self._computeJobInfo(job_id, jobFiles)
+        info['inputsVersion'] = self.JOB_INPUTS_VERSION
         self._set_info(self._jobs, job_id, info)
         self._forcedJobs.discard(job_id)
         return info, True
@@ -1506,17 +1522,15 @@ class ProjectData(FolderManager):
 
         for job in self._wf.jobs():
             params = self._project._readJobParams(job)
-            for k, v in params.items():
-                if not isinstance(v, str):
-                    continue
-                if os.path.isabs(v):
-                    v = self._project.relpath(v)
-                v = Path.rmslash(v)
-                if not self._wf.hasData(v):
-                    continue
-                info = self.getOutputInfo(v)
-                print(format.format(job.id, k, v, info['type'], info['info']))
-                if not job.hasInput(v):
-                    job.addInputs([self._wf.getData(v)])
+            for k, value in params.items():
+                for v in iter_param_strings(value):
+                    v = workflow_refs.normalize_id(
+                        workflow_refs.normalize_value(v, self._project.relpath))
+                    if not self._wf.hasData(v):
+                        continue
+                    info = self.getOutputInfo(v)
+                    print(format.format(job.id, k, v, info['type'], info['info']))
+                    if not job.hasInput(v):
+                        job.addInputs([self._wf.getData(v)])
 
         self._project._save_workflow_data(message='sync job inputs')

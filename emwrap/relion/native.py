@@ -55,7 +55,8 @@ class RelionNative(RelionBasePipeline):
             wait_project_lock_free(self.workingDir)
 
             # Get Relion's version
-            self.batch_execute('version', batch, {'relion_pipeliner': '--version'})
+            self.batch_execute('version', batch, {'relion_pipeliner': '--version'},
+                               check=False)
 
             # Run the job via the relion_pipeliner
             jobId = Path.addslash(self.outputDir)

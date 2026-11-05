@@ -16,7 +16,6 @@
 
 import os
 import sys
-import re
 import shlex
 import json
 import string
@@ -33,6 +32,7 @@ from emtools.metadata import Table, StarFile, RelionStar
 
 from .config import ProcessingConfig
 from .job_form import JobForm, JobValidationError
+from . import workflow_refs
 from .processing_pipeline import ProcessingPipeline
 from .project_data import ProjectData, PROJECT_JSON, LABELS_JSON, EMHUB_DIR
 from .project_labels import ProjectLabels
@@ -302,13 +302,10 @@ class ProjectManager(FolderManager):
         skip_path_exists = None
         if for_schedule and job is not None:
             parent_ids = {inp.parent.id for inp in job.inputs}
-            for v in (params or {}).values():
-                if not isinstance(v, str):
-                    continue
-                for job2 in self._wf.jobs():
-                    if (job2.id != job.id
-                            and self._param_references_job(v, job2.id)):
-                        parent_ids.add(job2.id)
+            job_ids = [j.id for j in self._wf.jobs()]
+            parent_ids.update(
+                pid for _, _, pid in workflow_refs.job_refs(
+                    params, job_ids, self.relpath) if pid != job.id)
             if parent_ids:
                 skip_path_exists = lambda value, ids=parent_ids: (
                     isinstance(value, str)
@@ -346,32 +343,25 @@ class ProjectManager(FolderManager):
 
     def _param_references_job(self, param_value, job_id):
         """Return True when a param value points at a job folder or its outputs."""
-        if not isinstance(param_value, str):
-            return False
+        return workflow_refs.string_references_job(param_value, job_id,
+                                                   self.relpath)
 
-        if os.path.isabs(param_value):
-            param_value = self.relpath(param_value)
-            
-        return param_value == job_id or param_value.startswith(f'{job_id}/')
-         
     def _updateJobInputs(self, job, params):
         # Clear jobs inputs and add new ones
         job.clearInputs()
-        for k, v in params.items():
-            values = v if isinstance(v, list) else [v]
-            for item in values:
-                if not isinstance(item, str):
-                    continue
-                for job2 in self._wf.jobs():
-                    if self._param_references_job(item, job2.id):
-                        data = job2.getOutput(item)
-                        if data is None:
-                            data = job2.registerOutput(item, datatype="File")
-                        elif 'datatype' not in data:
-                            info = self._data.getOutputInfo(item)
-                            data['datatype'] = info['type']
-                            data['info'] = info.get('info', '')
-                        job.addInputs([data])
+        jobs = {j.id: j for j in self._wf.jobs()}
+        # Also references nested in lists and dicts (e.g. table params)
+        for _, item, jobId2 in workflow_refs.job_refs(params, jobs,
+                                                       self.relpath):
+            job2 = jobs[jobId2]
+            data = job2.getOutput(item)
+            if data is None:
+                data = job2.registerOutput(item, datatype="File")
+            elif 'datatype' not in data:
+                info = self._data.getOutputInfo(item)
+                data['datatype'] = info['type']
+                data['info'] = info.get('info', '')
+            job.addInputs([data])
 
     def saveJob(self, jobTypeOrId, params, update=True):
         """ Save a job. If jobId = None, a new job is created
@@ -421,88 +411,24 @@ class ProjectManager(FolderManager):
         job_params = self._readJobParams(job, extraParams=params)
         self.saveJob(job['jobtype'], job_params)
 
-    # A param pointing at a job folder or its files: <JobType>/jobNNN[/...]
-    _JOB_REF_RE = re.compile(r'^([^/\s]+/job\d+)(?:/|$)')
+    _JOB_REF_RE = workflow_refs.JOB_REF_RE
 
     def _external_job_ref(self, param_value, jobIds):
         """ Return the job id referenced by param_value when it is a job
         not in jobIds, otherwise None. """
-        if not isinstance(param_value, str) or not param_value:
-            return None
-        value = param_value
-        if os.path.isabs(value):
-            value = self.relpath(value)
-        if m := self._JOB_REF_RE.match(value):
-            return None if m.group(1) in jobIds else m.group(1)
-        return None
+        return workflow_refs.external_ref(param_value, jobIds, self.relpath)
 
     def _instanciateJobs(self, jobDict, external_inputs='keep', cleared=None):
         """
         Instanciate jobs in jobDict giving new Ids and preserving dependencies.
-        This method can be called from duplicateJobs or from loadWorkflow
-
-        Args:
-            external_inputs: what to do with the params referencing jobs
-                not in jobDict: 'keep' them (same project, e.g. duplicate)
-                or 'clear' them (jobs coming from another project, whose
-                job ids mean other jobs here).
-            cleared: optional list, filled with {'jobid', 'param', 'value'}
-                of each cleared param (jobid is the one in jobDict).
+        This method can be called from duplicateJobs or from loadWorkflow.
+        See workflow_refs.instantiate for external_inputs and cleared.
         """
-        if external_inputs not in ('keep', 'clear'):
-            raise Exception(f"Invalid external_inputs: {external_inputs}")
-
-        if external_inputs == 'clear':
-            for jobId, jobInfo in jobDict.items():
-                params = dict(jobInfo.get('params') or {})
-                for key, value in params.items():
-                    if self._external_job_ref(value, jobDict):
-                        params[key] = ''
-                        if cleared is not None:
-                            cleared.append({'jobid': jobId, 'param': key,
-                                            'value': value})
-                jobInfo['params'] = params
-
-        # Compute graph with dependencies
-        for jobId, jobInfo in jobDict.items():
-            for key, value in (jobInfo.get('params') or {}).items():
-                for jobId2 in jobDict:
-                    if jobId2 != jobId and self._param_references_job(value, jobId2):
-                        jobInfo['parents'].add(jobId2)
-                        jobDict[jobId2]['children'].add(jobId)
-
-        # Instanciate in dependency order; jobs with multiple parents are created once
-        # after all of their parents exist in newIdsDict.
-        newIdsDict = {}  # Map old ids to new ids
-        remaining = set(jobDict.keys())
-
-        def _new_value(v, parents):
-            for p in sorted(parents, key=len, reverse=True):
-                if self._param_references_job(v, p):
-                    return v.replace(p, newIdsDict[p], 1) if p in newIdsDict else ''
-            return v
-
-        while remaining:
-            # Keep the jobDict order (e.g. workflow order) for the new ids
-            ready = [
-                jobId for jobId in jobDict if jobId in remaining
-                and jobDict[jobId]['parents'].issubset(newIdsDict)
-            ]
-            if not ready:
-                raise Exception(
-                    "Workflow job dependency cycle or missing parent references."
-                )
-
-            for jobId in ready:
-                jobInfo = jobDict[jobId]
-                params = jobInfo['params']
-                new_params = {k: _new_value(v, jobInfo['parents'])
-                              for k, v in params.items()}
-                newJob = self.saveJob(jobInfo['jobtype'], new_params)
-                newIdsDict[jobId] = newJob.id
-                remaining.remove(jobId)
-
-        return newIdsDict
+        return workflow_refs.instantiate(
+            jobDict,
+            lambda _, jobType, params: self.saveJob(jobType, params).id,
+            external_inputs=external_inputs, cleared=cleared,
+            relpath=self.relpath)
 
     def duplicateJobs(self, jobIds):
         """ Duplicate one or many jobs.
@@ -514,26 +440,44 @@ class ProjectManager(FolderManager):
             return {
                 'jobtype': job['jobtype'],
                 'params': self._readJobParams(job),
-                'parents': set(),
-                'children': set()
             }
 
         return self._instanciateJobs({jobId: _jobInfo(jobId) for jobId in jobIds})
 
-    def getWorkflowJobs(self, jobIds):
+    def _clearExternalRefs(self, jobId, params, jobIds, cleared=None):
+        """ Return a copy of params where the references to jobs not in
+        jobIds (also nested in lists and dicts) are cleared, adding
+        {'jobid', 'param', 'value'} to cleared for each one. """
+        return workflow_refs.clear_external(params, jobIds, cleared, jobId,
+                                            self.relpath)
+
+    def getWorkflowJobs(self, jobIds, clear_external=False, cleared=None):
         """ Return the workflow {'jobs': [{jobid, jobtype, params}]} of the
-        given job ids, in that order (see exportWorkflow, loadWorkflow). """
+        given job ids, in that order (see exportWorkflow, loadWorkflow).
+
+        Args:
+            clear_external: clear the params referencing jobs that are not
+                in jobIds, their ids would mean other jobs in another
+                project (e.g. a workflow template).
+            cleared: optional list, filled with {'jobid', 'param', 'value'}
+                of each cleared param.
+        """
         jobs = []
+        ids = {workflow_refs.normalize_id(j) for j in jobIds}
         for jobId in jobIds:
-            job = self._getJob(Path.rmslash(jobId))
+            job = self._getJob(workflow_refs.normalize_id(jobId))
+            params = self._readJobParams(job)
+            if clear_external:
+                params = self._clearExternalRefs(job.id, params, ids, cleared)
             jobs.append({
                 'jobid': job.id,
                 'jobtype': job['jobtype'],
-                'params': self._readJobParams(job),
+                'params': params,
             })
         return {'jobs': jobs}
 
-    def exportWorkflow(self, jobIds, output_path, in_project=True):
+    def exportWorkflow(self, jobIds, output_path, in_project=True,
+                       clear_external=True, cleared=None):
         """" Export a subworkflow with the given job ids.
 
         Args:
@@ -541,10 +485,14 @@ class ProjectManager(FolderManager):
             output_path: JSON file to write the workflow
             in_project: if True, the file is written in the project folder
                 (only with the output_path name), otherwise in output_path.
+            clear_external, cleared: see getWorkflowJobs. By default, the
+                references to jobs that are not exported are cleared.
         Returns:
             The path of the written file.
         """
-        workflow_json = self.getWorkflowJobs(jobIds)
+        workflow_json = self.getWorkflowJobs(jobIds,
+                                             clear_external=clear_external,
+                                             cleared=cleared)
 
         # FIXME: For now, let's write all outputs to the project directory
         if in_project:
@@ -553,10 +501,13 @@ class ProjectManager(FolderManager):
             json.dump(workflow_json, f, indent=4)
         return output_path
 
-    def loadWorkflow(self, external_inputs='keep', cleared=None, **kwargs):
+    def loadWorkflow(self, external_inputs='clear', cleared=None, **kwargs):
         """ Load a workflow with jobs templates (workflow_file, workflow_id
         or the workflow dict). See _instanciateJobs for external_inputs
-        and cleared (e.g. 'clear' for jobs copied from another project). """
+        and cleared. By default, the references to jobs not in the
+        workflow are cleared: their ids come from the project where the
+        workflow was made and mean other jobs here. Use 'keep' only for
+        jobs copied from this same project. """
         if 'workflow_file' in kwargs:
             workflow_file = kwargs['workflow_file']
             if not os.path.exists(workflow_file):
@@ -570,15 +521,13 @@ class ProjectManager(FolderManager):
         else:
             raise Exception("workflow_id, workflow_file or workflow is required.")
 
-        def _jobInfo(jobEntry):
-            return {
-                'jobtype': jobEntry['jobtype'],
-                'params': jobEntry['params'],
-                'parents': set(),
-                'children': set()
-            }
+        jobDict = {
+            workflow_refs.normalize_id(e['jobid']): {
+                'jobtype': e['jobtype'], 'params': e['params']}
+            for e in workflow['jobs']
+        }
         return self._instanciateJobs(
-            {Path.rmslash(e['jobid']): _jobInfo(e) for e in workflow['jobs']},
+            jobDict,
             external_inputs=external_inputs, cleared=cleared)
 
     def runJob(self, jobTypeOrId, params=None, clean=False, wait=False, update=True):
@@ -1121,6 +1070,21 @@ class ProjectManager(FolderManager):
 
         return template.format(**qparams)
 
+    @staticmethod
+    def _queueParams(queue, job_params):
+        """Return the values of the queue params for a job: the defaults of
+        the queue definition (EMWRAP_CONFIG['queues'][i]['params']) updated
+        with the job's 'queue.param.<qname>.<name>' values. Jobs created
+        without the web form (API, MCP, workflows, command line) usually
+        do not have all of them. A missing or None job value takes the
+        default, any other value (also '') overrides it."""
+        qprefix = f"queue.param.{queue['name']}."
+        qparams = {p['name']: p['default'] for p in queue.get('params', [])
+                   if 'name' in p and p.get('default') is not None}
+        qparams.update({k[len(qprefix):]: v for k, v in job_params.items()
+                        if k.startswith(qprefix) and v is not None})
+        return qparams
+
     def _prepareQueueSubmission(self, cmd, job_params, folder_path, job_id=None):
         """Build cluster submission script content and command for a job folder."""
         qname = job_params.get('queue.name', 'NO-NAME')
@@ -1140,9 +1104,7 @@ class ProjectManager(FolderManager):
             eprint(msg)
             return None
 
-        qprefix = f'queue.param.{qname}.'
-        qparams = {k.replace(qprefix, ''): v for k, v in job_params.items()
-                   if k.startswith(qprefix)}
+        qparams = self._queueParams(queue, job_params)
 
         script_file = os.path.join(folder_path, 'job.script')
         script_log = os.path.join(folder_path, 'job.log')
