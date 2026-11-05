@@ -897,23 +897,10 @@ class WarpBasePipeline(ProcessingPipeline):
         return subargs
 
     def execute_checked(self, label, batch, args, **kwargs):
-        """Run a program and raise if it failed to run or exited non-zero.
-
-        Neither batch.call nor batch.execute raise on failure, so both the
-        batch error and the return code have to be checked here. Otherwise a
-        missing launcher (exit code 127) would silently leave the job state
-        untouched while the job is reported as successful.
-        """
-        returncode = self.batch_execute(label, batch, args, **kwargs)
-
-        if batch.error:
-            raise Exception(f"{label}: failed with error:\n{batch.error}")
-
-        if returncode:
-            raise Exception(f"{label}: failed with exit code {returncode}, "
-                            f"check {self.join('run.out')}")
-
-        return returncode
+        """Run a program and raise if it failed to run or exited non-zero
+        (batch_execute already checks it by default, kept for clarity). """
+        kwargs['check'] = True
+        return self.batch_execute(label, batch, args, **kwargs)
 
 
 class WarpBasePopulationPipeline(WarpBasePipeline):

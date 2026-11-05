@@ -116,8 +116,16 @@ class PyTom:
                 )
             args.update(extra)
 
-        with batch.execute('pytom_match'):
-            batch.call(launcher, args)
+        def _call(label, callArgs):
+            """ Run a PyTom command and raise if it fails. batch.execute
+            stores exceptions in batch.error instead of raising them, so
+            both the error and the exit code are checked. """
+            batch.info.pop('error', None)
+            returncode = None
+            with batch.execute(label):
+                returncode = batch.call(launcher, callArgs)
+            ProcessingPipeline.check_execution(
+                label, batch, returncode, logfile=batch.join('batch.log'))
 
         def _rename_star(newSuffix):
             """ Rename output star files to avoid overwrite. """
@@ -128,41 +136,46 @@ class PyTom:
                     print(f'>>> Renaming {fn} to {newFn}')
                     os.rename(fn, newFn)
             else:
-                print(f'>>> ERROR: Not files found for prefix "{newSuffix}')
+                # A clean extraction writes a STAR file even with 0
+                # particles, so a missing file means that it failed
+                raise Exception(f"pytom_extract ({newSuffix}): no particles "
+                                f"STAR file was generated")
 
-        if files := fm.glob('*.json'):
-            jsonFile = os.path.basename(files[0])
+        _call('pytom_match', args)
 
-            subargs = self.args['pytom_extract']
-            # pytom_extract arguments
-            args = {
-                'pytom_extract_candidates.py': '',
-                '-j': f'output/{jsonFile}',
-                '-n': subargs['n'],
-                "--particle-diameter": subargs['particle-diameter']
-            }
+        if not (files := fm.glob('*.json')):
+            raise Exception("pytom_match: no output job json file was "
+                            "generated, not running pytom_extract")
 
-            with batch.execute('pytom_extract'):
-                batch.call(launcher, args)
-                _rename_star('default')
+        jsonFile = os.path.basename(files[0])
 
-                if subargs['tophat-filter']:
-                    argsT = dict(args)
-                    argsT.update({
-                        '--tophat-filter': "",
-                        '--tophat-connectivity': subargs['tophat-connectivity']
-                    })
-                    batch.call(launcher, argsT)
-                    _rename_star('tophat')
+        subargs = self.args['pytom_extract']
+        # pytom_extract arguments
+        args = {
+            'pytom_extract_candidates.py': '',
+            '-j': f'output/{jsonFile}',
+            '-n': subargs['n'],
+            "--particle-diameter": subargs['particle-diameter']
+        }
 
-                # Run with relion5 compatibility mode
-                args.update({
-                    '--relion5-comp': ""
-                })
-                batch.call(launcher, args)
-                _rename_star('relion5')
-        else:
-            batch.log("No output json files, not running pytom_extract")
+        _call('pytom_extract', args)
+        _rename_star('default')
+
+        if subargs['tophat-filter']:
+            argsT = dict(args)
+            argsT.update({
+                '--tophat-filter': "",
+                '--tophat-connectivity': subargs['tophat-connectivity']
+            })
+            _call('pytom_extract_tophat', argsT)
+            _rename_star('tophat')
+
+        # Run with relion5 compatibility mode
+        args.update({
+            '--relion5-comp': ""
+        })
+        _call('pytom_extract_relion5', args)
+        _rename_star('relion5')
 
     def argsFromAcq(self, acq):
         """ Define arguments from a given acquisition """

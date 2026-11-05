@@ -151,9 +151,9 @@ class ProcessingPipeline(Pipeline, FolderManager):
             f.write(f"{logStr}\n\n")
             f.flush()
 
-    def batch_execute(self, label, batch, args, 
+    def batch_execute(self, label, batch, args,
                       logfile=None, logcmd=True, launcher=None, call=True,
-                      work_dir=None):
+                      work_dir=None, check=True, outputs=None):
         """ Shortcut to execute a batch using the internal launcher.
         Args:
             label: label to identify the batch
@@ -164,17 +164,26 @@ class ProcessingPipeline(Pipeline, FolderManager):
             launcher: launcher to use, by default it will use the internal launcher for this Pipeline instance
             call: if True, the program will be executed, otherwise only logs will be written
             work_dir: optional project-root-relative folder to run the command from
+            check: if True (default), raise an exception if the program could
+                not be run (batch.error) or exited with a non-zero code, so
+                the job is marked as failed instead of succeeded.
+            outputs: optional list of files that the program should have
+                generated (absolute or relative to the batch folder), an
+                exception is raised if any of them is missing (only if check).
 
         Returns:
             The exit code of the program, or None if it was not executed.
-            Note that batch.execute stores exceptions in batch.error instead
-            of raising them, so callers that need to detect a failed run
-            should check both this value and batch.error.
+            With check=False, batch.execute stores exceptions in batch.error
+            instead of raising them, so callers that need to detect a failed
+            run should check both this value and batch.error.
         """
         logfile = logfile or self.join('run.out')
         launcher = launcher or self._get_launcher()
         print(f">>>> Using launcher: {launcher}", flush=True)
         returncode = None
+        # Clear any error from a previous command of the same batch,
+        # so it is not reported again for this one
+        batch.info.pop('error', None)
         with batch.execute(label):
             if logcmd:
                 self.log_cmd(args)
@@ -184,7 +193,26 @@ class ProcessingPipeline(Pipeline, FolderManager):
                     cwd = os.path.join(self.workingDir,
                                        self.toProjectPath(work_dir))
                 returncode = batch.call(launcher, args, logfile=logfile, cwd=cwd)
+
+        if check and call:
+            self.check_execution(label, batch, returncode, outputs=outputs,
+                                 logfile=logfile)
         return returncode
+
+    @staticmethod
+    def check_execution(label, batch, returncode, outputs=None, logfile=None):
+        """ Raise an exception if a command executed in a batch failed:
+        an error stored in the batch, a non-zero exit code or missing
+        output files (absolute or relative to the batch folder). """
+        logStr = f", check {logfile}" if logfile else ''
+        if batch.error:
+            raise Exception(f"{label}: failed with error:\n{batch.error}")
+        if returncode:
+            raise Exception(f"{label}: failed with exit code {returncode}{logStr}")
+        if missing := [fn for fn in (outputs or [])
+                       if not os.path.exists(batch.join(fn))]:
+            raise Exception(f"{label}: missing output files: "
+                            f"{', '.join(missing)}{logStr}")
 
     def prerun(self):
         """ This method will be called before the run. """
