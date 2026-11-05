@@ -42,10 +42,11 @@ MODE_MATCH_SET = 1       # 'subset_match_set': keep names also found in a 2nd se
 MODE_RANDOM = 2          # 'subset_random_count' (+ optional 'subset_random_seed').
 MODE_RANDOM_PARTICLES = 3  # 'subset_random_particles' (+ optional 'subset_random_seed'),
                            # only for TomoCoordinates / TomoParticles inputs.
+MODE_EXCLUDE_SET = 4     # 'subset_exclude_set': keep names not found in a 2nd set.
 
 MODE_LABELS = ("0 (explicit names list), 1 (match a second set), "
-               "2 (random selection of N tomograms) or 3 (random selection "
-               "of M particles)")
+               "2 (random selection of N tomograms), 3 (random selection "
+               "of M particles), or 4 (exclude names from a second set)")
 
 
 class SubsetTsPipeline(ProcessingPipeline):
@@ -61,6 +62,7 @@ class SubsetTsPipeline(ProcessingPipeline):
         self.randomCount = None
         self.randomSeed = None
         self.matchSet = ''
+        self.excludeSet = ''
         # Mode 3: number of particles to pick and, once picked, the indexes
         # (rows of the input particles table) of the selected ones.
         self.randomParticles = None
@@ -71,6 +73,8 @@ class SubsetTsPipeline(ProcessingPipeline):
             self.subsetNames = set(names.split())
         elif self.mode == MODE_MATCH_SET:
             self.matchSet = (args.get('subset_match_set') or '').strip()
+        elif self.mode == MODE_EXCLUDE_SET:
+            self.excludeSet = (args.get('subset_exclude_set') or '').strip()
         elif self.mode == MODE_RANDOM:
             self.randomCount = self._parseRandomCount(
                 args.get('subset_random_count'), 'subset_random_count',
@@ -83,19 +87,17 @@ class SubsetTsPipeline(ProcessingPipeline):
             self.randomSeed = self._parseRandomSeed(args.get('subset_random_seed'))
 
         # 'exclude_tilts' only makes sense when the resulting tomogram names
-        # are known ahead of the run: Mode 0 (explicit list) and Mode 1
-        # (matched against a second set). In Modes 2 and 3 (random selection)
-        # the names are not known until the job actually runs, so it's
-        # ignored even if a stale value is still present in 'args'.
+        # are known ahead of the run: Mode 0 (explicit list), Mode 1 (matched
+        # against a second set), and Mode 4 (excluding a second set). In Modes
+        # 2 and 3 (random selection) the names are not known until the job
+        # actually runs, so it's ignored even if a stale value is present.
         self.excludedTiltsMap = (
             {} if self.mode in (MODE_RANDOM, MODE_RANDOM_PARTICLES)
             else self._parseExcludeTiltsParam(args))
 
     @staticmethod
     def _parseMode(value):
-        """ Parse the 'mode' EnumParam value into an int: 0 (explicit
-        names), 1 (match a second set), 2 (random selection of tomograms)
-        or 3 (random selection of particles). """
+        """Parse the 'mode' EnumParam value into an int."""
         if value is None or str(value).strip() == '':
             return MODE_EXPLICIT_NAMES
         try:
@@ -104,7 +106,7 @@ class SubsetTsPipeline(ProcessingPipeline):
             raise Exception(
                 f"Invalid 'mode' value: {value!r}. Expected {MODE_LABELS}.")
         if mode not in (MODE_EXPLICIT_NAMES, MODE_MATCH_SET, MODE_RANDOM,
-                        MODE_RANDOM_PARTICLES):
+                        MODE_RANDOM_PARTICLES, MODE_EXCLUDE_SET):
             raise Exception(
                 f"Invalid 'mode' value: {mode}. Expected {MODE_LABELS}.")
         return mode
@@ -291,8 +293,8 @@ class SubsetTsPipeline(ProcessingPipeline):
         Accepts the same kind of STAR files as 'input_set' (tilt_series.star,
         tomograms.star, optimisation_set.star), as well as any other STAR
         file that has at least one table with an 'rlnTomoName' column (e.g.
-        a plain particles.star). Used by Mode 1 ('subset_match_set') to
-        build the set of tomogram names to match against. """
+        a plain particles.star). Used by Modes 1 and 4 to build the set of
+        tomogram names to match against or exclude. """
         if not os.path.exists(starPath):
             raise Exception(f"{paramLabel} STAR file not found: {starPath}")
 
@@ -469,8 +471,9 @@ class SubsetTsPipeline(ProcessingPipeline):
     def _resolveSubsetNames(self, inputStar):
         """ Compute self.subsetNames according to the selected 'mode':
         Mode 0 (explicit list), Mode 1 (match names present in a second
-        set), Mode 2 (random selection of N tomograms) or Mode 3 (random
-        selection of M particles, and the tomograms they belong to). """
+        set), Mode 2 (random selection of N tomograms), Mode 3 (random
+        selection of M particles and their tomograms), or Mode 4 (exclude
+        names present in a second set). """
         if self.mode == MODE_EXPLICIT_NAMES:
             if not self.subsetNames and not self.excludedTiltsMap:
                 raise Exception(
@@ -521,6 +524,28 @@ class SubsetTsPipeline(ProcessingPipeline):
                      f"the second set ({Color.cyan(self.matchSet)}, which "
                      f"has {Color.bold(len(matchNames))} rlnTomoName "
                      "value(s)).")
+
+        elif self.mode == MODE_EXCLUDE_SET:
+            if not self.excludeSet:
+                raise Exception(
+                    "Missing parameter 'subset_exclude_set'. Provide a second "
+                    "STAR file with an 'rlnTomoName' column to exclude "
+                    "against (Mode 4)."
+                )
+            excludeNames = self._resolveTomoNamesFromStar(
+                self.excludeSet, "'subset_exclude_set'")
+            allNames = self._resolveAllTomoNames(inputStar)
+            self.subsetNames = allNames - excludeNames
+            if not self.subsetNames:
+                raise Exception(
+                    "No tomograms remain after excluding names from "
+                    f"'subset_exclude_set' ({self.excludeSet})."
+                )
+            self.log(f"Kept {Color.green(len(self.subsetNames))} / "
+                     f"{Color.bold(len(allNames))} tomogram(s) not present "
+                     f"in the second set ({Color.cyan(self.excludeSet)}, "
+                     f"which has {Color.bold(len(excludeNames))} "
+                     "rlnTomoName value(s)).")
 
         elif self.mode == MODE_RANDOM:
             allNames = self._resolveAllTomoNames(inputStar)

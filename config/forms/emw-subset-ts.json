@@ -1,7 +1,7 @@
 {
     "name": "emw-subset-ts",
     "label": "EMwrap Subset TS",
-    "help": "Create a subset of a tilt-series, tomogram, or particle/coordinate set by selecting tomogram names (rlnTomoName). The subset can be picked in four ways (see 'Selection mode' below): an explicit list of names, matching the names present in a second set, a random selection of N tomograms, or (for TomoCoordinates / TomoParticles) a random selection of M particles. Optionally, individual tilts can also be excluded from specific tomograms' tilt-series metadata.",
+    "help": "Create a subset of a tilt-series, tomogram, or particle/coordinate set by selecting tomogram names (rlnTomoName). The subset can be picked in five ways (see 'Selection mode' below): an explicit list of names, matching or excluding names present in a second set, a random selection of N tomograms, or (for TomoCoordinates / TomoParticles) a random selection of M particles. Optionally, individual tilts can also be excluded from specific tomograms' tilt-series metadata.",
     "sections": [
         {
             "label": "Input",
@@ -21,10 +21,12 @@
                         "0": "Explicit tomogram names list",
                         "1": "Match names from a second set",
                         "2": "Random selection of N tomograms",
-                        "3": "Random selection of M particles"
+                        "3": "Random selection of M particles",
+                        "4": "Exclude names from a second set"
                     },
                     "default": "0",
-                    "help": "How to choose the rlnTomoName values to keep:\n\n*Explicit tomogram names list*: provide the names directly in 'Subset Tomo Names' below.\n*Match names from a second set*: keep the tomograms from the input set whose rlnTomoName is also present in another STAR file (matched by the 'rlnTomoName' column).\n*Random selection of N tomograms*: randomly pick N tomograms out of the ones present in the input set.\n*Random selection of M particles*: only for TomoCoordinates / TomoParticles inputs; randomly pick M particles and keep only them and the tomograms they belong to."
+                    "order": ["0", "1", "4", "2", "3"],
+                    "help": "How to choose the rlnTomoName values to keep:\n\n*Explicit tomogram names list*: provide the names directly in 'Subset Tomo Names' below.\n*Match names from a second set*: keep the tomograms from the input set whose rlnTomoName is also present in another STAR file (matched by the 'rlnTomoName' column).\n*Exclude names from a second set*: keep only tomograms from the input set whose rlnTomoName does not appear in another STAR file.\n*Random selection of N tomograms*: randomly pick N tomograms out of the ones present in the input set.\n*Random selection of M particles*: only for TomoCoordinates / TomoParticles inputs; randomly pick M particles and keep only them and the tomograms they belong to."
                 },
                 {
                     "name": "subset_tomo_names",
@@ -41,6 +43,14 @@
                     "condition": "mode == 1",
                     "pointerClass": "TiltSeriesMovies, TiltSeries, TiltSeriesAligned, Tomograms, TomoParticles, TomoCoordinates",
                     "help": "Another STAR file containing an 'rlnTomoName' column (e.g. a tilt_series.star, tomograms.star, optimisation_set.star, or particles.star). The output subset will keep the tomograms from 'Input set' above whose rlnTomoName also appears in this second set."
+                },
+                {
+                    "name": "subset_exclude_set",
+                    "label": "Second set (exclude by rlnTomoName):",
+                    "paramClass": "PathParam",
+                    "condition": "mode == 4",
+                    "pointerClass": "TiltSeriesMovies, TiltSeries, TiltSeriesAligned, Tomograms, TomoParticles, TomoCoordinates",
+                    "help": "Another STAR file containing an 'rlnTomoName' column (e.g. a tilt_series.star, tomograms.star, optimisation_set.star, or particles.star). The output subset will keep tomograms from 'Input set' above whose rlnTomoName does not appear in this second set."
                 },
                 {
                     "name": "subset_random_count",
@@ -68,14 +78,14 @@
                     "name": "exclude_tilts",
                     "label": "Exclude Tilts",
                     "paramClass": "TableParam",
-                    "condition": "mode == 0 or mode == 1",
+                    "condition": "mode == 0 or mode == 1 or mode == 4",
                     "help": "Optional: for one or more tomograms in the subset above, exclude individual tilts from their tilt-series STAR file (the file referenced by the 'rlnTomoTiltSeriesStarFile' column). When at least one row is provided here, the job rewrites that per-tomogram STAR file for each listed tomogram, dropping the rows for the excluded tilts, and points the output 'rlnTomoTiltSeriesStarFile' at the rewritten file instead of the original. Every other tomogram in the subset (not listed here) keeps all its tilts, but its tilt-series STAR file is still copied as-is into this job's own output folder, so that all rows in the output set point to metadata files living in the same job folder. Not available in the 'Random selection' modes, since the tomogram names are not known until the job runs.",
                     "params": [
                         {
                             "name": "tomoName",
                             "label": "Tomo name",
                             "paramClass": "StringParam",
-                            "help": "rlnTomoName of the tomogram to exclude tilts from. Must be one of the names that end up in the output subset (the explicit list in Mode 0, or the matched names in Mode 1)."
+                            "help": "rlnTomoName of the tomogram to exclude tilts from. Must be one of the names that end up in the output subset."
                         },
                         {
                             "name": "excludedTilts",
