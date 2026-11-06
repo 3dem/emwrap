@@ -19,7 +19,7 @@ import os
 from emtools.utils import Color, Timer, Path
 from emtools.jobs import Args
 
-from emwrap.base import ProcessingPipeline
+from emwrap.base import ProcessingPipeline, print_launcher
 
 
 # TODO: 
@@ -147,6 +147,7 @@ class AreTomo3:
 
         t = Timer()
         launcher = self._get_launcher()
+        print_launcher('launcher_aretomo3' if self.launcher_aretomo3 else 'ARETOMO3', launcher)
         print("AreTomo3 argv:", launcher, kwargs)
         returncode = batch.call(launcher, kwargs)
 

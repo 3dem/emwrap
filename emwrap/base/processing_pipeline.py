@@ -33,6 +33,23 @@ from emtools.metadata import (Table, Column, StarFile, StarMonitor, TextFile,
 
 from .config import ProcessingConfig
 
+
+def launcher_banner(variable, launcher):
+    """ Box of asterisks with the launcher variable and its path,
+    marked as NOT FOUND if it is not a file nor a command in the PATH. """
+    lines = [f"{variable} launcher: {launcher}"]
+    if not launcher or not (os.path.exists(launcher) or shutil.which(launcher)):
+        lines.append("NOT FOUND")
+    width = max(80, max(len(line) for line in lines) + 4)
+    border = '*' * width
+    rows = '\n'.join(f"* {line.ljust(width - 4)} *" for line in lines)
+    return f"{border}\n{rows}\n{border}"
+
+
+def print_launcher(variable, launcher):
+    print(f"\n{launcher_banner(variable, launcher)}\n", flush=True)
+
+
 class ProcessingPipeline(Pipeline, FolderManager):
     """ Subclass of Pipeline that is commonly used to run programs.
 
@@ -179,7 +196,7 @@ class ProcessingPipeline(Pipeline, FolderManager):
         """
         logfile = logfile or self.join('run.out')
         launcher = launcher or self._get_launcher()
-        print(f">>>> Using launcher: {launcher}", flush=True)
+        print_launcher(getattr(self, 'PROGRAM', None) or label, launcher)
         returncode = None
         # Clear any error from a previous command of the same batch,
         # so it is not reported again for this one
@@ -318,6 +335,7 @@ class ProcessingPipeline(Pipeline, FolderManager):
         if packageName := packageName or getattr(cls, 'PROGRAM', None):
             if launcher := ProcessingConfig.get_programs().get(packageName, {}).get('launcher', ''):
                 if not os.path.exists(launcher):
+                    print_launcher(packageName, launcher)
                     raise Exception(f"{packageName} launcher '{launcher}' does not exists.")
             else:
                 raise Exception(f"{packageName} not found in EMWRAP_CONFIG['programs']")

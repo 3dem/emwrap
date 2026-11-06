@@ -32,6 +32,7 @@ from emtools.metadata import Table, StarFile, RelionStar
 
 from .config import ProcessingConfig
 from .job_form import JobForm, JobValidationError
+from .job_star import job_star_path, clear_job_star_backup
 from . import workflow_refs
 from .processing_pipeline import ProcessingPipeline
 from .project_data import ProjectData, PROJECT_JSON, LABELS_JSON, EMHUB_DIR
@@ -1041,6 +1042,8 @@ class ProjectManager(FolderManager):
 
         RelionStar.write_jobstar(job_type, values, job_star,
                                  isTomo=is_tomo, isContinue=is_continue)
+        # A backup left by an interrupted Relion native run is outdated now
+        clear_job_star_backup(job_dir)
 
     @staticmethod
     def _template_format_fields(template):
@@ -1283,7 +1286,8 @@ class ProjectManager(FolderManager):
         """ Read params from job.star and optionally update
         some of the params.
         """
-        job_params = RelionStar.read_jobstar(self.join(job.id, 'job.star'))
+        # job.star.emwrap while relion_pipeliner runs the job (see job_star)
+        job_params = RelionStar.read_jobstar(job_star_path(self.join(job.id)))
         if extraParams:
             job_params.update(extraParams)
         job_form = ProcessingConfig.get_job_form(job['jobtype'])

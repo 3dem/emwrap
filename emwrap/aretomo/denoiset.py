@@ -27,7 +27,7 @@ from emtools.utils import Color, FolderManager, Timer
 from emtools.jobs import BatchManager, Args, Batch
 from emtools.metadata import StarFile, Table, StarMonitor
 
-from emwrap.base import ProcessingPipeline
+from emwrap.base import ProcessingPipeline, print_launcher
 
 
 class DenoisET(ProcessingPipeline):
@@ -122,6 +122,9 @@ class DenoisET(ProcessingPipeline):
     # ------------------------------------------------------------------
     def _get_launcher(self):
         return self.launcher_denoiset or ProcessingPipeline.get_launcher('DENOISET')
+
+    def _print_launcher(self, launcher):
+        print_launcher('launcher_denoiset' if self.launcher_denoiset else 'DENOISET', launcher)
 
     def _get_mode(self):
         return int(self._args.get('mode', self.MODE_TRAIN_AND_INFER))
@@ -476,6 +479,7 @@ class DenoisET(ProcessingPipeline):
         argv = ['denoise3d'] + Args(cmdArgs).toList()
 
         trainingBatch = Batch(id='training', path=self.path)
+        self._print_launcher(launcher)
         trainingBatch.log(f"DenoisET denoise3d argv: {launcher} {' '.join(argv)}")
         trainingBatch.call(launcher, argv)
 
@@ -530,6 +534,7 @@ class DenoisET(ProcessingPipeline):
             argv = ['predict3d'] + Args(cmdArgs).toList()
  
             t = Timer()
+            self._print_launcher(launcher)
             batch.log(f"DenoisET predict3d argv: {launcher} {' '.join(argv)}")
             batch.call(launcher, argv)
  
