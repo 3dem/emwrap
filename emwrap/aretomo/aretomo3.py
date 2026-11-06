@@ -35,8 +35,17 @@ class AreTomo3:
         self.args = self.argsFromAcq(acq)
         form_args = kwargs.get('extra_args', kwargs)
         self.args.update(self._serialize_form_args(form_args))
+        for flag in ('-McPatch', '-AtPatch'):
+            values = self._patch_values(self.args.get(flag))
+            self.args[flag] = ['0', '0'] if values in ([], ['1', '1']) else values
         self.outputPrefix = "output/"
         self.launcher_aretomo3 = kwargs.get('launcher_aretomo3', None)
+
+    @staticmethod
+    def _patch_values(value):
+        if isinstance(value, (list, tuple)):
+            value = ' '.join(str(v) for v in value)
+        return str(value or '').lower().replace('x', ' ').split()
 
     @classmethod
     def _serialize_form_args(cls, formArgs):

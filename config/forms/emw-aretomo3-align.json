@@ -54,7 +54,7 @@
                     "label": "Local alignment patches (X Y)",
                     "default": "0 0",
                     "paramClass": "StringParam",
-                    "help": "(--AtPatch) e.g. '4 4'. Improves alignment for samples with local thickness variation. 0 0 or empty = global alignment only."
+                    "help": "(--AtPatch) e.g. '4 4'. Improves alignment for samples with local thickness variation. 0 0, 1 1 (or 1x1) or empty = global alignment only."
                 },
                 {
                     "name": "aretomo3.DarkTol",
