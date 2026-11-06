@@ -71,7 +71,8 @@ class AreTomo3AlignPipeline(Aretomo3ModularBase):
                     ('rlnMicrographNameEven', '_EVN'),
                 ):
                     stack = batch.join('output', f'{ts_name}{suffix}.mrc')
-                    self._write_stack_from_images(stack, table, column)
+                    self._write_stack_from_images(stack, table, column,
+                                                  pixel_size=self._pixel_size(row))
             # else:
                 # at3.args['-SplitSum'] = 0
 
@@ -94,9 +95,14 @@ class AreTomo3AlignPipeline(Aretomo3ModularBase):
             # Cmd 1 is the alignment-only public job.  Set this after form
             # serialization so ExtraArgs cannot accidentally request a volume.
             at3.args['-VolZ'] = 0
+            # When preserving the input CTF, AreTomo3 does not estimate it
+            # (no -kV/-Cs), the values come from the input STAR files, so the
+            # *_CTF.txt is only there if staged from a previous alignment
+            expect_ctf = (self.ctf_mode != 'preserve'
+                          or os.path.exists(batch.join('output', f'{ts_name}_CTF.txt')))
             at3.process_batch(batch, gpu=gpu, cmd=1, input_prefix=f'./{ts_name}',
                               input_suffix='.mrc', input_skips='_ODD,_EVN,_Vol,_CTF',
-                              ts_name=ts_name)
+                              ts_name=ts_name, expect_ctf_output=expect_ctf)
 
             return batch
         return process

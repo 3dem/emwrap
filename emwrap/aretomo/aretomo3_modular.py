@@ -134,8 +134,23 @@ class Aretomo3ModularBase(AreTomo3Pipeline):
                 rlnIndex = getattr(row, 'rlnTomoTiltMovieIndex', '')
                 handle.write(f'{at3Index} {rlnIndex}\n')
 
-    def _write_stack_from_images(self, path, table, image_column='rlnMicrographName'):
-        """Compose an MRC stack from one per-tilt RELION image column."""
+    @staticmethod
+    def _set_stack_pixel_size(path, pixel_size):
+        """Write the pixel size in the header of an MRC stack.
+
+        AreTomo3 takes the pixel size of an MRC input (-Cmd 1/2) from its
+        header, not from -PixSize, and uses 1.0 if it is 0 (see
+        CTsPackage::LoadTiltSeries), so the CTF estimation, the alignment
+        and the outputs would use a wrong pixel size.
+        """
+        # Memory-mapped, to not read big stacks (header_only would truncate it)
+        with mrcfile.mmap(path, mode='r+', permissive=True) as mrc:
+            mrc.voxel_size = float(pixel_size)
+
+    def _write_stack_from_images(self, path, table, image_column='rlnMicrographName',
+                                 pixel_size=None):
+        """Compose an MRC stack from one per-tilt RELION image column,
+        with pixel_size in its header (AreTomo3 reads it from there)."""
         frames = []
         table.sort(key='rlnTomoNominalStageTiltAngle')
         for row in table:
@@ -168,6 +183,8 @@ class Aretomo3ModularBase(AreTomo3Pipeline):
             raise ValueError('All input tilt images must have identical dimensions.')
         with mrcfile.new(path, overwrite=True) as mrc:
             mrc.set_data(np.stack(frames))
+            if pixel_size:
+                mrc.voxel_size = float(pixel_size)
 
     @staticmethod
     def _has_complete_image_column(table, image_column):
@@ -181,7 +198,7 @@ class Aretomo3ModularBase(AreTomo3Pipeline):
         stack = batch.join(f'{ts_name}.mrc')
         tlt = batch.join(f'{ts_name}_TLT.txt')
         idxMap = batch.join(f'{ts_name}_at3_rln_idx.txt')
-        self._write_stack_from_images(stack, table)
+        self._write_stack_from_images(stack, table, pixel_size=self._pixel_size(row))
         self._write_tlt(tlt, table, use_aligned_angles=aligned_angles)
         self._write_rln_index_map(idxMap, table)
         return table, stack, tlt
@@ -256,6 +273,13 @@ class Aretomo3ModularBase(AreTomo3Pipeline):
                         shutil.copy2(source, destination)
                     staged[key] = destination
 
+        # Stacks written by previous emwrap versions have no pixel size in
+        # their header (AreTomo3 would use 1.0 Å/px)
+        pixel_size = self._pixel_size(self._input_row(ts_name))
+        for key in ('stack', 'odd', 'evn'):
+            if key in staged:
+                self._set_stack_pixel_size(staged[key], pixel_size)
+
         return resolved, staged
 
     def _copy_result(self, result, ts_name, include_tilt=True):
@@ -283,12 +307,17 @@ class Aretomo3ModularBase(AreTomo3Pipeline):
 
     def _output(self, batch):
         ts_name = batch['tsName']
-        if batch.error:
-            self._allResults[ts_name] = {'error': batch.error}
-        else:
-            result = batch['results'][0] if batch['results'] else {}
-            self._allResults[ts_name] = self._copy_result(
-                result, ts_name, include_tilt=self._include_tilt_outputs())
+        result = self._batchResult(batch)
+        if 'error' not in result:
+            # Failed ones are not copied, only listed as failed
+            try:
+                result = self._copy_result(
+                    result, ts_name, include_tilt=self._include_tilt_outputs())
+            except Exception as e:
+                result = {'error': f"Copying outputs: {e}"}
+        if 'error' in result:
+            batch.log(f"ERROR: {ts_name}: {result['error']}", flush=True)
+        self._allResults[ts_name] = result
 
         batch.info['tsName'] = ts_name
         self._registerOutputs()
