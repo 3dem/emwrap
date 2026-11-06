@@ -102,6 +102,8 @@ class AreTomo3ReconstructPipeline(Aretomo3ModularBase):
             row = input_by_name[ts_name]
             tomo = result.get('rlnTomoReconstructedTomogram')
             if 'error' in result or not tomo or not os.path.exists(tomo):
+                # Count it as failed (see postrun)
+                result.setdefault('error', f'Missing reconstructed tomogram: {tomo}')
                 failed.addRowValues(**row._asdict())
                 continue
             dims = Image.get_dimensions(tomo)
