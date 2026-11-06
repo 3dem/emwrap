@@ -66,9 +66,9 @@
                         {
                             "name": "aretomo3.McPatch",
                             "label": "Patches (X Y):",
-                            "default": "1 1",
+                            "default": "0 0",
                             "paramClass": "StringParam",
-                            "help": "(--McPatch) More patches capture more local motion. 5 5 works well for cryo-ET; 1 1 = full-frame alignment only."
+                            "help": "(--McPatch) More patches capture more local motion. 5 5 works well for cryo-ET; 0 0 or empty = full-frame alignment only."
                         },
                         {
                             "name": "aretomo3.Group",
@@ -103,8 +103,9 @@
                         {
                             "name": "aretomo3.AtPatch",
                             "label": "Local alignment patches (X Y):",
+                            "default": "0 0",
                             "paramClass": "StringParam",
-                            "help": "(--AtPatch) e.g. '4 4'. Improves alignment for samples with local thickness variation. Empty = global alignment only."
+                            "help": "(--AtPatch) e.g. '4 4'. Improves alignment for samples with local thickness variation. 0 0 or empty = global alignment only."
                         },
                         {
                             "name": "aretomo3.DarkTol",

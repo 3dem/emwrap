@@ -80,7 +80,7 @@ class AreTomoPipeline(ProcessingPipeline):
             "-Cs": self.acq.cs,
             "-AmpContrast": self.acq.amplitude_contrast,
             "-AtBin": "8",  # FIXME
-            "-AtPatch": "1 1",
+            "-AtPatch": "0 0",
             "-Wbp": 1,
             "-TiltAxis": 85,
             "-TiltCor": 1,

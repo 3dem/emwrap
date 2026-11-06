@@ -85,7 +85,9 @@ class AreTomo3:
             '-PixSize': acq.pixel_size,
             '-kV': acq.voltage,
             '-Cs': acq.cs,
-            '-AmpContrast': acq.amplitude_contrast
+            '-AmpContrast': acq.amplitude_contrast,
+            '-McPatch': ['0', '0'],
+            '-AtPatch': ['0', '0']
         })
         if gain := acq.get('gain', None):
             args['-Gain'] = gain
