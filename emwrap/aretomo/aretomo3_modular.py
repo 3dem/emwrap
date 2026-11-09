@@ -61,11 +61,17 @@ class Aretomo3ModularBase(AreTomo3Pipeline):
                     )
                 fom = getattr(row, 'rlnCtfFigureOfMerit', 0) or 0
                 resolution = getattr(row, 'rlnCtfMaxResolution', 0) or 0
+                # Same layout as AreTomo3's own *_CTF.txt: its reader
+                # (CLoadCtfResults::mLoadFittings) parses from the 2nd char
+                # of each line, so the index must be right-aligned with
+                # leading spaces ('%4d'), otherwise its first digit is lost,
+                # the columns shift and AreTomo3 crashes (exit code 139).
+                # dfHand = 1 (correct handedness, as AreTomo3 writes it).
                 handle.write(
-                    f'{index} {float(row.rlnDefocusU):.6f} '
-                    f'{float(row.rlnDefocusV):.6f} '
-                    f'{float(row.rlnDefocusAngle):.6f} 0 '
-                    f'{float(fom):.6f} {float(resolution):.6f} 0\n'
+                    f'{index:4d} {float(row.rlnDefocusU):10.2f} '
+                    f'{float(row.rlnDefocusV):9.2f} '
+                    f'{float(row.rlnDefocusAngle):9.2f} {0.0:10.4f} '
+                    f'{float(fom):9.4f} {float(resolution):9.4f} {1:4d}\n'
                 )
 
     STAR_CTF_COLUMNS = ('rlnDefocusU', 'rlnDefocusV', 'rlnDefocusAngle')
