@@ -343,14 +343,14 @@
                             "label": "ARETOMO",
                             "paramClass": "StringParam",
                             "condition": "wat.method < 2",
-                            "help": "Launcher to use for AreTomo2 or AreTomo3"
+                            "help": "Launcher to use for AreTomo2 or AreTomo3, depending on the selected alignment method (passed to WarpTools ts_aretomo or ts_aretomo3 as --exe). Leave empty to use EMWRAP_CONFIG default (ARETOMO2 or ARETOMO3)."
                         },
                         {
                             "name": "wat.launcher_imod",
                             "label": "IMOD",
                             "paramClass": "StringParam",
                             "condition": "wat.method == 2",
-                            "help": "Launcher to use for IMOD newstack after etomo patch tracking"
+                            "help": "Launcher to use for IMOD newstack after etomo patch tracking. Leave empty to use EMWRAP_CONFIG default (IMOD)."
                         }
                     ]
                 }
