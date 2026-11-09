@@ -28,7 +28,7 @@ from emtools.utils import Color, FolderManager, Path, Process
 from emtools.metadata import StarFile, Acquisition, StarMonitor, Table, RelionStar
 from emtools.jobs import Batch
 from emtools.image import Image
-from emwrap.base import ProcessingPipeline
+from emwrap.base import ProcessingPipeline, print_launcher
 
 from .pytom import PyTom
 
@@ -60,7 +60,11 @@ class PyTomPipeline(ProcessingPipeline):
         ProcessingPipeline.__init__(self, args, output)
         # FIXME add support to comma separated values for parallels in batches
         self.gpuList = self.get_gpu_list(args['gpus'])
-        self.launcher = args.get('launcher', '') or ProcessingPipeline.get_launcher('PYTOM')
+        # A launcher given in the form takes precedence over the one in
+        # EMWRAP_CONFIG
+        self.launcher_form = args.get('launcher', '') or None
+        self.launcher = (self.launcher_form
+                         or ProcessingPipeline.get_launcher('PYTOM'))
 
         self.inTomoStar = self._args['input_tomograms']
         self.acq = self.loadAcquisition(self.inTomoStar)
@@ -440,6 +444,8 @@ class PyTomPipeline(ProcessingPipeline):
 
     def prerun(self):
         self.log("Setting up PyTom picking pipeline.")
+        print_launcher('launcher' if self.launcher_form else 'PYTOM',
+                       self.launcher)
 
         self._dims = None
         self._updateInput()

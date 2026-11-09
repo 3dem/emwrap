@@ -117,17 +117,25 @@
                     "help": "If empty, the program will use the number of GPUs * 10 CPUs."
                 },
                 {
-                    "name": "register_output_only",
-                    "label": "Register output only",
-                    "paramClass": "BooleanParam",
-                    "default": false,
-                    "help": "If enabled, the job will only register the output files, but not run the program."
-                },
-                {
-                    "name": "launcher_aretomo3",
-                    "label": "AreTomo3 launcher",
-                    "paramClass": "StringParam",
-                    "help": "Launcher to use for AreTomo3"
+                    "label": "Launchers",
+                    "paramClass": "Group",
+                    "help": "Launchers to use for the different programs",
+                    "collapsed": true,
+                    "params": [
+                        {
+                            "name": "register_output_only",
+                            "label": "Register output only",
+                            "paramClass": "BooleanParam",
+                            "default": false,
+                            "help": "If enabled, the job will only register the output files, but not run the program."
+                        },
+                        {
+                            "name": "launcher_aretomo3",
+                            "label": "AreTomo3",
+                            "paramClass": "StringParam",
+                            "help": "Launcher to use for AreTomo3"
+                        }
+                    ]
                 }
             ]
         }

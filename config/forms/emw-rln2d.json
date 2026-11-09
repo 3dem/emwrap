@@ -35,7 +35,7 @@
             ]
         },
         {
-            "label": "Streaming & Compute",
+            "label": "Compute",
             "params": [
                 {
                     "name": "wait.timeout",

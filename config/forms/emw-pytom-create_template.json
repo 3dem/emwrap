@@ -85,6 +85,25 @@
                     "condition": "false"
                 }
             ]
+        },
+        {
+            "label": "Compute",
+            "params": [
+                {
+                    "label": "Launchers",
+                    "paramClass": "Group",
+                    "help": "Launchers to use for the different programs",
+                    "collapsed": true,
+                    "params": [
+                        {
+                            "name": "launcher",
+                            "label": "PyTOM",
+                            "paramClass": "StringParam",
+                            "help": "Launcher to use for pytom_create_template.py and pytom_create_mask.py. Leave empty to use EMWRAP_CONFIG default."
+                        }
+                    ]
+                }
+            ]
         }
     ]
 }

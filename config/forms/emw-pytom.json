@@ -129,15 +129,16 @@
                     "help": "If it is a single number (N), it will represent the total number of GPUs (0..N-1). It there are multiple values, it will be the specific GPUs ID."
                 },                              
                 {
-                    "label": "Launcher",
+                    "label": "Launchers",
                     "paramClass": "Group",
-                    "help": "External launcher for pytom_* programs.",
+                    "help": "Launchers to use for the different programs",
+                    "collapsed": true,
                     "params": [
                         {
                             "name": "launcher",
-                            "label": "PYTOM",
+                            "label": "PyTOM",
                             "paramClass": "StringParam",
-                            "help": "Launcher to use for PYTOM"
+                            "help": "Launcher to use for the pytom_* programs (match and extract). Leave empty to use EMWRAP_CONFIG default."
                         }
                     ]
                 }  
