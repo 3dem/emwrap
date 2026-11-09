@@ -68,6 +68,22 @@ class Aretomo3ModularBase(AreTomo3Pipeline):
                     f'{float(fom):.6f} {float(resolution):.6f} 0\n'
                 )
 
+    STAR_CTF_COLUMNS = ('rlnDefocusU', 'rlnDefocusV', 'rlnDefocusAngle')
+
+    @classmethod
+    def _has_star_ctf(cls, table):
+        """True when every tilt has the CTF values needed by AreTomo3."""
+        return all(cls._has_complete_image_column(table, col)
+                   for col in cls.STAR_CTF_COLUMNS)
+
+    @classmethod
+    def _write_ctf_from_star(cls, path, table):
+        """Write an AreTomo3 *_CTF.txt from the RELION per-tilt CTF values
+        (e.g. from CTFFIND, carried through emw-subset-ts), with its rows in
+        the same angle-sorted order used for the stack and the .tlt file."""
+        table.sort(key='rlnTomoNominalStageTiltAngle')
+        cls._write_aretomo3_ctf(path, table)
+
     def newTargetTsPs(self, input_ps):
         # These jobs start after motion correction, so McBin is irrelevant.
         return float(input_ps)
