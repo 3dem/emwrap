@@ -18,4 +18,4 @@ from .processing_pipeline import ProcessingPipeline, launcher_banner, print_laun
 from .project_manager import ProjectManager
 from .config import ProcessingConfig
 from .job_form import JobForm, JobValidationError
-from .job_star import job_star_path
+from .job_star import job_star_path, read_job_params

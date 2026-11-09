@@ -28,7 +28,7 @@ from .processing_pipeline import ProcessingPipeline
 from .project_lock import atomic_write_json
 from .project_labels import ProjectLabels
 from .job_form import JobForm, iter_param_strings
-from .job_star import job_star_path
+from .job_star import read_job_params
 from . import workflow_refs
 
 
@@ -949,11 +949,10 @@ class ProjectData(FolderManager):
         # The job.star mtime is already checked with the job files
         if (mtime := self._jobFilesMtimes(job_id).get('job.star')) is None:
             return {}
-        # job.star.emwrap while relion_pipeliner runs the job (see job_star)
-        job_star = job_star_path(self.join(job_id))
         cached = self._jobParamsCache.get(job_id)
         if cached is None or cached[0] != mtime:
-            cached = (mtime, RelionStar.read_jobstar(job_star))
+            # job.star.emwrap while relion_pipeliner runs the job (see job_star)
+            cached = (mtime, read_job_params(self.join(job_id)))
             self._jobParamsCache[job_id] = cached
         return cached[1]
 
@@ -1043,7 +1042,7 @@ class ProjectData(FolderManager):
 
         self._debug(f"{Color.cyan('JOB')}: {Color.red('Computing')} info for {Color.bold(jobStarFile)}")
 
-        params = RelionStar.read_jobstar(jobStarFile)
+        params = read_job_params(os.path.dirname(jobStarFile))
         job = self._wf.getJob(jobId)
         all_job_ids = [job.id for job in self._project.get_workflow().jobs()]
 

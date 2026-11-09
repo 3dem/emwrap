@@ -31,8 +31,10 @@ from emtools.utils import FolderManager
 
 from emwrap.base.config import ProcessingConfig
 from emwrap.base.project_manager import ProjectManager
+from emwrap.base import job_star
 from emwrap.base.job_star import (JOB_STAR, JOB_STAR_BACKUP, job_star_path,
-                                  backup_job_star, restore_job_star)
+                                  read_job_params, backup_job_star,
+                                  restore_job_star)
 from emwrap.relion import native
 from emwrap.relion.native import RelionNative
 
@@ -69,7 +71,7 @@ class _Native(RelionNative):
     def batch_execute(self, label, batch, args, **kwargs):
         if label == 'pipeliner':
             _pipeliner_rewrite(self.join(JOB_STAR))
-            self.seen = RelionStar.read_jobstar(job_star_path(self.outputDir))
+            self.seen = read_job_params(self.outputDir)
             if self.interrupt:
                 raise SystemExit(0)  # e.g. SIGTERM, see ProcessingPipeline
         return 0
@@ -130,6 +132,29 @@ class TestJobStarBackup(unittest.TestCase):
         restore_job_star(self.jobDir)
         self.assertEqual(self._queue(), 'cryoem_rtx')
         self.assertEqual(job_star_path(self.jobDir), self.jobStar)
+
+    def test_restored_while_reading(self):
+        """ The run restores the backup between finding it and reading it
+        (e.g. EMhub updating the project while the job ends). """
+        backup_job_star(self.jobDir)
+        _pipeliner_rewrite(self.jobStar)
+        read_jobstar = RelionStar.read_jobstar
+
+        def _read(path):
+            if path == self.backup:
+                restore_job_star(self.jobDir)
+            return read_jobstar(path)
+
+        with unittest.mock.patch.object(job_star.RelionStar, 'read_jobstar',
+                                        side_effect=_read):
+            params = read_job_params(self.jobDir)
+        self.assertEqual(params['queue.name'], 'cryoem_rtx')
+        self.assertFalse(os.path.exists(self.backup))
+
+    def test_no_temporary_files(self):
+        backup_job_star(self.jobDir)
+        restore_job_star(self.jobDir)
+        self.assertEqual(os.listdir(self.jobDir), [JOB_STAR])
 
     def test_project_manager(self):
         """ ProjectManager reads the params from the backup (e.g. the queue
