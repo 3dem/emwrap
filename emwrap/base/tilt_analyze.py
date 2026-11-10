@@ -32,10 +32,12 @@ class TiltAnalyzePipeline(ProcessingPipeline):
     OTF dashboard shows and the tilt curation job (emw-tilt-curation)
     applies its rule to.
 
-    Input: TiltSeries (or TiltSeriesAligned), followed as the job that
-    writes it adds tilt series.  For each tilt series, once it is in the
-    input, its jpegs and CTF fit views are completed and its image measures
-    written (<tomoName>_imageqc.json).  When the input job is Warp's, a
+    Input: TiltSeries (motion corrected, before alignment), followed as
+    the job that writes it adds tilt series.  The one exception is Warp
+    OTF's aligned_tilt_series.star (tomo-otf workflow): that job does every
+    step at once, so there is no earlier output to analyze.  For each tilt
+    series, once it is in the input, its jpegs and CTF fit views are
+    completed and its image measures written (<tomoName>_imageqc.json).  When the input job is Warp's, a
     background thread also follows its tilt averages and power spectra, so
     the jpegs and CTF views of a tilt are made as soon as Warp writes it,
     before its tilt series is complete.
