@@ -10,8 +10,8 @@
                     "name": "input_tiltseries",
                     "label": "Input tilt series:",
                     "paramClass": "PathParam",
-                    "pointerClass": "TiltSeries, TiltSeriesAligned",
-                    "help": "tilt_series.star of motion corrected tilt series (e.g. the output of Warp Motion and CTF, or Warp OTF's aligned_tilt_series.star). To curate the tilts with emw-tilt-curation afterwards, use the motion correction output, before alignment."
+                    "pointerClass": "TiltSeries",
+                    "help": "tilt_series.star of motion corrected tilt series, before alignment (e.g. the output of Warp Motion and CTF). Aligned tilt series are not accepted: the tilt curation (emw-tilt-curation) and the dashboard subsets are made of this input, and individual tilts cannot be left out once the tilt series are aligned. The exception is Warp OTF (emw-warp-otf), which does every step in one job: the tomo-otf workflow analyzes its aligned_tilt_series.star."
                 },
                 {
                     "name": "medium_jpegs",
