@@ -83,13 +83,15 @@ class ProjectData(FolderManager):
     # the outputs whose info changed in OUTPUT_INFO_CHANGED, so their info
     # cached by previous versions is computed again (see _loadOutputs).
     # Computing all outputs again is slow for large projects.
-    OUTPUT_INFO_VERSION = 3
+    OUTPUT_INFO_VERSION = 4
     OUTPUT_INFO_CHANGED = {
         # Version 2: Relion optimiser files are Classes{dim}D (were all Classes2D)
         2: re.compile(r'_optimiser\.star$'),
         # Version 3: tilt series and tomograms without rows (were errors),
         # PDF files are PdfFile (were File)
         3: re.compile(r'(_series[^/]*|tomograms)\.star$|\.pdf$', re.IGNORECASE),
+        # Version 4: TomoParticles/TomoCoordinates with the pixel size
+        4: re.compile(r'optimisation_set\.star$'),
     }
 
     # Relion iterative jobs whose outputs are resolved from the files of the
@@ -102,7 +104,9 @@ class ProjectData(FolderManager):
     # Version of the outputs cached for these jobs, cached outputs of other
     # versions are resolved again from the files (see _getJobInfo)
     # Version 2: Refine3D and InitialModel jobs (were the pipeline nodes)
-    RELION_ITER_OUTPUTS_VERSION = 2
+    # Version 3: Refine3D jobs list the volume first, without the optimiser
+    # (Classes3D) and, in tomography, the data STAR file (Particles)
+    RELION_ITER_OUTPUTS_VERSION = 3
 
     # Version of the inputs detected from the job params (cached with each
     # job info), the info of jobs cached by other versions is computed again
@@ -116,6 +120,11 @@ class ProjectData(FolderManager):
     # Refine3D iterations only have half maps (half1 is listed, as Relion does)
     RELION_ITER_OUTPUTS = ('initial_model', 'optimiser.star',
                            'optimisation_set.star', 'data.star', 'class', 'half1')
+    # Refine3D: one refined volume (no classes), listed first. The optimiser
+    # is not an output, and the data STAR file neither when it is linked
+    # by the optimisation set (tomography), which already has the particles
+    REFINE3D_JOBTYPES = ('relion.refine3d', 'relion.refine3d.tomo')
+    REFINE3D_OUTPUTS = ('class', 'half1', 'optimisation_set.star', 'data.star')
     RELION_ITER_FILE = re.compile(
         r'^run(?:_ct\d+)?_it(\d+)_(optimiser\.star|optimisation_set\.star'
         r'|data\.star|class\d+\.mrc|half1_class\d+\.mrc)$')
@@ -611,14 +620,16 @@ class ProjectData(FolderManager):
                                 'size': sf.getTableSize(tableName),
                                 'table': sf.getTableInfo(tableName),
                             }
+                            if tableName == 'particles':
+                                info[col]['ps'] = self._spaPixelSize(sf, tableName)
 
-                    # TODO: Check if there are TomoParticles
                     ptsInfo = info['rlnTomoParticlesFile']
                     datatype = 'TomoParticles' if ptsInfo['table'].hasColumn('rlnTomoParticleName') else 'TomoCoordinates'
-                    return {
-                        'type': datatype,
-                        'info': f'{ptsInfo["size"]} items, Tomograms: {info["rlnTomoTomogramsFile"]["size"]}'
-                    }
+                    text = f'{ptsInfo["size"]} items'
+                    if ptsInfo['ps']:
+                        text += f', {ptsInfo["ps"]:0.3f} Å/px'
+                    text += f', Tomograms: {info["rlnTomoTomogramsFile"]["size"]}'
+                    return {'type': datatype, 'info': text}
                 elif spaInfo := self._spaStarInfo(output_id, filepath):
                     return spaInfo
             except Exception as e:
@@ -722,7 +733,9 @@ class ProjectData(FolderManager):
         optics = sf.getTable('optics')
         labels = ['rlnMicrographPixelSize', 'rlnMicrographOriginalPixelSize']
         if tableName == 'particles':
-            labels.insert(0, 'rlnImagePixelSize')
+            # Tomography particles: the subtomograms' one, else (e.g.
+            # picked coordinates) the one of the tilt series
+            labels = ['rlnImagePixelSize', 'rlnTomoTiltSeriesPixelSize'] + labels
         for label in labels:
             if optics.hasColumn(label):
                 return float(getattr(optics[0], label))
@@ -842,7 +855,7 @@ class ProjectData(FolderManager):
             # (e.g. run_it025_*, run_optimisation_set.star) are ignored, since
             # some might not be written and the others are not written until
             # the last iteration
-            _add(*self._relionIterOutputs(job_id))
+            _add(*self._relionIterOutputs(job_id, job))
         else:
             _add(*(o.id for o in job.outputs))
             _add(*self._relionOutputNodes(job_id))
@@ -910,7 +923,7 @@ class ProjectData(FolderManager):
                   and RelionStar.isNodeTypeLabel(row.rlnPipeLineNodeTypeLabel)}
         return {o: labels[_suffix(o)] for o in outputs if _suffix(o) in labels}
 
-    def _relionIterOutputs(self, job_id):
+    def _relionIterOutputs(self, job_id, job):
         """ Return the outputs of the last completed iteration of a Relion
         iterative job (the optimiser STAR file is written last), or its final
         files once written (see RELION_FINAL_FILE). """
@@ -934,9 +947,17 @@ class ProjectData(FolderManager):
             files = iterations[max(completed)] if completed else []
             files += [(s, fn) for s, fn in final.items() if s == 'initial_model.mrc']
 
+        order = self.RELION_ITER_OUTPUTS
+        if job['jobtype'] in self.REFINE3D_JOBTYPES:
+            order = self.REFINE3D_OUTPUTS
+            hasOptSet = any(s == 'optimisation_set.star' for s, _ in files)
+            files = [(s, fn) for s, fn in files
+                     if s != 'optimiser.star'
+                     and not (hasOptSet and s == 'data.star')]
+
         def _order(item):
             suffix, fn = item
-            index = next(i for i, s in enumerate(self.RELION_ITER_OUTPUTS)
+            index = next(i for i, s in enumerate(order)
                          if suffix.startswith(s))
             return index, fn
 

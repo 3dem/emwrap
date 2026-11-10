@@ -1130,9 +1130,7 @@ class ProjectManager(FolderManager):
         gpu_type = qparams.get('gpu_type', 'any')
 
         if gpus > 0:
-            # FIXME: Move all this cluster dependent logic to a separate function
-            # that could be configured by a environment variable or a config file.            
-            cores_per_gpu = {'cryo_core': 12, 'gpu_rtx': 30}.get(qname, {'A100': 12}.get(gpu_type, 10))
+            cores_per_gpu = int(queue.get('cores_per_gpu', 10))
             cpus = max(cpus, gpus * cores_per_gpu)
 
         if gpus:
@@ -1146,6 +1144,10 @@ class ProjectManager(FolderManager):
 
         if cpus == 0:
             raise Exception("Neither CPUs nor GPUs are set. Please set at least one of them.")
+
+        if queue.get('cpu_only', False) and gpus > 0:
+            raise Exception(f"Queue {qname} is for CPU-only jobs, but {gpus} GPU(s) "
+                            f"were requested. Set GPUs to none or choose a GPU queue.")
 
         qparams.update({
             'queue_name': qname,
