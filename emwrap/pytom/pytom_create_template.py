@@ -85,9 +85,10 @@ class PyTomCreateTemplate(ProcessingPipeline):
     def prerun(self):
         self.create_template_and_mask()
 
-    
     def _get_launcher(self):
-        return ProcessingPipeline.get_launcher('PYTOM')
+        # A launcher given in the form takes precedence over EMWRAP_CONFIG
+        return (self._args.get('launcher', '')
+                or ProcessingPipeline.get_launcher('PYTOM'))
 
 
 if __name__ == '__main__':

@@ -15,13 +15,13 @@
 # **************************************************************************
 
 import os
-import shutil
 
 from emtools.jobs import Batch
 from emtools.metadata import StarFile
 from emtools.utils import Path
 
 from emwrap.base.project_lock import wait_project_lock_free
+from emwrap.base.job_star import backup_job_star, restore_job_star
 
 from .relion_base import RelionBasePipeline
 
@@ -29,21 +29,16 @@ from .relion_base import RelionBasePipeline
 class RelionNative(RelionBasePipeline):
     """ Class to run native Relion pipelines, using the relion_pipeliner. """
     name = 'emw-relion-native'
-    JOB_STAR_BACKUP = 'job.star.emwrap'
-
-    def _restoreJobStar(self):
-        """Restore EMwrap job.star after relion_pipeliner (drops unknown options)."""
-        backup = self.join(self.JOB_STAR_BACKUP)
-        job_star = self.join('job.star')
-        if os.path.exists(backup):
-            shutil.copy2(backup, job_star)
-            os.remove(backup)
 
     def prerun(self):
-        # Let's get the job name from the job.star
+        # relion_pipeliner rewrites job.star without the options it does not
+        # know (queue.*, ...): keep a copy, read instead of job.star while it
+        # exists (job_star_path), and restore it when the run ends. On
+        # SIGTERM (e.g. Stop) ProcessingPipeline exits via sys.exit, so the
+        # finally below also runs.
         job_star = self.join('job.star')
-        backup = self.join(self.JOB_STAR_BACKUP)
-        shutil.copy2(job_star, backup)
+        job_dir = os.path.dirname(job_star)
+        backup_job_star(job_dir)
 
         try:
             job = StarFile.getTableFromFile('job', job_star)[0]
@@ -64,7 +59,7 @@ class RelionNative(RelionBasePipeline):
 
             self.updateBatchInfo(batch)
         finally:
-            self._restoreJobStar()
+            restore_job_star(job_dir)
 
 
 if __name__ == '__main__':

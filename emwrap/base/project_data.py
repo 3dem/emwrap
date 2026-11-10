@@ -28,6 +28,7 @@ from .processing_pipeline import ProcessingPipeline
 from .project_lock import atomic_write_json
 from .project_labels import ProjectLabels
 from .job_form import JobForm, iter_param_strings
+from .job_star import read_job_params
 from . import workflow_refs
 
 
@@ -82,9 +83,17 @@ class ProjectData(FolderManager):
     # the outputs whose info changed in OUTPUT_INFO_CHANGED, so their info
     # cached by previous versions is computed again (see _loadOutputs).
     # Computing all outputs again is slow for large projects.
-    OUTPUT_INFO_VERSION = 2
-    # Version 2: Relion optimiser files are Classes{dim}D (were all Classes2D)
-    OUTPUT_INFO_CHANGED = re.compile(r'_optimiser\.star$')
+    OUTPUT_INFO_VERSION = 4
+    OUTPUT_INFO_CHANGED = {
+        # Version 2: Relion optimiser files are Classes{dim}D (were all Classes2D)
+        2: re.compile(r'_optimiser\.star$'),
+        # Version 3: tilt series and tomograms without rows (were errors),
+        # PDF files are PdfFile (were File)
+        3: re.compile(r'(_series[^/]*|tomograms)\.star$|\.pdf$', re.IGNORECASE),
+        # Version 4: TomoParticles/TomoCoordinates with the pixel size, tilt
+        # series with the pixel size, number of tilts and dimensions
+        4: re.compile(r'optimisation_set\.star$|_series[^/]*\.star$'),
+    }
 
     # Relion iterative jobs whose outputs are resolved from the files of the
     # last completed iteration, instead of the nodes registered in the pipeline,
@@ -96,18 +105,28 @@ class ProjectData(FolderManager):
     # Version of the outputs cached for these jobs, cached outputs of other
     # versions are resolved again from the files (see _getJobInfo)
     # Version 2: Refine3D and InitialModel jobs (were the pipeline nodes)
-    RELION_ITER_OUTPUTS_VERSION = 2
+    # Version 3: Refine3D jobs list the volume first, without the optimiser
+    # (Classes3D), the unfiltered half map and, in tomography, the data STAR
+    # file (Particles)
+    RELION_ITER_OUTPUTS_VERSION = 3
 
     # Version of the inputs detected from the job params (cached with each
     # job info), the info of jobs cached by other versions is computed again
     # Version 2: references nested in table and multi-pointer params (e.g.
     # the 'sources' of Warp M create population, a list of dicts)
-    JOB_INPUTS_VERSION = 2
+    # Version 3: unwritten outputs of finished Relion jobs are ignored (see
+    # _isUnwrittenOutputsJob), the cached outputs of the jobs are updated
+    JOB_INPUTS_VERSION = 3
 
     # Files of an iteration that are outputs, in the order they are listed.
     # Refine3D iterations only have half maps (half1 is listed, as Relion does)
     RELION_ITER_OUTPUTS = ('initial_model', 'optimiser.star',
                            'optimisation_set.star', 'data.star', 'class', 'half1')
+    # Refine3D: one refined volume (no classes), listed first. The optimiser
+    # is not an output, and the data STAR file neither when it is linked
+    # by the optimisation set (tomography), which already has the particles
+    REFINE3D_JOBTYPES = ('relion.refine3d', 'relion.refine3d.tomo')
+    REFINE3D_OUTPUTS = ('class', 'half1', 'optimisation_set.star', 'data.star')
     RELION_ITER_FILE = re.compile(
         r'^run(?:_ct\d+)?_it(\d+)_(optimiser\.star|optimisation_set\.star'
         r'|data\.star|class\d+\.mrc|half1_class\d+\.mrc)$')
@@ -180,9 +199,13 @@ class ProjectData(FolderManager):
         that changed (OUTPUT_INFO_CHANGED) cached by previous versions
         (OUTPUT_INFO_VERSION), to be computed again. """
         outputs = self._data.setdefault('outputs', {})
-        for output_id in [k for k, v in outputs.items()
-                          if v.get('version', 1) < self.OUTPUT_INFO_VERSION
-                          and self.OUTPUT_INFO_CHANGED.search(k)]:
+
+        def _changed(output_id, info):
+            cached_version = info.get('version', 1)
+            return any(cached_version < version and regex.search(output_id)
+                       for version, regex in self.OUTPUT_INFO_CHANGED.items())
+
+        for output_id in [k for k, v in outputs.items() if _changed(k, v)]:
             del outputs[output_id]
         return outputs
 
@@ -486,6 +509,21 @@ class ProjectData(FolderManager):
         datatype = label.split('.')[-1]
         return self.NODE_TYPE_DATATYPES.get(datatype, datatype)
 
+    # Relion node types (last part) of tilt series tables without rows
+    EMPTY_TS_DATATYPES = {
+        'aligntiltseries': 'TiltSeriesAligned',
+        'TiltSeriesAligned': 'TiltSeriesAligned',
+        'frameseries': 'TiltSeriesMovies',
+        'TiltSeriesMovies': 'TiltSeriesMovies',
+    }
+
+    def _emptyTsDatatype(self, output_id):
+        """ Datatype of a tilt series STAR file without rows, from the node
+        type declared by its job (e.g. 'aligntiltseries' for the aligned
+        ones), 'TiltSeries' if it does not tell. """
+        nodeType = self._outputTypeFromRelionNodes(output_id) or ''
+        return self.EMPTY_TS_DATATYPES.get(nodeType, 'TiltSeries')
+
     def _isPlaceholderOutputInfo(self, info):
         """Return True for generic cached output info that should be recomputed."""
         text = str(info.get('info', '')) if info else ''
@@ -523,6 +561,13 @@ class ProjectData(FolderManager):
                     
                         datatype = 'TiltSeriesMovies'
                         global_table = StarFile.getTableFromFile('global', filepath)
+                        if not global_table or global_table[0] is None:
+                            # e.g. all tilt series failed, the type comes
+                            # from the job's node type (columns are unknown)
+                            return {
+                                'type': self._emptyTsDatatype(output_id),
+                                'info': '0 items'
+                            }
                         first = global_table[0]
                         ts_table = StarFile.getTableFromFile(first.rlnTomoName, self.join(first.rlnTomoTiltSeriesStarFile))
 
@@ -531,20 +576,22 @@ class ProjectData(FolderManager):
                             raise ValueError(f"Tilt series {filepath} does not have the required columns:  "
                                             f"{RelionStar.TOMO_FRAME_SERIES_COLUMNS}")
 
-                        # 'info': f"{len(self.allTsTable)} items, {x} x {y} x {n} x {N}, {ps:0.3f} Å/px",
-
+                        imageCol = 'rlnMicrographMovieName'
                         if ts_table.hasColumn('rlnMicrographName'):
                             datatype = 'TiltSeries'
+                            imageCol = 'rlnMicrographName'
 
                         if ts_table.hasAllColumns(RelionStar.TOMO_ALIGNMENT_COLUMNS):
                             datatype = 'TiltSeriesAligned'
                         return {
                             'type': datatype,
-                            'info': f'{len(global_table)} items'
+                            'info': self._tsInfo(global_table, ts_table, imageCol)
                     }
                     
                 elif filepath.endswith('tomograms.star'):
                     global_table = StarFile.getTableFromFile('global', filepath)
+                    if not global_table or global_table[0] is None:
+                        return {'type': 'Tomograms', 'info': '0 items'}
                     first = global_table[0]
                     datatype = 'Tomograms'
                     n = len(global_table)
@@ -575,14 +622,16 @@ class ProjectData(FolderManager):
                                 'size': sf.getTableSize(tableName),
                                 'table': sf.getTableInfo(tableName),
                             }
+                            if tableName == 'particles':
+                                info[col]['ps'] = self._spaPixelSize(sf, tableName)
 
-                    # TODO: Check if there are TomoParticles
                     ptsInfo = info['rlnTomoParticlesFile']
                     datatype = 'TomoParticles' if ptsInfo['table'].hasColumn('rlnTomoParticleName') else 'TomoCoordinates'
-                    return {
-                        'type': datatype,
-                        'info': f'{ptsInfo["size"]} items, Tomograms: {info["rlnTomoTomogramsFile"]["size"]}'
-                    }
+                    text = f'{ptsInfo["size"]} items'
+                    if ptsInfo['ps']:
+                        text += f', {ptsInfo["ps"]:0.3f} Å/px'
+                    text += f', Tomograms: {info["rlnTomoTomogramsFile"]["size"]}'
+                    return {'type': datatype, 'info': text}
                 elif spaInfo := self._spaStarInfo(output_id, filepath):
                     return spaInfo
             except Exception as e:
@@ -592,6 +641,9 @@ class ProjectData(FolderManager):
                 if self._isPendingOutput(output_id):
                     return self._pendingOutputInfo(output_id)
                 info = f'Error: {str(e)}'
+
+        elif filepath.lower().endswith('.pdf'):
+            return {'type': 'PdfFile', 'info': self._pdfInfo(filepath)}
 
         elif filepath.endswith('.population'):
             try:
@@ -647,6 +699,60 @@ class ProjectData(FolderManager):
             'info': info
         }
 
+    def _tsInfo(self, global_table, ts_table, imageCol):
+        """ Info of a tilt series STAR file: number of tilt series, pixel
+        size, tilts and image dimensions (x x y) of the first one, read from
+        the header of its first image (the image data is not read). """
+        first = global_table[0]
+        info = f'{len(global_table)} items'
+        for label in ('rlnTomoTiltSeriesPixelSize', 'rlnMicrographOriginalPixelSize'):
+            if global_table.hasColumn(label):
+                info += f', {float(getattr(first, label)):0.3f} Å/px'
+                break
+        info += f', {len(ts_table)} tilts'
+        try:
+            if dims := self._imageDims(self.join(getattr(ts_table[0], imageCol))):
+                info += f', {dims[0]} x {dims[1]}'
+        except Exception as e:
+            self._debug(f"Error reading tilt image dimensions: {e}")
+        return info
+
+    @staticmethod
+    def _imageDims(imagePath):
+        """ (x, y) of an MRC or TIFF/EER image from its header, or None. """
+        lower = imagePath.lower()
+        if not os.path.exists(imagePath):
+            return None
+        if lower.endswith(('.mrc', '.mrcs', '.st')):
+            import mrcfile
+            with mrcfile.open(imagePath, header_only=True, permissive=True) as mrc:
+                return int(mrc.header.nx), int(mrc.header.ny)
+        if lower.endswith(('.tif', '.tiff', '.eer')):
+            import tifffile
+            with tifffile.TiffFile(imagePath) as tif:
+                y, x = tif.pages[0].shape[:2]
+                return x, y
+        return None
+
+    # Number of pages of the page tree root (/Type /Pages ... /Count N)
+    _PDF_PAGE_COUNT = re.compile(rb'/Type\s*/Pages\b[^>]*?/Count\s+(\d+)'
+                                 rb'|/Count\s+(\d+)[^>]*?/Type\s*/Pages\b')
+    _PDF_MAX_SCAN = 32 * 1024 * 1024
+
+    @classmethod
+    def _pdfInfo(cls, filepath):
+        """ Size and, if found without a PDF library, number of pages of a
+        PDF file (in compressed object streams it is not found). """
+        size = os.path.getsize(filepath)
+        info = Pretty.size(size)
+        if size <= cls._PDF_MAX_SCAN:
+            with open(filepath, 'rb') as f:
+                counts = [int(a or b) for a, b in cls._PDF_PAGE_COUNT.findall(f.read())]
+            if counts:
+                # The root of the page tree has the total
+                info = f'{max(counts)} pages, {info}'
+        return info
+
     # SPA STAR files: table with the items -> datatype
     SPA_TABLES = {
         'movies': 'Movies',
@@ -664,7 +770,9 @@ class ProjectData(FolderManager):
         optics = sf.getTable('optics')
         labels = ['rlnMicrographPixelSize', 'rlnMicrographOriginalPixelSize']
         if tableName == 'particles':
-            labels.insert(0, 'rlnImagePixelSize')
+            # Tomography particles: the subtomograms' one, else (e.g.
+            # picked coordinates) the one of the tilt series
+            labels = ['rlnImagePixelSize', 'rlnTomoTiltSeriesPixelSize'] + labels
         for label in labels:
             if optics.hasColumn(label):
                 return float(getattr(optics[0], label))
@@ -784,7 +892,7 @@ class ProjectData(FolderManager):
             # (e.g. run_it025_*, run_optimisation_set.star) are ignored, since
             # some might not be written and the others are not written until
             # the last iteration
-            _add(*self._relionIterOutputs(job_id))
+            _add(*self._relionIterOutputs(job_id, job))
         else:
             _add(*(o.id for o in job.outputs))
             _add(*self._relionOutputNodes(job_id))
@@ -792,6 +900,7 @@ class ProjectData(FolderManager):
 
         # Infer expected outputs from downstream job parameter references.
         job_prefix = f'{job_id}/'
+        referenced = set()
         for other in self._wf.jobs():
             if other.id == job_id:
                 continue
@@ -800,9 +909,24 @@ class ProjectData(FolderManager):
                     continue
                 rel_value = self._outputId(value, job_id)
                 if rel_value.startswith(job_prefix):
+                    referenced.add(rel_value)
                     _add(rel_value)
 
+        if self._isUnwrittenOutputsJob(job):
+            outputs = [o for o in outputs
+                       if o in referenced or os.path.exists(self.join(o))]
+
         return outputs
+
+    def _isUnwrittenOutputsJob(self, job):
+        """ True for finished Relion jobs, whose outputs registered in the
+        pipeline that were not written are ignored: Relion (e.g. 5.1) adds
+        some that its tomography jobs never write (e.g. corrected_micrographs.star
+        of motion correction or micrographs_ctf.star of CTF estimation). The
+        ones used by other jobs are kept, to show that they are missing. """
+        return (str(job['jobtype']).startswith('relion.')
+                and not self._isRelionIterJob(job)
+                and self._resolveJobStatus(job) in self.JOB_STATUS_TERMINAL)
 
     def _isRelionIterJob(self, job):
         return job['jobtype'] in self.RELION_ITER_JOBTYPES
@@ -836,7 +960,7 @@ class ProjectData(FolderManager):
                   and RelionStar.isNodeTypeLabel(row.rlnPipeLineNodeTypeLabel)}
         return {o: labels[_suffix(o)] for o in outputs if _suffix(o) in labels}
 
-    def _relionIterOutputs(self, job_id):
+    def _relionIterOutputs(self, job_id, job):
         """ Return the outputs of the last completed iteration of a Relion
         iterative job (the optimiser STAR file is written last), or its final
         files once written (see RELION_FINAL_FILE). """
@@ -860,9 +984,19 @@ class ProjectData(FolderManager):
             files = iterations[max(completed)] if completed else []
             files += [(s, fn) for s, fn in final.items() if s == 'initial_model.mrc']
 
+        order = self.RELION_ITER_OUTPUTS
+        if job['jobtype'] in self.REFINE3D_JOBTYPES:
+            order = self.REFINE3D_OUTPUTS
+            hasOptSet = any(s == 'optimisation_set.star' for s, _ in files)
+            # The final unfiltered half map is not listed either (the
+            # half1 map is while running, the only volume of an iteration)
+            files = [(s, fn) for s, fn in files
+                     if s != 'optimiser.star' and not s.endswith('_unfil.mrc')
+                     and not (hasOptSet and s == 'data.star')]
+
         def _order(item):
             suffix, fn = item
-            index = next(i for i, s in enumerate(self.RELION_ITER_OUTPUTS)
+            index = next(i for i, s in enumerate(order)
                          if suffix.startswith(s))
             return index, fn
 
@@ -875,10 +1009,10 @@ class ProjectData(FolderManager):
         # The job.star mtime is already checked with the job files
         if (mtime := self._jobFilesMtimes(job_id).get('job.star')) is None:
             return {}
-        job_star = self.join(job_id, 'job.star')
         cached = self._jobParamsCache.get(job_id)
         if cached is None or cached[0] != mtime:
-            cached = (mtime, RelionStar.read_jobstar(job_star))
+            # job.star.emwrap while relion_pipeliner runs the job (see job_star)
+            cached = (mtime, read_job_params(self.join(job_id)))
             self._jobParamsCache[job_id] = cached
         return cached[1]
 
@@ -968,7 +1102,7 @@ class ProjectData(FolderManager):
 
         self._debug(f"{Color.cyan('JOB')}: {Color.red('Computing')} info for {Color.bold(jobStarFile)}")
 
-        params = RelionStar.read_jobstar(jobStarFile)
+        params = read_job_params(os.path.dirname(jobStarFile))
         job = self._wf.getJob(jobId)
         all_job_ids = [job.id for job in self._project.get_workflow().jobs()]
 

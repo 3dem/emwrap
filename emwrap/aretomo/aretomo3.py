@@ -19,7 +19,7 @@ import os
 from emtools.utils import Color, Timer, Path
 from emtools.jobs import Args
 
-from emwrap.base import ProcessingPipeline
+from emwrap.base import ProcessingPipeline, print_launcher
 
 
 # TODO: 
@@ -35,8 +35,17 @@ class AreTomo3:
         self.args = self.argsFromAcq(acq)
         form_args = kwargs.get('extra_args', kwargs)
         self.args.update(self._serialize_form_args(form_args))
+        for flag in ('-McPatch', '-AtPatch'):
+            values = self._patch_values(self.args.get(flag))
+            self.args[flag] = ['0', '0'] if values in ([], ['1', '1']) else values
         self.outputPrefix = "output/"
         self.launcher_aretomo3 = kwargs.get('launcher_aretomo3', None)
+
+    @staticmethod
+    def _patch_values(value):
+        if isinstance(value, (list, tuple)):
+            value = ' '.join(str(v) for v in value)
+        return str(value or '').lower().replace('x', ' ').split()
 
     @classmethod
     def _serialize_form_args(cls, formArgs):
@@ -69,13 +78,25 @@ class AreTomo3:
     def split_sum(self):
         return str(self.args.get('-SplitSum', 1)) != '0'
 
+    @property
+    def out_imod(self):
+        return str(self.args.get('-OutImod', 0)) != '0'
+
+    @staticmethod
+    def aligns(cmd):
+        """ True if AreTomo3 aligns the tilt series with this -Cmd value:
+        0 (full) and 1 (from the tilt series), not 2 (reconstruction). """
+        return str(cmd) in ('0', '1')
+
     def argsFromAcq(self, acq):
         """ Define arguments from a given acquisition """
         args = Args({
             '-PixSize': acq.pixel_size,
             '-kV': acq.voltage,
             '-Cs': acq.cs,
-            '-AmpContrast': acq.amplitude_contrast
+            '-AmpContrast': acq.amplitude_contrast,
+            '-McPatch': ['0', '0'],
+            '-AtPatch': ['0', '0']
         })
         if gain := acq.get('gain', None):
             args['-Gain'] = gain
@@ -126,12 +147,14 @@ class AreTomo3:
 
         t = Timer()
         launcher = self._get_launcher()
+        print_launcher('launcher_aretomo3' if self.launcher_aretomo3 else 'ARETOMO3', launcher)
         print("AreTomo3 argv:", launcher, kwargs)
-        batch.call(launcher, kwargs)
+        returncode = batch.call(launcher, kwargs)
 
         batch.info.update({
             'aretomo_input': len(items),
-            'aretomo_elapsed': str(t.getElapsedTime())
+            'aretomo_elapsed': str(t.getElapsedTime()),
+            'aretomo_exit_code': returncode
         })
 
         batch['results'] = []
@@ -140,6 +163,13 @@ class AreTomo3:
 
         result = {'rlnTomoName': tsName}
         try:
+            # AreTomo3 may crash (e.g. segmentation fault) after writing some
+            # outputs (e.g. *_CTF.txt), so its files are not enough to tell
+            # whether it finished. The exit code is in batch.log.
+            if returncode:
+                raise Exception(f"AreTomo3 failed with exit code {returncode}, "
+                                f"check {batch.join('batch.log')}")
+
             # Cmd 2 may only write volumes. Cmd 0/1 always write a tilt stack.
             outTiltSeriesMrc = batch.join('output', f'{tsName}.mrc')
             if expect_tilt_series:
@@ -215,6 +245,14 @@ class AreTomo3:
                         result[key] = splitName
 
             imodFolder = batch.join('output', f'{tsName}_Imod')
+            # The IMOD alignment files are used to compute the Relion
+            # alignments, they must be complete when they are requested
+            if self.out_imod and self.aligns(cmd):
+                for ext in ('xf', 'tlt'):
+                    imodFile = os.path.join(imodFolder, f'{tsName}_st.{ext}')
+                    self.__expect(imodFile)
+                    if not os.path.getsize(imodFile):
+                        raise Exception(f"Empty expected output: {imodFile}")
             if os.path.isdir(imodFolder):
                 batch['outputs'].append(imodFolder)
                 result['at3ImodFolder'] = imodFolder

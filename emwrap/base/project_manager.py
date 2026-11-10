@@ -32,6 +32,7 @@ from emtools.metadata import Table, StarFile, RelionStar
 
 from .config import ProcessingConfig
 from .job_form import JobForm, JobValidationError
+from .job_star import read_job_params, clear_job_star_backup
 from . import workflow_refs
 from .processing_pipeline import ProcessingPipeline
 from .project_data import ProjectData, PROJECT_JSON, LABELS_JSON, EMHUB_DIR
@@ -1041,6 +1042,8 @@ class ProjectManager(FolderManager):
 
         RelionStar.write_jobstar(job_type, values, job_star,
                                  isTomo=is_tomo, isContinue=is_continue)
+        # A backup left by an interrupted Relion native run is outdated now
+        clear_job_star_backup(job_dir)
 
     @staticmethod
     def _template_format_fields(template):
@@ -1127,9 +1130,7 @@ class ProjectManager(FolderManager):
         gpu_type = qparams.get('gpu_type', 'any')
 
         if gpus > 0:
-            # FIXME: Move all this cluster dependent logic to a separate function
-            # that could be configured by a environment variable or a config file.            
-            cores_per_gpu = {'cryo_core': 12, 'gpu_rtx': 30}.get(qname, {'A100': 12}.get(gpu_type, 10))
+            cores_per_gpu = int(queue.get('cores_per_gpu', 10))
             cpus = max(cpus, gpus * cores_per_gpu)
 
         if gpus:
@@ -1143,6 +1144,10 @@ class ProjectManager(FolderManager):
 
         if cpus == 0:
             raise Exception("Neither CPUs nor GPUs are set. Please set at least one of them.")
+
+        if queue.get('cpu_only', False) and gpus > 0:
+            raise Exception(f"Queue {qname} is for CPU-only jobs, but {gpus} GPU(s) "
+                            f"were requested. Set GPUs to none or choose a GPU queue.")
 
         qparams.update({
             'queue_name': qname,
@@ -1283,7 +1288,8 @@ class ProjectManager(FolderManager):
         """ Read params from job.star and optionally update
         some of the params.
         """
-        job_params = RelionStar.read_jobstar(self.join(job.id, 'job.star'))
+        # job.star.emwrap while relion_pipeliner runs the job (see job_star)
+        job_params = read_job_params(self.join(job.id))
         if extraParams:
             job_params.update(extraParams)
         job_form = ProcessingConfig.get_job_form(job['jobtype'])

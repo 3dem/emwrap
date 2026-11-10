@@ -991,8 +991,6 @@ class AreTomo3Pipeline(ProcessingPipeline):
 
         inputByName = {row.rlnTomoName: row for row in self.inputTsTable}
 
-        tsDims = None
-        tomDims = None
         haveTomograms = False
         newTsPs = None
 
@@ -1010,56 +1008,15 @@ class AreTomo3Pipeline(ProcessingPipeline):
                 failedTable.addRowValues(**tsRow._asdict())
                 continue
 
-            tsAligned = result.get('rlnTiltSeriesAligned', None)
-            if tsAligned is None or not os.path.exists(tsAligned):
-                self.log(f"Missing aligned tilt series for {tsName}, marking failed.", flush=True)
+            # A problem with one tilt series (e.g. incomplete AreTomo3
+            # outputs) marks it as failed, without losing the other ones
+            try:
+                haveTomograms |= self._registerTsOutputs(
+                    tsName, tsRow, result, newTsPs, alignedTable, tomogramsTable)
+            except Exception as e:
+                result['error'] = f"Registering outputs: {e}"
+                self.log(Color.red(f"ERROR: {tsName}: {result['error']}"), flush=True)
                 failedTable.addRowValues(**tsRow._asdict())
-                continue
-
-            if tsDims is None:
-                tsDims = Image.get_dimensions(tsAligned)
-
-            dstMdocFile = self._copy_mdoc_to_output(tsName, result)
-
-            idvTsStarFile = self._write_individual_tilt_series_star(
-                tsName,
-                tsRow,
-                result, 
-                newTsPs
-            )
-
-            alignedRow = self._build_aligned_ts_row(
-                tsRow,
-                result,
-                newTsPs,
-                idvTsStarFile,
-                dstMdocFile
-            )
-
-            alignedTable.addRowValues(**alignedRow)
-
-            tomogram = result.get('rlnTomoReconstructedTomogram', None)
-            if tomogram and os.path.exists(tomogram):
-                self.log(f"Found reconstructed tomogram for {tsName}: {tomogram}", flush=True)
-                haveTomograms = True
-                tomDimsThis = Image.get_dimensions(tomogram)
-                if tomDims is None:
-                    tomDims = tomDimsThis
-
-                tomFolderDir = self.join(self.outputTomDir, tsName)
-                edfFile = create_dummy_edf_file(tomFolderDir, tsName)
-                result['rlnEtomoDirectiveFile'] = edfFile
-                
-                tomRow = self._build_tomogram_row(
-                    tsRow,
-                    result,
-                    newTsPs,
-                    idvTsStarFile,
-                    edfFile,
-                    tomDimsThis
-                )
-
-                tomogramsTable.addRowValues(**tomRow)
 
         # aligned_tilt_series.star
         self.write_ts_table('global', alignedTable, alignedStarFile)
@@ -1076,9 +1033,59 @@ class AreTomo3Pipeline(ProcessingPipeline):
             outputNodes.append([tomogramsStarFile, 'TomogramGroupMetadata.star.relion.tomo.tomograms'])
 
         self.writeRelionOutputNodes(outputNodes)
-        self._registerAretomo3CsvOutputs()   
-    
-    
+        self._registerAretomo3CsvOutputs()
+
+    def _registerTsOutputs(self, tsName, tsRow, result, newTsPs,
+                           alignedTable, tomogramsTable):
+        """ Register the outputs of one aligned tilt series: write its
+        STAR file and add its rows to the aligned (and tomograms) tables.
+        Returns True if it has a reconstructed tomogram. """
+        tsAligned = result.get('rlnTiltSeriesAligned', None)
+        if tsAligned is None or not os.path.exists(tsAligned):
+            raise Exception(f"Missing aligned tilt series: {tsAligned}")
+
+        dstMdocFile = self._copy_mdoc_to_output(tsName, result)
+
+        idvTsStarFile = self._write_individual_tilt_series_star(
+            tsName,
+            tsRow,
+            result, 
+            newTsPs
+        )
+
+        alignedRow = self._build_aligned_ts_row(
+            tsRow,
+            result,
+            newTsPs,
+            idvTsStarFile,
+            dstMdocFile
+        )
+
+        alignedTable.addRowValues(**alignedRow)
+
+        tomogram = result.get('rlnTomoReconstructedTomogram', None)
+        if tomogram and os.path.exists(tomogram):
+            self.log(f"Found reconstructed tomogram for {tsName}: {tomogram}", flush=True)
+            tomDimsThis = Image.get_dimensions(tomogram)
+
+            tomFolderDir = self.join(self.outputTomDir, tsName)
+            edfFile = create_dummy_edf_file(tomFolderDir, tsName)
+            result['rlnEtomoDirectiveFile'] = edfFile
+
+            tomRow = self._build_tomogram_row(
+                tsRow,
+                result,
+                newTsPs,
+                idvTsStarFile,
+                edfFile,
+                tomDimsThis
+            )
+
+            tomogramsTable.addRowValues(**tomRow)
+            return True
+
+        return False
+
     # ---------- Batch execution --------------
     def get_aretomo3_proc(self, gpu):
         def _aretomo3(batch):
@@ -1155,39 +1162,16 @@ class AreTomo3Pipeline(ProcessingPipeline):
         tsName = batch['tsName']
         batch.log(f"Storing output for batch '{tsName}'", flush=True)
 
-        if batch.error:
-            batch.log(f"ERROR: {batch.error}")
-            self._allResults[tsName] = {'error': batch.error}
+        result = self._batchResult(batch)
+        if 'error' in result:
+            batch.log(f"ERROR: {result['error']}")
+            self._allResults[tsName] = result
         else:
-            result = batch['results'][0] if batch['results'] else {}
-
-            tsFolder = self._getOutputTsFolder(tsName)
-            tsFolder.create()
-            tomFolder = None  # only created if a tomogram was produced
-
-            # --- Aligned tilt series outputs -> outputTsDir
-            for key in ('rlnTiltSeriesAligned', 'rlnTiltSeriesAlignedOdd',
-                        'rlnTiltSeriesAlignedEvn', 'at3TomoAlignmentFile',
-                        'at3MappingFile', 'at3TomoCtfFile', 'rlnCtfImage',
-                        'at3MetricsCsv', 'at3TimeStampCsv', 'at3RlnIndexMapFile'):
-                self._copy_result_file(result, key, tsFolder)
-
-            # RELION expects image stacks to use .mrcs extension.
-            for key in ('rlnTiltSeriesAligned', 'rlnTiltSeriesAlignedOdd',
-                        'rlnTiltSeriesAlignedEvn', 'rlnCtfImage'):
-                self._link_result_stack_as_mrcs(result, key)
-
-            # --- IMOD folder -> outputTsDir/TS_NAME/
-            self._copy_result_folder(result, 'at3ImodFolder', tsFolder)
-
-            # --- Tomogram outputs (only present if reconstruction was enabled) -> outputTomDir
-            if result.get('rlnTomoReconstructedTomogram', None) is not None:
-                tomFolder = self._getOutputTomFolder(tsName)
-                tomFolder.create()
-                for key in ('rlnTomoReconstructedTomogram', 'rlnTomoNameOdd',
-                            'rlnTomoNameEvn', 'at3ThicknessMrc', 'at3ThicknessCsv'):
-                    self._copy_result_file(result, key, tomFolder)
-
+            try:
+                self._copyBatchResult(tsName, result)
+            except Exception as e:
+                result = {'error': f"Copying outputs: {e}"}
+                batch.log(Color.red(f"ERROR: {tsName}: {result['error']}"))
             batch.info['result'] = {k: v for k, v in result.items()
                                     if k != 'error'}
             self._allResults[tsName] = result
@@ -1207,9 +1191,62 @@ class AreTomo3Pipeline(ProcessingPipeline):
             batch.log(f">>> Processed {Color.green(totalOutput)} out of "
                     f"{Color.red(self.inputLen)} "
                     f"({Color.bold('%0.2f' % percent)} %)", flush=True)
-        
+
         return batch
 
+    @staticmethod
+    def _batchResult(batch):
+        """ Result of a processed batch, with an 'error' if it failed:
+        an exception processing it or an error running AreTomo3. """
+        if batch.error:
+            return {'error': batch.error}
+        results = batch['results'] if 'results' in batch else []
+        if not results:
+            return {'error': 'No AreTomo3 results'}
+        return results[0]
+
+    def postrun(self):
+        """ Fail the job if no tilt series could be processed, instead of
+        finishing with empty outputs. Partial failures are only reported,
+        the failed ones are in failed_tilt_series.star. """
+        failed = {ts: r['error'] for ts, r in self._allResults.items()
+                  if 'error' in r}
+        done = len(self._allResults) - len(failed)
+        if failed:
+            self.log(Color.red(f"{len(failed)} tilt series failed, "
+                               f"{done} processed:"), flush=True)
+            for ts, error in failed.items():
+                self.log(f"   {ts}: {str(error).strip().splitlines()[-1]}", flush=True)
+        if self._allResults and not done:
+            raise Exception(f"All {len(failed)} tilt series failed.")
+
+    def _copyBatchResult(self, tsName, result):
+        """ Copy the outputs of one tilt series from its batch folder. """
+        tsFolder = self._getOutputTsFolder(tsName)
+        tsFolder.create()
+
+        # --- Aligned tilt series outputs -> outputTsDir
+        for key in ('rlnTiltSeriesAligned', 'rlnTiltSeriesAlignedOdd',
+                    'rlnTiltSeriesAlignedEvn', 'at3TomoAlignmentFile',
+                    'at3MappingFile', 'at3TomoCtfFile', 'rlnCtfImage',
+                    'at3MetricsCsv', 'at3TimeStampCsv', 'at3RlnIndexMapFile'):
+            self._copy_result_file(result, key, tsFolder)
+
+        # RELION expects image stacks to use .mrcs extension.
+        for key in ('rlnTiltSeriesAligned', 'rlnTiltSeriesAlignedOdd',
+                    'rlnTiltSeriesAlignedEvn', 'rlnCtfImage'):
+            self._link_result_stack_as_mrcs(result, key)
+
+        # --- IMOD folder -> outputTsDir/TS_NAME/
+        self._copy_result_folder(result, 'at3ImodFolder', tsFolder)
+
+        # --- Tomogram outputs (only present if reconstruction was enabled) -> outputTomDir
+        if result.get('rlnTomoReconstructedTomogram', None) is not None:
+            tomFolder = self._getOutputTomFolder(tsName)
+            tomFolder.create()
+            for key in ('rlnTomoReconstructedTomogram', 'rlnTomoNameOdd',
+                        'rlnTomoNameEvn', 'at3ThicknessMrc', 'at3ThicknessCsv'):
+                self._copy_result_file(result, key, tomFolder)
 
     def _iterNewInputTs(self):
         """ Yield the input tilt series while monitoring the input STAR file.

@@ -20,6 +20,8 @@ import re
 from emtools.jobs import Args
 from emtools.metadata import StarFile
 
+from emwrap.base import print_launcher
+
 from .warp import WarpBaseTsAlign
 
 # Helper to parse flexible patches input used by both Aretomo2 and Aretomo3
@@ -54,7 +56,10 @@ def parse_patches(val):
 class WarpTsAlign(WarpBaseTsAlign):
     """ Warp wrapper for tilt-series alignment.
 
-    Supports AreTomo2 (ts_aretomo) and Etomo patches (ts_etomo_patches).
+    Supports AreTomo2 (ts_aretomo), AreTomo3 (ts_aretomo3) and Etomo
+    patches (ts_etomo_patches). Launchers given in the form for the
+    selected method (launcher_aretomo for AreTomo2/3, launcher_imod for
+    etomo patches) take precedence over the ones in EMWRAP_CONFIG.
     It will run:
         - ts_import -> mdocs
         - create_settings -> warp_tiltseries.settings
@@ -110,6 +115,18 @@ class WarpTsAlign(WarpBaseTsAlign):
             return self.join(self.TS, 'tiltstack', tsName, f'{tsName}_Imod', f"{tsName}_st.mrc" )
         return super().alignedTS(tsName)
 
+    def _get_method_launcher(self, argNames, varName):
+        """ Return the launcher of a program used by the alignment method:
+        the first non-empty form arg in argNames, otherwise the one from
+        EMWRAP_CONFIG['programs'][varName]. It is printed with its origin. """
+        for argName in argNames:
+            if launcher := self._args.get(argName, None):
+                break
+        else:
+            argName, launcher = varName, self.get_launcher(varName)
+        print_launcher(argName, launcher)
+        return launcher
+
     def runAlignment(self, batch):
         method = self._method()
         if method == 0:
@@ -122,7 +139,8 @@ class WarpTsAlign(WarpBaseTsAlign):
             raise Exception(f"Unknown alignment method: {method}")
 
     def _runAlignmentAretomo2(self, batch):
-        aretomo_launcher = self.get_launcher_arg('launcher_aretomo', 'ARETOMO2')
+        aretomo_launcher = self._get_method_launcher(['launcher_aretomo'],
+                                                     'ARETOMO2')
 
         args = Args({
             'WarpTools': 'ts_aretomo',
@@ -148,7 +166,10 @@ class WarpTsAlign(WarpBaseTsAlign):
         self.batch_execute('ts_aretomo', batch, args)
 
     def _runAlignmentAretomo3(self, batch):
-        aretomo3_launcher = self.get_launcher_arg('launcher_aretomo', 'ARETOMO3')
+        # 'launcher_aretomo' is the launcher for AreTomo2 or AreTomo3,
+        # depending on the selected alignment method
+        aretomo3_launcher = self._get_method_launcher(['launcher_aretomo'],
+                                                      'ARETOMO3')
 
         args = Args({
             'WarpTools': 'ts_aretomo3',
@@ -192,7 +213,7 @@ class WarpTsAlign(WarpBaseTsAlign):
         args.update(subargs)
         self.batch_execute('ts_etomo_patches', batch, args)
 
-        imod_launcher = self.get_launcher_arg('launcher_imod', 'IMOD')
+        imod_launcher = self._get_method_launcher(['launcher_imod'], 'IMOD')
         tsAllTable = StarFile.getTableFromFile('global', self.inputTs)
 
         def _tsFile(tsName, suffix):

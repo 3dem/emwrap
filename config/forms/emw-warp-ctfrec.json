@@ -107,6 +107,7 @@
                     "label": "Launchers",
                     "paramClass": "Group",
                     "help": "Launchers to use for the different programs",
+                    "collapsed": true,
                     "params": [
                         {
                             "name": "register_output_only",

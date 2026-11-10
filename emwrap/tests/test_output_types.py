@@ -29,7 +29,7 @@ import mrcfile
 import numpy as np
 
 from emtools.utils import FolderManager
-from emtools.metadata import StarFile, Table
+from emtools.metadata import StarFile, Table, RelionStar
 
 from emwrap.base.project_data import ProjectData
 
@@ -120,6 +120,119 @@ class TestOutputTypes(unittest.TestCase):
             'MaskCreate/job011/mask.mrc', relion, {'type': 'Volume'}))
         self.assertFalse(self.data._isStaleMaskInfo(
             'PyTom/job008/emd_template.mrc', pytom, {'type': 'Volume'}))
+
+
+    def _starNodes(self, job_id, nodes):
+        os.makedirs(self.data.join(job_id), exist_ok=True)
+        t = Table(columns=['rlnPipeLineNodeName', 'rlnPipeLineNodeTypeLabel'])
+        for name, label in nodes:
+            t.addRowValues(f'{job_id}/{name}', label)
+        with StarFile(self.data.join(job_id, 'RELION_OUTPUT_NODES.star'), 'w') as sf:
+            sf.writeTable('pipeline_nodes', t)
+
+    def test_empty_tilt_series(self):
+        """ STAR files without rows (e.g. all tilt series failed) have the
+        type declared by their job and 0 items. """
+        job_id = 'Aretomo3Align/job006'
+        self._starNodes(job_id, [
+            ('aligned_tilt_series.star', 'TomogramGroupMetadata.star.relion.tomo.aligntiltseries'),
+            ('tomograms.star', 'TomogramGroupMetadata.star.relion.tomo.tomograms')])
+        for fn in ('aligned_tilt_series.star', 'tomograms.star'):
+            with open(self.data.join(job_id, fn), 'w') as f:
+                f.write('\n# StarFile written by emtools\n\n\ndata_global\n')
+        job = _Job(job_id, 'emw-aretomo3-align')
+        aligned = f'{job_id}/aligned_tilt_series.star'
+        tomograms = f'{job_id}/tomograms.star'
+        self.data._wf = _Workflow({aligned: job, tomograms: job})
+        self.assertEqual(self.data._computeOutputTypeInfo(aligned, []),
+                         {'type': 'TiltSeriesAligned', 'info': '0 items'})
+        self.assertEqual(self.data._computeOutputTypeInfo(tomograms, []),
+                         {'type': 'Tomograms', 'info': '0 items'})
+
+    def test_tilt_series_info(self):
+        """ Tilt series: items, pixel size, tilts and dimensions (of the
+        first tilt series, from the header of its first image). """
+        job_id = 'MotionCorr/job002'
+        os.makedirs(self.data.join(job_id, 'tilt_series'))
+        tilts = Table(columns=RelionStar.TOMO_FRAME_SERIES_COLUMNS + ['rlnMicrographName'])
+        for i in range(3):
+            mic = f'{job_id}/frames/TS_01_{i}.mrc'
+            os.makedirs(os.path.dirname(self.data.join(mic)), exist_ok=True)
+            with mrcfile.new(self.data.join(mic)) as mrc:
+                mrc.set_data(np.zeros((6, 10), dtype=np.float32))
+            tilts.addRowValues(f'movie{i}.eer', 10, 0.0, 85.0, 0.0, -3.0, mic)
+        tsStar = f'{job_id}/tilt_series/TS_01.star'
+        with StarFile(self.data.join(tsStar), 'w') as sf:
+            sf.writeTable('TS_01', tilts)
+        glob = Table(columns=['rlnTomoName', 'rlnTomoTiltSeriesStarFile',
+                              'rlnTomoTiltSeriesPixelSize'])
+        glob.addRowValues('TS_01', tsStar, 1.35)
+        glob.addRowValues('TS_02', tsStar, 1.35)
+        output_id = f'{job_id}/corrected_tilt_series.star'
+        with StarFile(self.data.join(output_id), 'w') as sf:
+            sf.writeTable('global', glob)
+        self.data._wf = _Workflow({output_id: _Job(job_id, 'relion.motioncorr')})
+        self.assertEqual(self.data._computeOutputTypeInfo(output_id, []),
+                         {'type': 'TiltSeries',
+                          'info': '2 items, 1.350 Å/px, 3 tilts, 10 x 6'})
+
+    def test_unwritten_relion_outputs(self):
+        """ Outputs registered by finished Relion jobs that were not written
+        (e.g. Relion 5.1 tomo motioncorr corrected_micrographs.star) are
+        ignored, unless another job uses them. """
+        job_id = 'TiltSeries/job003'
+        os.makedirs(self.data.join(job_id))
+        for fn in ('corrected_tilt_series.star', 'logfile.pdf'):
+            with open(self.data.join(job_id, fn), 'w'):
+                pass
+        names = ['corrected_tilt_series.star', 'corrected_micrographs.star',
+                 'logfile.pdf', 'used_but_missing.star']
+
+        class _Output:
+            def __init__(self, oid):
+                self.id = oid
+
+        job = _Job(job_id, 'relion.motioncorr.tomo')
+        job.outputs = [_Output(f'{job_id}/{n}') for n in names]
+        child = _Job('Aretomo3Align/job004', 'emw-aretomo3-align')
+
+        class _Wf:
+            def jobs(self):
+                return [job, child]
+
+        self.data._wf = _Wf()
+        self.data._jobs = {}
+        self.data._resolveJobStatus = lambda j: j['status']
+        params = {child.id: {'input_tiltseries': f'{job_id}/used_but_missing.star'}}
+        self.data._jobParams = lambda jid: params.get(jid, {})
+
+        expected = [f'{job_id}/{n}' for n in names if n != 'corrected_micrographs.star']
+        self.assertEqual(self.data._collectJobOutputIds(job_id, job=job), expected)
+
+        # Running: the outputs might be written later
+        job['status'] = 'Running'
+        self.assertEqual(self.data._collectJobOutputIds(job_id, job=job),
+                         [f'{job_id}/{n}' for n in names])
+        # Only Relion jobs
+        job['status'] = 'Succeeded'
+        job['jobtype'] = 'emw-aretomo3-align'
+        self.assertEqual(self.data._collectJobOutputIds(job_id, job=job),
+                         [f'{job_id}/{n}' for n in names])
+
+
+    def test_pdf(self):
+        job_id = 'TiltSeries/job005'
+        os.makedirs(self.data.join(job_id))
+        with open(self.data.join(job_id, 'logfile.pdf'), 'wb') as f:
+            f.write(b'%PDF-1.4\n1 0 obj <</Type /Catalog /Pages 2 0 R>> endobj\n'
+                    b'2 0 obj <</Type /Pages /Kids [3 0 R 4 0 R] /Count 2>> endobj\n'
+                    b'3 0 obj <</Type /Page /Parent 2 0 R>> endobj\n'
+                    b'4 0 obj <</Type /Page /Parent 2 0 R>> endobj\n%%EOF\n')
+        output = f'{job_id}/logfile.pdf'
+        self.data._wf = _Workflow({output: _Job(job_id, 'relion.ctffind.tomo')})
+        info = self.data._computeOutputTypeInfo(output, [])
+        self.assertEqual(info['type'], 'PdfFile')
+        self.assertTrue(info['info'].startswith('2 pages, '), info['info'])
 
 
 if __name__ == '__main__':

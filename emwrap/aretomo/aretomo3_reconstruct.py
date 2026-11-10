@@ -28,12 +28,46 @@ class AreTomo3ReconstructPipeline(Aretomo3ModularBase):
     def _use_previous_alignment(self):
         return self._args.get('UsePreviousAlignment', False)
 
-    def _install_previous_alignment(self, batch, ts_name):
+    def _has_previous_alignment(self, ts_name):
+        try:
+            self._resolve_previous_alignment(ts_name, required=('stack', 'tlt', 'aln'))
+            return True
+        except FileNotFoundError:
+            return False
+
+    def _install_previous_alignment(self, batch, ts_name, row):
+        resolved, staged = self._stage_previous_alignment(
+            batch, ts_name, required=('stack', 'tlt', 'aln'))
         if self._ctf_requested():
-            _, staged = self._stage_previous_alignment(batch, ts_name, required=('stack', 'tlt', 'aln', 'ctf', 'ctf_stack'))
-        else:
-            _, staged = self._stage_previous_alignment(batch, ts_name, required=('stack', 'tlt', 'aln'))
+            self._install_ctf(batch, ts_name, row, resolved, staged)
         return staged
+
+    def _install_ctf(self, batch, ts_name, row, resolved, staged):
+        """Stage the *_CTF.txt used by -CorrCTF: the one written by the
+        previous AreTomo3 alignment if any, otherwise one made from the CTF
+        values in the input STAR files (e.g. CTFFIND results preserved by
+        the alignment, through emw-subset-ts)."""
+        ctf_dst = batch.join(f'{ts_name}_CTF.txt')
+        if os.path.exists(resolved['ctf']):
+            for key in ('ctf', 'ctf_stack'):
+                if os.path.exists(resolved[key]):
+                    dst = batch.join(os.path.basename(resolved[key]))
+                    if os.path.abspath(resolved[key]) != os.path.abspath(dst):
+                        shutil.copy2(resolved[key], dst)
+                    staged[key] = dst
+            return
+
+        table = self._read_series(ts_name, row)
+        if not self._has_star_ctf(table):
+            raise ValueError(
+                f'{ts_name}: CTF correction requested, but there is no '
+                f'{os.path.basename(resolved["ctf"])} from a previous AreTomo3 '
+                f'alignment and the tilt-series STAR file lacks '
+                f'{", ".join(self.STAR_CTF_COLUMNS)}.')
+        self.log(f'{ts_name}: Writing {os.path.basename(ctf_dst)} from the '
+                 f'CTF values in {row.rlnTomoTiltSeriesStarFile}', flush=True)
+        self._write_ctf_from_star(ctf_dst, table)
+        staged['ctf'] = ctf_dst
 
     def _write_synthetic_aln(self, path, table, row, pixel_size, raw_size=None):
         rot = float(getattr(row, 'rlnTomoNominalTiltAxisAngle', 0) or 0)
@@ -67,9 +101,9 @@ class AreTomo3ReconstructPipeline(Aretomo3ModularBase):
             ts_name = batch['tsName']
             batch.create()
             row = self._input_row(ts_name)
-            if self._use_previous_alignment():
+            if self._use_previous_alignment() or self._has_previous_alignment(ts_name):
                 self.log(f'{ts_name}: Using previous AreTomo3 alignment from tilt_series/{ts_name}/', flush=True)
-                self._install_previous_alignment(batch, ts_name)
+                self._install_previous_alignment(batch, ts_name, row)
             else:
                 raise NotImplementedError(
                     f'{ts_name}: Cmd 2 reconstruction without a previous AreTomo3 '
@@ -102,6 +136,8 @@ class AreTomo3ReconstructPipeline(Aretomo3ModularBase):
             row = input_by_name[ts_name]
             tomo = result.get('rlnTomoReconstructedTomogram')
             if 'error' in result or not tomo or not os.path.exists(tomo):
+                # Count it as failed (see postrun)
+                result.setdefault('error', f'Missing reconstructed tomogram: {tomo}')
                 failed.addRowValues(**row._asdict())
                 continue
             dims = Image.get_dimensions(tomo)
