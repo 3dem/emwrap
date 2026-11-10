@@ -105,8 +105,7 @@ class TestRefine3dOutputs(unittest.TestCase):
                              'run_data.star', 'run_class001.mrc',
                              'run_half1_class001_unfil.mrc'])
         self.assertEqual(self._outputs(job, 'relion.refine3d.tomo'),
-                         ['run_class001.mrc', 'run_half1_class001_unfil.mrc',
-                          'run_optimisation_set.star'])
+                         ['run_class001.mrc', 'run_optimisation_set.star'])
 
     def test_spa_final(self):
         """ Without optimisation set the data STAR file has the particles. """
@@ -114,8 +113,7 @@ class TestRefine3dOutputs(unittest.TestCase):
         self._jobFiles(job, ['run_optimiser.star', 'run_data.star',
                              'run_class001.mrc', 'run_half1_class001_unfil.mrc'])
         self.assertEqual(self._outputs(job, 'relion.refine3d'),
-                         ['run_class001.mrc', 'run_half1_class001_unfil.mrc',
-                          'run_data.star'])
+                         ['run_class001.mrc', 'run_data.star'])
 
     def test_class3d_unchanged(self):
         job = 'Class3D/job020'

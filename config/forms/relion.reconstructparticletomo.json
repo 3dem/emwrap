@@ -57,7 +57,7 @@
                     "name": "binning",
                     "label": "Binning factor:",
                     "default": 1,
-                    "paramClass": "IntParam",
+                    "paramClass": "FloatParam",
                     "help": "The tilt series images will be binned by this (real-valued) factor and then reconstructed in the specified box size above. Note that thereby the reconstructed region becomes larger when specifying binning factors larger than one."
                 },
                 {

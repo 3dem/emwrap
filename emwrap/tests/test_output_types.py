@@ -29,7 +29,7 @@ import mrcfile
 import numpy as np
 
 from emtools.utils import FolderManager
-from emtools.metadata import StarFile, Table
+from emtools.metadata import StarFile, Table, RelionStar
 
 from emwrap.base.project_data import ProjectData
 
@@ -148,6 +148,33 @@ class TestOutputTypes(unittest.TestCase):
                          {'type': 'TiltSeriesAligned', 'info': '0 items'})
         self.assertEqual(self.data._computeOutputTypeInfo(tomograms, []),
                          {'type': 'Tomograms', 'info': '0 items'})
+
+    def test_tilt_series_info(self):
+        """ Tilt series: items, pixel size, tilts and dimensions (of the
+        first tilt series, from the header of its first image). """
+        job_id = 'MotionCorr/job002'
+        os.makedirs(self.data.join(job_id, 'tilt_series'))
+        tilts = Table(columns=RelionStar.TOMO_FRAME_SERIES_COLUMNS + ['rlnMicrographName'])
+        for i in range(3):
+            mic = f'{job_id}/frames/TS_01_{i}.mrc'
+            os.makedirs(os.path.dirname(self.data.join(mic)), exist_ok=True)
+            with mrcfile.new(self.data.join(mic)) as mrc:
+                mrc.set_data(np.zeros((6, 10), dtype=np.float32))
+            tilts.addRowValues(f'movie{i}.eer', 10, 0.0, 85.0, 0.0, -3.0, mic)
+        tsStar = f'{job_id}/tilt_series/TS_01.star'
+        with StarFile(self.data.join(tsStar), 'w') as sf:
+            sf.writeTable('TS_01', tilts)
+        glob = Table(columns=['rlnTomoName', 'rlnTomoTiltSeriesStarFile',
+                              'rlnTomoTiltSeriesPixelSize'])
+        glob.addRowValues('TS_01', tsStar, 1.35)
+        glob.addRowValues('TS_02', tsStar, 1.35)
+        output_id = f'{job_id}/corrected_tilt_series.star'
+        with StarFile(self.data.join(output_id), 'w') as sf:
+            sf.writeTable('global', glob)
+        self.data._wf = _Workflow({output_id: _Job(job_id, 'relion.motioncorr')})
+        self.assertEqual(self.data._computeOutputTypeInfo(output_id, []),
+                         {'type': 'TiltSeries',
+                          'info': '2 items, 1.350 Å/px, 3 tilts, 10 x 6'})
 
     def test_unwritten_relion_outputs(self):
         """ Outputs registered by finished Relion jobs that were not written

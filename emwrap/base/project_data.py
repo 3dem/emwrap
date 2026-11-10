@@ -90,8 +90,9 @@ class ProjectData(FolderManager):
         # Version 3: tilt series and tomograms without rows (were errors),
         # PDF files are PdfFile (were File)
         3: re.compile(r'(_series[^/]*|tomograms)\.star$|\.pdf$', re.IGNORECASE),
-        # Version 4: TomoParticles/TomoCoordinates with the pixel size
-        4: re.compile(r'optimisation_set\.star$'),
+        # Version 4: TomoParticles/TomoCoordinates with the pixel size, tilt
+        # series with the pixel size, number of tilts and dimensions
+        4: re.compile(r'optimisation_set\.star$|_series[^/]*\.star$'),
     }
 
     # Relion iterative jobs whose outputs are resolved from the files of the
@@ -105,7 +106,8 @@ class ProjectData(FolderManager):
     # versions are resolved again from the files (see _getJobInfo)
     # Version 2: Refine3D and InitialModel jobs (were the pipeline nodes)
     # Version 3: Refine3D jobs list the volume first, without the optimiser
-    # (Classes3D) and, in tomography, the data STAR file (Particles)
+    # (Classes3D), the unfiltered half map and, in tomography, the data STAR
+    # file (Particles)
     RELION_ITER_OUTPUTS_VERSION = 3
 
     # Version of the inputs detected from the job params (cached with each
@@ -574,16 +576,16 @@ class ProjectData(FolderManager):
                             raise ValueError(f"Tilt series {filepath} does not have the required columns:  "
                                             f"{RelionStar.TOMO_FRAME_SERIES_COLUMNS}")
 
-                        # 'info': f"{len(self.allTsTable)} items, {x} x {y} x {n} x {N}, {ps:0.3f} Å/px",
-
+                        imageCol = 'rlnMicrographMovieName'
                         if ts_table.hasColumn('rlnMicrographName'):
                             datatype = 'TiltSeries'
+                            imageCol = 'rlnMicrographName'
 
                         if ts_table.hasAllColumns(RelionStar.TOMO_ALIGNMENT_COLUMNS):
                             datatype = 'TiltSeriesAligned'
                         return {
                             'type': datatype,
-                            'info': f'{len(global_table)} items'
+                            'info': self._tsInfo(global_table, ts_table, imageCol)
                     }
                     
                 elif filepath.endswith('tomograms.star'):
@@ -696,6 +698,41 @@ class ProjectData(FolderManager):
             'type': 'File',
             'info': info
         }
+
+    def _tsInfo(self, global_table, ts_table, imageCol):
+        """ Info of a tilt series STAR file: number of tilt series, pixel
+        size, tilts and image dimensions (x x y) of the first one, read from
+        the header of its first image (the image data is not read). """
+        first = global_table[0]
+        info = f'{len(global_table)} items'
+        for label in ('rlnTomoTiltSeriesPixelSize', 'rlnMicrographOriginalPixelSize'):
+            if global_table.hasColumn(label):
+                info += f', {float(getattr(first, label)):0.3f} Å/px'
+                break
+        info += f', {len(ts_table)} tilts'
+        try:
+            if dims := self._imageDims(self.join(getattr(ts_table[0], imageCol))):
+                info += f', {dims[0]} x {dims[1]}'
+        except Exception as e:
+            self._debug(f"Error reading tilt image dimensions: {e}")
+        return info
+
+    @staticmethod
+    def _imageDims(imagePath):
+        """ (x, y) of an MRC or TIFF/EER image from its header, or None. """
+        lower = imagePath.lower()
+        if not os.path.exists(imagePath):
+            return None
+        if lower.endswith(('.mrc', '.mrcs', '.st')):
+            import mrcfile
+            with mrcfile.open(imagePath, header_only=True, permissive=True) as mrc:
+                return int(mrc.header.nx), int(mrc.header.ny)
+        if lower.endswith(('.tif', '.tiff', '.eer')):
+            import tifffile
+            with tifffile.TiffFile(imagePath) as tif:
+                y, x = tif.pages[0].shape[:2]
+                return x, y
+        return None
 
     # Number of pages of the page tree root (/Type /Pages ... /Count N)
     _PDF_PAGE_COUNT = re.compile(rb'/Type\s*/Pages\b[^>]*?/Count\s+(\d+)'
@@ -951,8 +988,10 @@ class ProjectData(FolderManager):
         if job['jobtype'] in self.REFINE3D_JOBTYPES:
             order = self.REFINE3D_OUTPUTS
             hasOptSet = any(s == 'optimisation_set.star' for s, _ in files)
+            # The final unfiltered half map is not listed either (the
+            # half1 map is while running, the only volume of an iteration)
             files = [(s, fn) for s, fn in files
-                     if s != 'optimiser.star'
+                     if s != 'optimiser.star' and not s.endswith('_unfil.mrc')
                      and not (hasOptSet and s == 'data.star')]
 
         def _order(item):
