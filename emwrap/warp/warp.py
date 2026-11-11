@@ -44,6 +44,10 @@ class WarpBasePipeline(ProcessingPipeline):
     TM = 'warp_tomostar'
     M = 'm'
     M_IMPORT_EXCLUDES = ('versions', 'sources')
+    # Image data folders of the M sources, linked instead of copied
+    M_SOURCES_LINKED_FOLDERS = ('tiltstack', 'reconstruction', 'powerspectrum',
+                                'average', 'thumbnails', 'denoising',
+                                'particleseries', 'frames')
     WARP_PARTICLES_STAR = 'warp_particles.star'
     WARP_FOLDERS = [FS, TS, TM]
 
@@ -128,7 +132,9 @@ class WarpBasePipeline(ProcessingPipeline):
         are shallow-copied: root files are copied, nested directories are
         linked and ``logs`` folders are recreated empty. ``mdocs`` is copied
         so it can be edited without touching the previous job. ``m`` is
-        rsync-ed (with ``sources`` linked) and every other input is linked.
+        rsync-ed, with ``sources`` copied except its image data folders
+        (MCore rewrites the source metadata in place), and every other
+        input is linked.
         Existing destinations are replaced.
 
         Args:
@@ -186,6 +192,30 @@ class WarpBasePipeline(ProcessingPipeline):
                 else:
                     _link(path, dst)
 
+        def _copySources(src, dst):
+            """ Private copy of the M sources metadata: MCore rewrites the
+            tilt-series XML files, the .source file and its versions in
+            place, so a link would let every downstream refinement modify
+            the population of the previous jobs. Only the image data
+            folders (and folders that were already links) are linked. """
+            os.makedirs(dst, exist_ok=True)
+            for fn in os.listdir(src):
+                path = os.path.join(src, fn)
+                if os.path.islink(path):
+                    target = os.path.realpath(path)
+                    dstPath = os.path.join(dst, fn)
+                    _replace(dstPath)
+                    os.symlink(os.path.relpath(target, os.path.realpath(dst)),
+                               dstPath)
+                elif not os.path.isdir(path):
+                    shutil.copy(path, dst)
+                elif fn == 'logs':
+                    os.makedirs(os.path.join(dst, fn), exist_ok=True)
+                elif fn in cls.M_SOURCES_LINKED_FOLDERS:
+                    _link(path, dst)
+                else:
+                    _copySources(path, os.path.join(dst, fn))
+
         def _copyMFolder(src):
             dst = os.path.join(outputFolder, cls.M)
             os.makedirs(dst, exist_ok=True)
@@ -193,7 +223,9 @@ class WarpBasePipeline(ProcessingPipeline):
                         for arg in ('--exclude', name)]
             Path.rsync(src, dst, *excludes)
             if os.path.exists(sources := os.path.join(src, 'sources')):
-                _link(sources, dst)
+                dstSources = os.path.join(dst, 'sources')
+                _replace(dstSources)
+                _copySources(sources, dstSources)
 
         for key, src in inputPaths.items():
             if src.endswith('.settings'):

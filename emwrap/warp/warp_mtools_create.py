@@ -158,24 +158,54 @@ class WarpMtoolsCreate(WarpBasePipeline):
             new_cols.insert(insert_at + offset, pixel_col)
         return new_cols
 
-    def _convertParticlesTableToWarp(self, particles_table, tomo_lookup, scale_factor):
-        """Return a Warp-compatible particles table (voxels and tomostar names)."""
+    @staticmethod
+    def _opticsPixelSizes(optics_table):
+        """ Image pixel size (rlnImagePixelSize) by optics group. """
+        sizes = {}
+        for row in optics_table or []:
+            ps = float(getattr(row, 'rlnImagePixelSize', 0) or 0)
+            if ps <= 0:
+                raise Exception(
+                    "Particles optics table is missing rlnImagePixelSize, "
+                    "needed by MTools to read the particle coordinates.")
+            sizes[str(getattr(row, 'rlnOpticsGroup', 1))] = ps
+        if not sizes:
+            raise Exception("Particles STAR file has no optics table.")
+        return sizes
+
+    def _convertParticlesTableToWarp(self, particles_table, tomo_lookup, optics_ps):
+        """Return a Warp-compatible particles table (voxels and tomostar names).
+
+        MTools create_species reads rlnCoordinateX/Y/Z in pixels of the
+        rlnImagePixelSize of the optics table (when --angpix_coords is not
+        given), as Warp writes them in ts_export_particles. So Relion 5
+        centered Angstrom coordinates are converted to pixels of that size,
+        not to tomogram pixels nor with rlnTomoSubtomogramBinning.
+        Coordinates already in pixels are kept as they are.
+        """
         out_cols = self._particlesOutputColumns(particles_table)
         out_table = Table(out_cols)
         src_cols = particles_table.getColumnNames()
+        centered = not particles_table.hasAllColumns(
+            RelionStar.TOMO_PARTICLES_PIXEL_COORD_COLUMNS)
+        defaultPs = next(iter(optics_ps.values()))
 
         for row in particles_table:
             tomo_row = tomo_lookup[row.rlnTomoName]
             x, y, z = RelionStar.particleCoordsToPixel(row, tomo_row)
+            if centered:
+                ps = optics_ps.get(str(getattr(row, 'rlnOpticsGroup', '')), defaultPs)
+                scale = RelionStar.getTomoPixelSize(tomo_row) / ps
+                x, y, z = x * scale, y * scale, z * scale
             row_values = {
                 c: getattr(row, c)
                 for c in src_cols
                 if c not in RelionStar.TOMO_PARTICLES_CENTERED_COORD_COLUMNS
             }
             row_values.update({
-                'rlnCoordinateX': x * scale_factor,
-                'rlnCoordinateY': y * scale_factor,
-                'rlnCoordinateZ': z * scale_factor,
+                'rlnCoordinateX': x,
+                'rlnCoordinateY': y,
+                'rlnCoordinateZ': z,
                 'rlnTomoName': self._warpTomoName(tomo_row),
             })
             out_table.addRowValues(**row_values)
@@ -196,17 +226,10 @@ class WarpMtoolsCreate(WarpBasePipeline):
         )
         tomo_lookup = self._collectTomoLookup(particles_table)
 
-        # There might be a scale missmatch between the tomogram binning and the particles binning
-        # because in WarpExportParticles, one can select a different output pixel size
-        optics_table = StarFile.getTableFromFile('optics', abs_path)
-        first_tomo_row = next(iter(tomo_lookup.values()))
-        tomogram_binning = RelionStar.getTomoBinning(first_tomo_row)
-        particles_binning = optics_table[0].rlnTomoSubtomogramBinning
-        scale_factor = tomogram_binning / particles_binning
-
-
+        optics_ps = self._opticsPixelSizes(
+            StarFile.getTableFromFile('optics', abs_path))
         converted_table = self._convertParticlesTableToWarp(
-            particles_table, tomo_lookup, scale_factor)
+            particles_table, tomo_lookup, optics_ps)
 
         out_star = self.join(self.M, self.WARP_PARTICLES_STAR)
         all_tables = StarFile.getTablesDict(abs_path)
