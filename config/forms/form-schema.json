@@ -77,6 +77,9 @@
         { "$ref": "#/$defs/floatParam" },
         { "$ref": "#/$defs/booleanParam" },
         { "$ref": "#/$defs/enumParam" },
+        { "$ref": "#/$defs/filesPatternParam" },
+        { "$ref": "#/$defs/multiPointerParam" },
+        { "$ref": "#/$defs/tableParam" },
         { "$ref": "#/$defs/lineParam" },
         { "$ref": "#/$defs/groupParam" },
         { "$ref": "#/$defs/simpleParam" },
@@ -230,7 +233,11 @@
           "const": "IntParam"
         },
         "default": {
-          "type": "integer"
+          "description": "Integer, or its string form (empty if allowsEmpty)",
+          "oneOf": [
+            { "type": "integer" },
+            { "type": "string", "pattern": "^\\s*(-?[0-9]+)?\\s*$" }
+          ]
         }
       },
       "unevaluatedProperties": false
@@ -247,7 +254,11 @@
           "const": "FloatParam"
         },
         "default": {
-          "type": "number"
+          "description": "Number, or its string form (empty if allowsEmpty)",
+          "oneOf": [
+            { "type": "number" },
+            { "type": "string", "pattern": "^\\s*(-?([0-9]+\\.?[0-9]*|\\.[0-9]+)([eE][-+]?[0-9]+)?)?\\s*$" }
+          ]
         }
       },
       "unevaluatedProperties": false
@@ -304,6 +315,63 @@
           "type": "string",
           "enum": ["combo", "hlist", "vlist"],
           "description": "Display style for the enum"
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "filesPatternParam": {
+      "description": "A glob pattern (relative to the project) that must match at least one file",
+      "allOf": [
+        { "$ref": "#/$defs/commonAttributes" }
+      ],
+      "type": "object",
+      "required": ["name", "label", "paramClass"],
+      "properties": {
+        "paramClass": {
+          "const": "FilesPatternParam"
+        },
+        "default": {
+          "type": "string"
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "multiPointerParam": {
+      "description": "A list of input paths (stored as a JSON list in job.star)",
+      "allOf": [
+        { "$ref": "#/$defs/commonAttributes" }
+      ],
+      "type": "object",
+      "required": ["name", "label", "paramClass"],
+      "properties": {
+        "paramClass": {
+          "const": "MultiPointerParam"
+        },
+        "min": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Minimum number of inputs required"
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "tableParam": {
+      "description": "A table whose rows are edited by the user (stored as a JSON list of row objects in job.star); its params are the columns",
+      "allOf": [
+        { "$ref": "#/$defs/commonAttributes" }
+      ],
+      "type": "object",
+      "required": ["name", "label", "paramClass", "params"],
+      "properties": {
+        "paramClass": {
+          "const": "TableParam"
+        },
+        "params": {
+          "type": "array",
+          "description": "Column definitions of the table",
+          "items": {
+            "$ref": "#/$defs/parameter"
+          }
         }
       },
       "unevaluatedProperties": false
@@ -376,6 +444,10 @@
         "hidden": {
           "type": "boolean",
           "description": "If true, group is not displayed but included in job values"
+        },
+        "collapsed": {
+          "type": "boolean",
+          "description": "If true, group is displayed collapsed by default"
         }
       },
       "additionalProperties": false

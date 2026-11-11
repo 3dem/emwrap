@@ -37,7 +37,12 @@
           "label": "Extra arguments",
           "paramClass": "StringParam",
           "help": "Extra arguments to pass to EstimateWeights."
-        },
+        }
+      ]
+    },
+    {
+      "label": "Compute",
+      "params": [
         {
           "name": "gpus",
           "label": "Fixed one GPU",
@@ -45,7 +50,21 @@
           "paramClass": "StringParam",
           "help": "Hidden parameter to force the use of a single GPU.",
           "condition": "false"
-        }  
+        },
+        {
+          "label": "Launchers",
+          "paramClass": "Group",
+          "help": "Launchers to use for the different programs",
+          "collapsed": true,
+          "params": [
+            {
+              "name": "launcher_warp",
+              "label": "WARP",
+              "paramClass": "StringParam",
+              "help": "Launcher to use for Warp (EstimateWeights). Leave empty to use EMWRAP_CONFIG default (WARP)."
+            }
+          ]
+        }
       ]
     }
   ]

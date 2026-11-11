@@ -89,7 +89,6 @@
                 {
                     "label": "Refine Zernike Polynomials",
                     "paramClass": "Group",
-                    "default": false,
                     "help": "Refine Zernike polynomials of 2nd, 3rd, 4th and 5th order (--ctf_zernike2, --ctf_zernike3, --ctf_zernike4, --ctf_zernike5).",
                     "params": [
                         {
@@ -139,6 +138,20 @@
                     "default": 1,
                     "paramClass": "IntParam",
                     "help": "--perdevice_refine: Number of worker processes per GPU; set to >1 to improve utilization if your GPUs have enough memory."
+                },
+                {
+                    "label": "Launchers",
+                    "paramClass": "Group",
+                    "help": "Launchers to use for the different programs",
+                    "collapsed": true,
+                    "params": [
+                        {
+                            "name": "launcher_warp",
+                            "label": "WARP",
+                            "paramClass": "StringParam",
+                            "help": "Launcher to use for Warp (MCore). Leave empty to use EMWRAP_CONFIG default (WARP)."
+                        }
+                    ]
                 }
             ]
         }
