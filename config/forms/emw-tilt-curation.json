@@ -1,7 +1,7 @@
 {
     "name": "emw-tilt-curation",
     "label": "EMwrap Tilt Curation",
-    "help": "Automatically leave out the tilt images of each tilt series that fail the curation rule, and write the result as a new TiltSeries.\n\nThe input is a tilt analysis (emw-tilt-analyze): the rule is applied to its measures, nothing is computed from the images here. Each tilt image is judged on:\n- its image content, measured by the analysis on its 512 px jpeg: blank (no texture), blacked out (more of the field black than the rest of the tilt series), a different field from the tilt before it, or shifted away from the first tilt;\n- its motion and CTF values from the tilt-series STAR file, and the CTF profile correlation of the analysis' CTF fit view.\nOnce a tilt has lost the field (blank, blacked out, different field or shifted), the tilts acquired after it on the same side of the first tilt can be left out too.\n\nThe image measures are relative to each tilt series, so a tilt series dark or low in contrast throughout is not penalised. The defaults were calibrated on a hand curation of lamella tilt series (EMPIAR-11830) and are the same limits the OTF dashboard uses. Leave a limit empty to not use that check.\n\nOutput: as the subset job (emw-subset-ts) of the tilt series the analysis was made on, with every analyzed tilt series and the failing tilts excluded, a filtered tilt-series STAR file per tilt series. When that input job has a Warp frame-series state, the same tilts are deselected in a copy of it (WarpTools change_selection), so the next Warp jobs do not use them. tilt_curation.csv lists every tilt with its measures, whether it was kept and why not. Tilt series are never left out unless 'Leave out tilt series keeping less than' is set (or no tilt is left); tilt series the analysis has not reached are left out.",
+    "help": "Automatically leave out the tilt images of each tilt series that fail the curation rule, and write the result as a new TiltSeries.\n\nThe input is a tilt analysis (emw-tilt-analyze): the rule is applied to its measures, nothing is computed from the images here. Each tilt image is judged on:\n- its image content, measured by the analysis on its 512 px jpeg: blank (no texture), blacked out (more of the field black than the rest of the tilt series), a different field from the tilt before it, or shifted away from the first tilt;\n- its motion and CTF values from the tilt-series STAR file, and the CTF profile correlation of the analysis' CTF fit view.\nOnce a tilt has lost the field (blank, blacked out, different field or shifted), the tilts acquired after it on the same side of the first tilt can be left out too.\n\nThe image measures are relative to each tilt series, so a tilt series dark or low in contrast throughout is not penalised. The defaults were calibrated on a hand curation of lamella tilt series (EMPIAR-11830) and are the same limits the OTF dashboard uses. Leave a limit empty to not use that check.\n\nOutput: as the subset job (emw-subset-ts) of the tilt series the analysis was made on, with every analyzed tilt series and the failing tilts excluded, a filtered tilt-series STAR file per tilt series. When that input job has a Warp frame-series state, the same tilts are deselected in a copy of it (WarpTools change_selection), so the next Warp jobs do not use them. tilt_curation.csv lists every tilt with its measures, whether it was kept and why not; tilt_qc_config.json the limits applied (it can be loaded in another curation or tilt analysis job). Tilt series are never left out unless 'Leave out tilt series keeping fewer than' is set (or no tilt is left); tilt series the analysis has not reached are left out.",
     "sections": [
         {
             "label": "Input",
@@ -12,6 +12,14 @@
                     "paramClass": "PathParam",
                     "pointerClass": "TiltSeriesAnalysis",
                     "help": "tilt_analysis.star of a tilt analysis job (emw-tilt-analyze) of motion corrected tilt series, before alignment: individual tilts cannot be deselected in a Warp tilt-series state once it exists."
+                },
+                {
+                    "name": "input_config",
+                    "label": "Load a configuration file (optional)",
+                    "paramClass": "PathParam",
+                    "pattern": "*.json",
+                    "allowsEmpty": true,
+                    "help": "A tilt QC configuration file (tilt_qc_config.json), e.g. the one the OTF dashboard saved in the tilt analysis job (<analysis job>/tilt_qc_config.json) or that of another curation job. When given, every limit is taken from it (also 'Leave out tilt series keeping fewer than') and the Criteria below are not used. Either way the limits applied are written to this job's tilt_qc_config.json."
                 }
             ]
         },
@@ -139,10 +147,10 @@
                     "params": [
                         {
                             "name": "drop_series_below",
-                            "label": "Drop TS keeping < (fraction of their tilts)",
+                            "label": "Leave out tilt series keeping fewer than (fraction of their tilts)",
                             "paramClass": "FloatParam",
                             "allowsEmpty": true,
-                            "help": "Empty (the default): tilt series are never left out, only their failing tilts (a tilt series with no tilt left is left out). E.g. 0.75 leaves out the tilt series that would keep fewer than 75% of their tilts; the OTF dashboard lists those for review."
+                            "help": "Empty (the default): tilt series are never left out, only their failing tilts (a tilt series with no tilt left is left out). E.g. 0.75 leaves out the tilt series that would keep fewer than 75% of their tilts. The OTF dashboard has the same threshold ('Too few tilts kept') and lists those tilt series for review."
                         }
                     ]
                 }
