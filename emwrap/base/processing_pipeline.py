@@ -24,14 +24,23 @@ import traceback
 import threading
 import argparse
 import re
+import subprocess
 from collections import defaultdict
 
-from emtools.utils import Process, Color, Pretty, FolderManager, Timer
+from emtools.utils import Process, Color, Pretty, FolderManager, Timer, System
 from emtools.jobs import BatchManager, Args, Pipeline
 from emtools.metadata import (Table, Column, StarFile, StarMonitor, TextFile,
                               Acquisition, RelionStar)
 
 from .config import ProcessingConfig
+
+
+def banner(lines):
+    """ Box of asterisks around the given lines. """
+    width = max(80, max(len(line) for line in lines) + 4)
+    border = '*' * width
+    rows = '\n'.join(f"* {line.ljust(width - 4)} *" for line in lines)
+    return f"{border}\n{rows}\n{border}"
 
 
 def launcher_banner(variable, launcher):
@@ -40,10 +49,7 @@ def launcher_banner(variable, launcher):
     lines = [f"{variable} launcher: {launcher}"]
     if not launcher or not (os.path.exists(launcher) or shutil.which(launcher)):
         lines.append("NOT FOUND")
-    width = max(80, max(len(line) for line in lines) + 4)
-    border = '*' * width
-    rows = '\n'.join(f"* {line.ljust(width - 4)} *" for line in lines)
-    return f"{border}\n{rows}\n{border}"
+    return banner(lines)
 
 
 def print_launcher(variable, launcher):
@@ -268,6 +274,13 @@ class ProcessingPipeline(Pipeline, FolderManager):
         runInfo['end'] = Pretty.now()
         runInfo['elapsed'] = str(t.getElapsedTime())
         runInfo['status'] = status
+        computing = runInfo.get('computing') or {}
+        if cluster := computing.get('cluster'):
+            # Memory used by the cluster job, while it is still running
+            if memory := self.cluster_memory(cluster):
+                computing['memory'] = memory
+                self.log(f"Cluster job {cluster['job_id']} memory: "
+                         f"max {memory.get('max')}, avg {memory.get('avg')}")
         try:
             self.readInfo()
             runs = self.info['runs']
@@ -327,6 +340,156 @@ class ProcessingPipeline(Pipeline, FolderManager):
         else:
             return gpu_list
 
+    @staticmethod
+    def get_relion_gpu_list(gpu_ids):
+        """ Different GPU ids (sorted) in Relion's --gpu syntax, where ':'
+        separates MPI processes and ',' threads (e.g. "0,1:0,1" -> [0, 1]). """
+        return sorted({int(t) for mpi_part in str(gpu_ids).split(':')
+                       for t in mpi_part.split(',') if t.strip()})
+
+    @staticmethod
+    def get_job_gpu_list(params):
+        """ Different GPU ids (sorted) used by a job, from Relion's native
+        gpu_ids param (none if use_gpu is No) or from the emwrap gpus param. """
+        # Relion jobs only use their gpu_ids if use_gpu is set
+        if str(params.get('use_gpu', '')).strip().lower() in ('no', 'false', '0'):
+            return []
+        gpu_ids = params.get('gpu_ids')
+        if gpu_ids is not None and str(gpu_ids).strip():
+            return ProcessingPipeline.get_relion_gpu_list(gpu_ids)
+        return sorted(set(ProcessingPipeline.get_gpu_list(params.get('gpus', ''))))
+
+    @staticmethod
+    def count_job_cpus(params):
+        """ Number of CPUs of a job (MPIs x threads), from the Relion
+        nr_mpi/nr_threads params or the emwrap cpus param ("N" or "MxT"). """
+        mpi, threads = 1, 1
+        if 'nr_mpi' in params or 'nr_threads' in params:
+            mpi = int(params.get('nr_mpi', 1))
+            threads = int(params.get('nr_threads', 1))
+        elif cpus_str := params.get('cpus', ''):
+            if 'x' in str(cpus_str):
+                mpi, threads = map(int, cpus_str.split('x'))
+            else:
+                mpi, threads = int(cpus_str), 1
+        return mpi * threads
+
+    # ------------------------- Computing environment -------------------------
+    @staticmethod
+    def cluster_info():
+        """ Cluster job (LSF or Slurm) running this process, read from its
+        environment variables, or None if it is running locally. """
+        env = os.environ
+
+        def _int(value):
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return None
+
+        if job_id := env.get('LSB_JOBID'):
+            hosts = env.get('LSB_HOSTS', '').split()  # one entry per slot
+            return {'system': 'LSF', 'job_id': job_id,
+                    'queue': env.get('LSB_QUEUE'),
+                    'cpus': _int(env.get('LSB_DJOB_NUMPROC')) or len(hosts) or None,
+                    'hosts': ' '.join(sorted(set(hosts))) or None}
+        if job_id := env.get('SLURM_JOB_ID'):
+            return {'system': 'Slurm', 'job_id': job_id,
+                    'queue': env.get('SLURM_JOB_PARTITION'),
+                    'cpus': _int(env.get('SLURM_CPUS_ON_NODE')),
+                    'hosts': env.get('SLURM_JOB_NODELIST')}
+        return None
+
+    @staticmethod
+    def cluster_memory(cluster, timeout=10):
+        """ Max and average memory used (up to now) by a cluster job, as
+        reported by the cluster (LSF bjobs or Slurm sstat), or None. """
+        if cluster['system'] == 'LSF':
+            cmd = ['bjobs', '-noheader', '-o', "max_mem avg_mem delimiter='|'",
+                   cluster['job_id']]
+        else:
+            cmd = ['sstat', '-n', '-P', '-j', f"{cluster['job_id']}.batch",
+                   '--format=MaxRSS,AveRSS']
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        lines = p.stdout.strip().splitlines() if p.returncode == 0 else []
+        if not lines:
+            return None
+        values = [v.strip() for v in lines[0].split('|')] + ['', '']
+        memory = {k: v for k, v in zip(['max', 'avg'], values) if v and v != '-'}
+        return memory or None
+
+    def computingInfo(self):
+        """ Computing environment of this run: the node (host, CPUs, memory
+        and GPUs), the CPUs and GPUs set in the job params, the type of the
+        GPUs used and, if running as a cluster job, its id, queue and CPUs.
+        It never fails, missing values are None. """
+        def _safe(func, default=None):
+            try:
+                return func()
+            except Exception:
+                return default
+
+        node_gpus = _safe(System.gpus, [])
+        gpu_ids = _safe(lambda: self.get_job_gpu_list(self._args), [])
+        visible = os.environ.get('CUDA_VISIBLE_DEVICES', '').strip()
+        visible_ids = [v.strip() for v in visible.split(',') if v.strip()]
+        # The job GPU ids are relative to the visible devices (if set)
+        indexes = [visible_ids[i] if i < len(visible_ids) else str(i)
+                   for i in gpu_ids]
+        gpu_names = {g.get('name') for g in node_gpus if g.get('index') in indexes}
+        if gpu_ids and not gpu_names:
+            # Not mapped (e.g. GPU UUIDs), it is clear if all are the same type
+            if len(names := {g.get('name') for g in node_gpus}) == 1:
+                gpu_names = names
+
+        return {
+            'host': _safe(System.hostname),
+            'node': {
+                'cpus': _safe(System.cpus),
+                'memory': _safe(System.memory),  # GiB
+                'gpus': [{'index': g.get('index'), 'name': g.get('name'),
+                          'memory': g.get('memory.total')} for g in node_gpus]
+            },
+            'cpus': _safe(lambda: self.count_job_cpus(self._args)),
+            'gpus': len(gpu_ids),
+            'gpu_ids': gpu_ids,
+            'gpu_type': ', '.join(sorted(n for n in gpu_names if n)) or None,
+            'cuda_visible_devices': visible or None,
+            'cluster': self.cluster_info()
+        }
+
+    @staticmethod
+    def computing_lines(computing):
+        """ Lines to log a computing info dict (see computingInfo). """
+        node = computing.get('node') or {}
+        gpus = {}
+        for g in node.get('gpus') or []:
+            key = f"{g['name']} ({g['memory']})" if g.get('memory') else g['name']
+            gpus[key] = gpus.get(key, 0) + 1
+        node_gpus = ', '.join(f"{n} x {name}" for name, n in gpus.items()) or 'no GPUs'
+        lines = ["Computing environment",
+                 f"  Host: {computing.get('host')}",
+                 f"  Node: {node.get('cpus')} CPUs, {node.get('memory')} GiB memory, "
+                 f"{node_gpus}"]
+        if cluster := computing.get('cluster'):
+            lines.append(f"  Cluster: {cluster['system']} job {cluster['job_id']}, "
+                         f"queue: {cluster.get('queue')}, CPUs: {cluster.get('cpus')}, "
+                         f"hosts: {cluster.get('hosts')}")
+        else:
+            lines.append("  Cluster: none (running locally)")
+        lines.append(f"  Job CPUs (params): {computing.get('cpus')}")
+        gpu_line = f"  Job GPUs: {computing.get('gpus')}"
+        if computing.get('gpus'):
+            gpu_line += (f", ids: {' '.join(str(i) for i in computing['gpu_ids'])}"
+                         f", type: {computing.get('gpu_type')}")
+        if visible := computing.get('cuda_visible_devices'):
+            gpu_line += f", CUDA_VISIBLE_DEVICES={visible}"
+        lines.append(gpu_line)
+        return lines
+
     @classmethod
     def get_launcher(cls, packageName=None):
         """ Get a launcher script to 'launch' programs from
@@ -371,6 +534,8 @@ class ProcessingPipeline(Pipeline, FolderManager):
             # launching) belongs to this run, to report its time in the queue
             if launched := self.info.pop('launched', None):
                 runInfo['launched'] = launched
+            runInfo['computing'] = computing = self.computingInfo()
+            print(f"\n{banner(self.computing_lines(computing))}\n", flush=True)
             self.info['runs'].append(runInfo)
             self.writeInfo()
             self._currentRun = (runInfo, t)
