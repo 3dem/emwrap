@@ -24,6 +24,7 @@ from emtools.metadata import StarFile
 from emwrap.base import ProcessingPipeline
 from emwrap.base.subset_ts import SubsetTsPipeline, MODE_EXPLICIT_NAMES
 from emwrap.base.tilt_quality_curation import TiltQualityCuration as tqc
+from emwrap.base.tilt_qc_config import TiltQcConfig
 from emwrap.warp.warp_subset import WarpSubsetTs
 
 
@@ -84,17 +85,29 @@ class TiltCurationPipeline(SubsetTsPipeline):
         self.randomCount = self.randomSeed = None
         self.matchSet = ''
 
-        # A parameter not given keeps the rule's default; an empty one
-        # turns that check off
-        self.limits = {}
-        for param, (key, factor) in LIMIT_PARAMS.items():
-            if param not in args:
-                self.limits[key] = tqc.DEFAULT_LIMITS[key]
-            else:
-                value = self._float(args[param], param)
-                self.limits[key] = None if value is None else value * factor
-        self.limits['beyond'] = args.get('reject_beyond', True)
-        self.dropBelow = self._float(args.get('drop_series_below', ''), 'drop_series_below')
+        self.inputConfig = (args.get('input_config') or '').strip() or None
+        if self.inputConfig:
+            # Every limit from the file, the form's are not used
+            if not os.path.exists(self.inputConfig):
+                raise Exception(f"Configuration file not found: {self.inputConfig}")
+            self.thresholds = TiltQcConfig.read(self.inputConfig)
+            self.limits = TiltQcConfig.rule_limits(self.thresholds)
+            self.dropBelow = TiltQcConfig.tilts_kept_min(self.thresholds)
+        else:
+            # A parameter not given keeps the rule's default; an empty one
+            # turns that check off
+            self.limits = {}
+            for param, (key, factor) in LIMIT_PARAMS.items():
+                if param not in args:
+                    self.limits[key] = tqc.DEFAULT_LIMITS[key]
+                else:
+                    value = self._float(args[param], param)
+                    self.limits[key] = None if value is None else value * factor
+            self.limits['beyond'] = self._bool(args.get('reject_beyond', True))
+            self.dropBelow = self._float(args.get('drop_series_below', ''), 'drop_series_below')
+            # The dashboard's own targets keep their defaults
+            self.thresholds = TiltQcConfig.from_rule_limits(self.limits)
+            self.thresholds['tiltsKept'] = {'min': self.dropBelow}
         # Filled by _prepareDeselection, reported in postrun
         self.results = {}
         self.droppedSeries = {}
@@ -108,6 +121,13 @@ class TiltCurationPipeline(SubsetTsPipeline):
         if not table:
             raise Exception(f"{path} is not a tilt analysis (emw-tilt-analyze output)")
         return table[0]
+
+    @staticmethod
+    def _bool(value):
+        """ A form boolean, which may come as text ('false', '0', 'no'). """
+        if isinstance(value, str):
+            return value.strip().lower() not in ('false', '0', 'no', '')
+        return bool(value)
 
     @staticmethod
     def _float(value, name):
@@ -200,7 +220,14 @@ class TiltCurationPipeline(SubsetTsPipeline):
                  f"{Color.bold(len(globalTable))} in {self.inputSet}")
         if notAnalyzed := len(inputNames) - len(series):
             self.log(f"{Color.red(notAnalyzed)} tilt series not analyzed are left out")
-        self.log("Limits: " + ', '.join(f'{k}={v}' for k, v in self.limits.items()))
+        self.log("Limits" + (f" (from {Color.bold(self.inputConfig)})" if self.inputConfig else '')
+                 + ": " + ', '.join(f'{k}={v}' for k, v in self.limits.items())
+                 + f", drop_series_below={self.dropBelow}")
+        configPath = TiltQcConfig.path(self.outputDir)
+        TiltQcConfig.write(configPath, self.thresholds, user=os.environ.get('USER'),
+                           source=f'{self.name} {self.outputPrefix}',
+                           loaded_from=os.path.abspath(self.inputConfig) if self.inputConfig else None)
+        self.log(f"Tilt QC configuration applied: {Color.cyan(configPath)}")
 
         for name, tsStar, qcJson in series:
             self.results[name] = self._curate_series(name, tsStar, qcJson)

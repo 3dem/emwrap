@@ -1,7 +1,7 @@
 {
     "name": "emw-tilt-analyze",
     "label": "EMwrap Tilt Analyze",
-    "help": "Analyze the tilts of motion corrected tilt series, on the fly, for the OTF dashboard and the tilt curation job (emw-tilt-curation).\n\nFor each tilt: a 512 px jpeg (filmstrip, and what the image measures use), optionally a 1024 px one (a closer look), and for Warp input the CTF fit view (the measured power spectrum over the simulated one) with its radial profiles and their correlation. For each tilt series: the image content measures of its tilts (texture, black area, match with the tilt before it, field shift), once it is in the input.\n\nThe input is followed while the job that writes it adds tilt series. With Warp input, the jpegs and CTF views of each tilt are made as soon as Warp writes it, before its tilt series is complete.\n\nOutput: tilt_analysis.star (TiltSeriesAnalysis), pointing to this job's thumbnails folder and listing the analyzed tilt series. Open it in the OTF dashboard, or curate it with emw-tilt-curation. Several analysis jobs (and dashboards) can run in the same project.",
+    "help": "Analyze the tilts of motion corrected tilt series, on the fly, for the OTF dashboard and the tilt curation job (emw-tilt-curation).\n\nFor each tilt: a 512 px jpeg (filmstrip, and what the image measures use), optionally a 1024 px one (a closer look), and for Warp input the CTF fit view (the measured power spectrum over the simulated one) with its radial profiles and their correlation. For each tilt series: the image content measures of its tilts (texture, black area, match with the tilt before it, field shift), once it is in the input.\n\nThe input is followed while the job that writes it adds tilt series. With Warp input, the jpegs and CTF views of each tilt are made as soon as Warp writes it, before its tilt series is complete.\n\nOutput: tilt_analysis.star (TiltSeriesAnalysis), pointing to this job's thumbnails folder and listing the analyzed tilt series; and tilt_qc_config.json, the thresholds of the dashboard (the defaults, or a previous configuration file), which the dashboard can change and save over. Open it in the OTF dashboard, or curate it with emw-tilt-curation. Several analysis jobs (and dashboards) can run in the same project.",
     "sections": [
         {
             "label": "Input",
@@ -19,6 +19,14 @@
                     "paramClass": "BooleanParam",
                     "default": true,
                     "help": "The larger jpeg the dashboard shows for a closer look at a tilt."
+                },
+                {
+                    "name": "input_config",
+                    "label": "Load a previous configuration file (optional)",
+                    "paramClass": "PathParam",
+                    "pattern": "*.json",
+                    "allowsEmpty": true,
+                    "help": "A tilt QC configuration file (tilt_qc_config.json) of another tilt analysis or tilt curation job, or one saved from the OTF dashboard: the thresholds the dashboard categorizes tilts and tilt series with, and the limits of the curation rule. It is copied to this job's tilt_qc_config.json, which the dashboard then shows and saves over ('Save configuration file'). Empty: the default thresholds."
                 }
             ]
         },
