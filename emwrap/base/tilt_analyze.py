@@ -24,6 +24,7 @@ from emtools.image import Image
 from emwrap.base import ProcessingPipeline
 from emwrap.base.tilt_thumbnails import TiltThumbnailWriter
 from emwrap.base.tilt_quality_curation import TiltQualityCuration as tqc
+from emwrap.base.tilt_qc_config import TiltQcConfig
 
 
 class TiltAnalyzePipeline(ProcessingPipeline):
@@ -43,7 +44,11 @@ class TiltAnalyzePipeline(ProcessingPipeline):
     before its tilt series is complete.
 
     Everything goes into <job>/thumbnails (see TiltThumbnailWriter).  The
-    output, tilt_analysis.star (TiltSeriesAnalysis), points to it:
+    job also writes <job>/tilt_qc_config.json (TiltQcConfig) when it starts:
+    the thresholds the OTF dashboard of this analysis categorizes with, the
+    defaults or those of a previous file (input_config).  The dashboard
+    saves over it.  The output, tilt_analysis.star (TiltSeriesAnalysis),
+    points to the thumbnails:
 
         data_analysis   one row: the job folder, the thumbnails folder and
                         the input tilt series
@@ -62,6 +67,7 @@ class TiltAnalyzePipeline(ProcessingPipeline):
     def __init__(self, args, output):
         ProcessingPipeline.__init__(self, args, output)
         self.inputTs = args['input_tiltseries']
+        self.inputConfig = (args.get('input_config') or '').strip() or None
         self.medium = str(args.get('medium_jpegs', True)).strip().lower() not in ('false', '0', 'no', '')
         self.threads = max(1, int(args.get('threads', 4) or 1))
         self.wait = {
@@ -236,7 +242,34 @@ class TiltAnalyzePipeline(ProcessingPipeline):
     # ------------------------------------------------------------------
     # Job
     # ------------------------------------------------------------------
+    def _writeConfig(self):
+        """ The job's tilt QC configuration, unless it has one already (a
+        job continued keeps what the dashboard saved), or it was loaded from
+        another file than the one asked for now. """
+        path = TiltQcConfig.path(self.outputDir)
+        loaded = os.path.abspath(self.inputConfig) if self.inputConfig else None
+        if os.path.exists(path):
+            try:
+                current = TiltQcConfig.read_file(path)
+            except (OSError, ValueError) as e:
+                current = None
+                self.log(f"WARNING: {path} cannot be read, written again: {e}")
+            if current and (not loaded or current.get('loadedFrom') == loaded):
+                self.log(f"Tilt QC configuration: {Color.bold(path)} (kept)")
+                return
+        if self.inputConfig:
+            # A wrong file stops the job: it was asked for explicitly
+            if not os.path.exists(self.inputConfig):
+                raise Exception(f"Configuration file not found: {self.inputConfig}")
+            thresholds = TiltQcConfig.read_file(self.inputConfig)['thresholds']
+        else:
+            thresholds = TiltQcConfig.defaults()
+        TiltQcConfig.write(path, thresholds, user=os.environ.get('USER'),
+                           source=f'{self.name} {self.outputPrefix}', loaded_from=loaded)
+        self.log(f"Tilt QC configuration: {Color.bold(path)}, from {Color.cyan(loaded or 'the defaults')}")
+
     def prerun(self):
+        self._writeConfig()
         self.log(f"Input tilt series: {Color.bold(self.inputTs)}"
                  + ('' if os.path.exists(self.inputTs) else ' (not written yet, waiting for it)'))
         self.log(f"Thumbnails folder: {Color.bold(self.writer.thumbnailsDir)}")
