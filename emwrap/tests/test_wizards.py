@@ -51,6 +51,7 @@ RELION = 'relion.pseudosubtomo'
 CLASS3D = 'relion.class3d.tomo'
 REFINE3D = 'relion.refine3d.tomo'
 MASK_CREATE = 'emw-relion-mask_create'
+MTOOLS_CREATE = 'emw-warp-mtools_create'
 
 
 class TestWizards(unittest.TestCase):
@@ -277,6 +278,44 @@ class TestWizards(unittest.TestCase):
         result = Wizards.apply(self.project, REFINE3D, 'mask', params,
                                {'diameter': 50})
         self.assertEqual(result['params'], {'particle_diameter': 50})
+
+    def test_mtools_create_mask(self):
+        self._write('Refine3D/job010/run_data.star', 'data_particles\n')
+        self._write('Refine3D/job010/run_it012_data.star', 'data_particles\n')
+        self._write_mrc('Refine3D/job010/run_it011_class001.mrc', (40, 40, 40))
+        self._write_mrc('Refine3D/job010/run_it012_class001.mrc', (40, 40, 40))
+        self._write_mrc('MaskCreate/job011/mask.mrc', (40, 40, 40))
+        params = {'create_species.particles_relion': 'Refine3D/job010/run_data.star',
+                  'create_species.mask': 'MaskCreate/job011/mask.mrc'}
+
+        # Before the final volume: the last iteration
+        result = Wizards.open(self.project, MTOOLS_CREATE, 'mask', params)
+        self.assertEqual(result['ui'], 'VolumeMaskWizard')
+        self.assertEqual(result['data']['volume']['path'],
+                         'Refine3D/job010/run_it012_class001.mrc')
+        self.assertEqual(result['data']['mask']['path'], params['create_species.mask'])
+        self.assertEqual(Wizards.apply(self.project, MTOOLS_CREATE, 'mask',
+                                       params, {})['params'], {})
+
+        # The final volume, or the one of the given iteration
+        self._write_mrc('Refine3D/job010/run_class001.mrc', (40, 40, 40))
+        result = Wizards.open(self.project, MTOOLS_CREATE, 'mask', params)
+        self.assertEqual(result['data']['volume']['path'],
+                         'Refine3D/job010/run_class001.mrc')
+        result = Wizards.open(self.project, MTOOLS_CREATE, 'mask', {
+            **params, 'create_species.particles_relion': 'Refine3D/job010/run_it012_data.star'})
+        self.assertEqual(result['data']['volume']['path'],
+                         'Refine3D/job010/run_it012_class001.mrc')
+
+        # Missing mask or particles, or particles without a volume
+        self._write('Other/job020/run_data.star', 'data_particles\n')
+        for p in [{'create_species.mask': ''},
+                  {'create_species.mask': 'missing.mrc'},
+                  {'create_species.particles_relion': ''},
+                  {'create_species.particles_relion': 'missing_data.star'},
+                  {'create_species.particles_relion': 'Other/job020/run_data.star'}]:
+            with self.assertRaises(WizardError):
+                Wizards.open(self.project, MTOOLS_CREATE, 'mask', {**params, **p})
 
     def test_errors(self):
         with self.assertRaises(WizardError):

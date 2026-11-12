@@ -1,6 +1,14 @@
 {
     "name": "emw-warp-mtools",
     "help": "Warp/MTools wrapper to create a population, add a data source, and define a species in one step. Runs: create_population, create_source, create_species.\n\n*REFERENCES*:\n[[https://warpem.github.io/warp/reference/mtools/api/mtools/?h=mtools][MTools API]]",
+    "wizards": [
+        {
+            "id": "mask",
+            "label": "Mask wizard",
+            "adaptor": "emwrap.warp.wizards.WarpCreateSpeciesMaskAdaptor",
+            "params": ["create_species.mask"]
+        }
+    ],
     "sections": [
         {
             "label": "Population / Source",

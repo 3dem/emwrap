@@ -18,7 +18,9 @@ The wizards so far:
   from tilt-series, used by Warp `emw-warp-export_particles` and Relion
   `relion.pseudosubtomo`.
 - `VolumeMaskWizard`: the mask of a map (a mask map or a sphere), used by
-  Relion `relion.class3d.tomo` and `relion.refine3d.tomo`.
+  Relion `relion.class3d.tomo` and `relion.refine3d.tomo`, and by Warp
+  `emw-warp-mtools_create` (the species mask over the last Relion volume of
+  the input `_data.star`, `WarpCreateSpeciesMaskAdaptor`).
 - `MaskCreateWizard`: the parameters of a mask created from a map, with a
   tentative mask computed on the server (preview), used by
   `emw-relion-mask_create`.

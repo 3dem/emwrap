@@ -16,7 +16,11 @@
 
 """ Wizard adaptors of the Warp job forms (see emwrap.base.wizards). """
 
-from emwrap.base.wizards import (WizardAdaptor, ExportTomoParticlesWizard,
+import os
+import re
+
+from emwrap.base.wizards import (WizardAdaptor, WizardError,
+                                 ExportTomoParticlesWizard, VolumeMaskWizard,
                                  tomograms_from_optimisation_set)
 
 
@@ -46,3 +50,71 @@ class WarpExportParticlesAdaptor(WizardAdaptor):
             'ts_export_particles.box': outputs['out_box'],
             'ts_export_particles.diameter': outputs['diameter']
         }
+
+
+# Volume of the first class of a Relion iteration (e.g. run_it025_class001.mrc,
+# run_ct5_it025_class001.mrc)
+RELION_ITER_CLASS001 = re.compile(r'^(.*)_it(\d+)_class001\.mrc$')
+
+
+def relion_last_volume(project, particles):
+    """ Return the project path of the last Relion volume of the particles
+    STAR file of a Relion refinement (<prefix>_data.star): <prefix>_class001.mrc
+    (e.g. run_class001.mrc for run_data.star, or run_it025_class001.mrc for
+    run_it025_data.star) or, if not written yet, the class001 volume of the
+    last iteration with the same prefix. Raise WizardError if none is found. """
+    if not particles.endswith('_data.star'):
+        raise WizardError(f"The particles should be a Relion _data.star file: "
+                          f"{particles}")
+    prefix = particles[:-len('_data.star')]
+    volume = f'{prefix}_class001.mrc'
+    join = lambda p: p if os.path.isabs(p) else project.join(p)
+    if os.path.exists(join(volume)):
+        return volume
+
+    folder, base = os.path.split(prefix)
+    iterations = []
+    if os.path.isdir(join(folder or '.')):
+        for fn in os.listdir(join(folder or '.')):
+            if (m := RELION_ITER_CLASS001.match(fn)) and m.group(1) == base:
+                iterations.append((int(m.group(2)), fn))
+    if not iterations:
+        raise WizardError(f"No Relion volume was found for the particles "
+                          f"{particles} (expected {volume}).")
+    return os.path.join(folder, max(iterations)[1])
+
+
+class WarpCreateSpeciesMaskAdaptor(WizardAdaptor):
+    """ emw-warp-mtools_create <-> VolumeMaskWizard
+
+    Shows the species mask (create_species.mask) over the last Relion volume
+    of the input particles (create_species.particles_relion, a Relion
+    _data.star). Both the mask and the particles are required; OK changes
+    nothing (the mask is a map).
+    """
+    wizard = VolumeMaskWizard
+
+    def toWizard(self, params):
+        mask = str(params.get('create_species.mask') or '').strip()
+        particles = str(params.get('create_species.particles_relion') or '').strip()
+        errors = []
+        if not mask:
+            errors.append("Select the mask before opening the wizard.")
+        elif not os.path.exists(self.join(mask)):
+            errors.append(f"The mask was not found: {mask}")
+        if not particles:
+            errors.append("Select the input particles (Relion _data.star) "
+                          "before opening the wizard.")
+        elif not os.path.exists(self.join(particles)):
+            errors.append(f"The input particles were not found: {particles}")
+        if errors:
+            raise WizardError(errors)
+
+        return {
+            'volume': relion_last_volume(self.project, particles),
+            'mask': mask,
+            'diameter': params.get('create_species.diameter')
+        }
+
+    def fromWizard(self, outputs, params):
+        return {}
