@@ -24,7 +24,6 @@ from emtools.metadata import StarFile
 from emwrap.base import ProcessingPipeline
 from emwrap.base.subset_ts import SubsetTsPipeline, MODE_EXPLICIT_NAMES
 from emwrap.base.tilt_quality_curation import TiltQualityCuration as tqc
-from emwrap.base.tilt_qc_config import TiltQcConfig
 from emwrap.warp.warp_subset import WarpSubsetTs
 
 
@@ -90,9 +89,9 @@ class TiltCurationPipeline(SubsetTsPipeline):
             # Every limit from the file, the form's are not used
             if not os.path.exists(self.inputConfig):
                 raise Exception(f"Configuration file not found: {self.inputConfig}")
-            self.thresholds = TiltQcConfig.read(self.inputConfig)
-            self.limits = TiltQcConfig.rule_limits(self.thresholds)
-            self.dropBelow = TiltQcConfig.tilts_kept_min(self.thresholds)
+            self.thresholds = tqc.Config.read(self.inputConfig)
+            self.limits = tqc.Config.rule_limits(self.thresholds)
+            self.dropBelow = tqc.Config.tilts_kept_min(self.thresholds)
         else:
             # A parameter not given keeps the rule's default; an empty one
             # turns that check off
@@ -106,7 +105,7 @@ class TiltCurationPipeline(SubsetTsPipeline):
             self.limits['beyond'] = self._bool(args.get('reject_beyond', True))
             self.dropBelow = self._float(args.get('drop_series_below', ''), 'drop_series_below')
             # The dashboard's own targets keep their defaults
-            self.thresholds = TiltQcConfig.from_rule_limits(self.limits)
+            self.thresholds = tqc.Config.from_rule_limits(self.limits)
             self.thresholds['tiltsKept'] = {'min': self.dropBelow}
         # Filled by _prepareDeselection, reported in postrun
         self.results = {}
@@ -223,8 +222,8 @@ class TiltCurationPipeline(SubsetTsPipeline):
         self.log("Limits" + (f" (from {Color.bold(self.inputConfig)})" if self.inputConfig else '')
                  + ": " + ', '.join(f'{k}={v}' for k, v in self.limits.items())
                  + f", drop_series_below={self.dropBelow}")
-        configPath = TiltQcConfig.path(self.outputDir)
-        TiltQcConfig.write(configPath, self.thresholds, user=os.environ.get('USER'),
+        configPath = tqc.Config.path(self.outputDir)
+        tqc.Config.write(configPath, self.thresholds, user=os.environ.get('USER'),
                            source=f'{self.name} {self.outputPrefix}',
                            loaded_from=os.path.abspath(self.inputConfig) if self.inputConfig else None)
         self.log(f"Tilt QC configuration applied: {Color.cyan(configPath)}")

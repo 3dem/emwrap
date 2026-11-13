@@ -24,7 +24,6 @@ from emtools.image import Image
 from emwrap.base import ProcessingPipeline
 from emwrap.base.tilt_thumbnails import TiltThumbnailWriter
 from emwrap.base.tilt_quality_curation import TiltQualityCuration as tqc
-from emwrap.base.tilt_qc_config import TiltQcConfig
 
 
 class TiltAnalyzePipeline(ProcessingPipeline):
@@ -44,8 +43,8 @@ class TiltAnalyzePipeline(ProcessingPipeline):
     before its tilt series is complete.
 
     Everything goes into <job>/thumbnails (see TiltThumbnailWriter).  The
-    job also writes <job>/tilt_qc_config.json (TiltQcConfig) when it starts:
-    the thresholds the OTF dashboard of this analysis categorizes with, the
+    job also writes <job>/tilt_qc_config.json (TiltQualityCuration.Config)
+    when it starts: the thresholds the OTF dashboard of this analysis categorizes with, the
     defaults or those of a previous file (input_config).  The dashboard
     saves over it.  The output, tilt_analysis.star (TiltSeriesAnalysis),
     points to the thumbnails:
@@ -246,11 +245,11 @@ class TiltAnalyzePipeline(ProcessingPipeline):
         """ The job's tilt QC configuration, unless it has one already (a
         job continued keeps what the dashboard saved), or it was loaded from
         another file than the one asked for now. """
-        path = TiltQcConfig.path(self.outputDir)
+        path = tqc.Config.path(self.outputDir)
         loaded = os.path.abspath(self.inputConfig) if self.inputConfig else None
         if os.path.exists(path):
             try:
-                current = TiltQcConfig.read_file(path)
+                current = tqc.Config.read_file(path)
             except (OSError, ValueError) as e:
                 current = None
                 self.log(f"WARNING: {path} cannot be read, written again: {e}")
@@ -261,10 +260,10 @@ class TiltAnalyzePipeline(ProcessingPipeline):
             # A wrong file stops the job: it was asked for explicitly
             if not os.path.exists(self.inputConfig):
                 raise Exception(f"Configuration file not found: {self.inputConfig}")
-            thresholds = TiltQcConfig.read_file(self.inputConfig)['thresholds']
+            thresholds = tqc.Config.read_file(self.inputConfig)['thresholds']
         else:
-            thresholds = TiltQcConfig.defaults()
-        TiltQcConfig.write(path, thresholds, user=os.environ.get('USER'),
+            thresholds = tqc.Config.defaults()
+        tqc.Config.write(path, thresholds, user=os.environ.get('USER'),
                            source=f'{self.name} {self.outputPrefix}', loaded_from=loaded)
         self.log(f"Tilt QC configuration: {Color.bold(path)}, from {Color.cyan(loaded or 'the defaults')}")
 
