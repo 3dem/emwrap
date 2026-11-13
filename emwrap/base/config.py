@@ -118,6 +118,11 @@ class ProcessingConfig:
         "emw-pytme": {"launcher": "emwrap.pytme", "visible": False},        
         "emw-relion-symmetrize_volume": {"launcher": "emwrap.relion.symmetrize_volume"},
         "emw-relion-mask_create": {"launcher": "emwrap.relion.mask_create"},
+        "emw-relion-transform_volume": {
+            "launcher": "emwrap.relion.transform_volume",
+            "label": "Relion Transform Volume",
+            "output": "TransformVolume"
+        },
         "emw-warp-mtools_create": {
             "launcher": "emwrap.warp.warp_mtools_create",
             "label": "Warp M Create Population",

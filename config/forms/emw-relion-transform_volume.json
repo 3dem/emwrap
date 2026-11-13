@@ -1,0 +1,221 @@
+{
+    "name": "emw-relion-transform_volume",
+    "help": "Transform a volume with relion_image_handler: rescale (to a pixel size, by a binning factor or to a box size), crop/pad the box, flip or invert the hand, shift, invert contrast and filter. RELION applies the operations in this order: remove NaN, invert contrast, B-factor, low-pass, high-pass, flip, shift, rescale, crop/pad. The output header always gets the resulting pixel size. Input: a Volume. Output: the transformed Volume.",
+    "sections": [
+        {
+            "label": "I/O",
+            "params": [
+                {
+                    "label": "Input",
+                    "paramClass": "Group",
+                    "params": [
+                        {
+                            "name": "relion_image_handler.i",
+                            "label": "Input volume:",
+                            "paramClass": "PathParam",
+                            "pointerClass": "Volume",
+                            "help": "Input volume (MRC) to transform (--i)."
+                        },
+                        {
+                            "name": "relion_image_handler.angpix",
+                            "label": "Input pixel size (Å):",
+                            "paramClass": "FloatParam",
+                            "default": -1,
+                            "allowsEmpty": true,
+                            "help": "Pixel size of the input volume (--angpix). Use -1 to read it from the volume header. Set it when the header value is missing or wrong; the output header will then be corrected as well."
+                        }
+                    ]
+                },
+                {
+                    "label": "Output",
+                    "paramClass": "Group",
+                    "params": [
+                        {
+                            "name": "relion_image_handler.force_angpix",
+                            "label": "Output pixel size (Å):",
+                            "paramClass": "FloatParam",
+                            "default": -1,
+                            "allowsEmpty": true,
+                            "help": "Write this pixel size in the output header (--force_header_angpix) instead of the computed one, without changing the data. Use -1 to keep the computed pixel size."
+                        },
+                        {
+                            "name": "relion_image_handler.float16",
+                            "label": "Write float16:",
+                            "paramClass": "BooleanParam",
+                            "default": false,
+                            "help": "Write the output in half precision (MRC mode 12) instead of 32-bit float (--float16). Not all programs can read it."
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "label": "Geometry",
+            "params": [
+                {
+                    "label": "Box",
+                    "paramClass": "Group",
+                    "params": [
+                        {
+                            "name": "relion_image_handler.rescale_mode",
+                            "label": "Rescale:",
+                            "paramClass": "EnumParam",
+                            "default": "0",
+                            "choices": {
+                                "0": "No rescaling",
+                                "1": "To a pixel size",
+                                "2": "By a binning factor",
+                                "3": "To a box size"
+                            },
+                            "help": "Rescale the volume in Fourier space (--rescale_angpix), keeping the same physical size. The new box is rounded to an even size, so the real pixel size might differ slightly from the requested one; the real value is written to the output header."
+                        },
+                        {
+                            "name": "relion_image_handler.rescale_angpix",
+                            "label": "Target pixel size (Å):",
+                            "paramClass": "FloatParam",
+                            "condition": "relion_image_handler.rescale_mode == 1",
+                            "help": "New pixel size in Å (--rescale_angpix)."
+                        },
+                        {
+                            "name": "relion_image_handler.binning",
+                            "label": "Binning factor:",
+                            "paramClass": "FloatParam",
+                            "default": 2,
+                            "condition": "relion_image_handler.rescale_mode == 2",
+                            "help": "New pixel size = input pixel size x binning. Values below 1 upsample the volume."
+                        },
+                        {
+                            "name": "relion_image_handler.rescale_box",
+                            "label": "Target box size (px):",
+                            "paramClass": "IntParam",
+                            "condition": "relion_image_handler.rescale_mode == 3",
+                            "help": "Even box size in pixels of the rescaled volume. The pixel size becomes input box x input pixel size / target box."
+                        },
+                        {
+                            "name": "relion_image_handler.new_box",
+                            "label": "Crop/pad to box (px):",
+                            "paramClass": "IntParam",
+                            "default": -1,
+                            "allowsEmpty": true,
+                            "help": "Crop (smaller) or zero-pad (larger) the volume around its center to this box size, without changing the pixel size (--new_box). Applied after rescaling. Use -1 to keep the box."
+                        }
+                    ]
+                },
+                {
+                    "name": "relion_image_handler.flip",
+                    "label": "Flip / hand:",
+                    "paramClass": "EnumParam",
+                    "default": "0",
+                    "choices": {
+                        "0": "None",
+                        "1": "Flip X",
+                        "2": "Flip Y",
+                        "3": "Flip Z",
+                        "4": "Invert hand"
+                    },
+                    "help": "Mirror the volume along one axis (--flipX/--flipY/--flipZ), or invert the hand (--invert_hand): like flipping X but keeping the symmetry origin, the recommended option to fix the handedness of a map."
+                },
+                {
+                    "name": "relion_image_handler.shift_com",
+                    "label": "Center by center of mass:",
+                    "paramClass": "BooleanParam",
+                    "default": false,
+                    "help": "Shift the volume so its center of mass (positive values only) is at the box center (--shift_com)."
+                },
+                {
+                    "label": "Shift (px)",
+                    "paramClass": "Line",
+                    "condition": "!relion_image_handler.shift_com",
+                    "params": [
+                        {
+                            "name": "relion_image_handler.shift_x",
+                            "label": "X:",
+                            "paramClass": "FloatParam",
+                            "default": 0
+                        },
+                        {
+                            "name": "relion_image_handler.shift_y",
+                            "label": "Y:",
+                            "paramClass": "FloatParam",
+                            "default": 0
+                        },
+                        {
+                            "name": "relion_image_handler.shift_z",
+                            "label": "Z:",
+                            "paramClass": "FloatParam",
+                            "default": 0
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "label": "Filter",
+            "params": [
+                {
+                    "name": "relion_image_handler.invert_contrast",
+                    "label": "Invert contrast:",
+                    "paramClass": "BooleanParam",
+                    "default": false,
+                    "help": "Multiply the values by -1 (--multiply_constant -1), e.g. to match the contrast of a template with the tomograms."
+                },
+                {
+                    "name": "relion_image_handler.lowpass",
+                    "label": "Low-pass (Å):",
+                    "paramClass": "FloatParam",
+                    "default": -1,
+                    "allowsEmpty": true,
+                    "help": "Low-pass filter resolution in Å (--lowpass). Use -1 for none."
+                },
+                {
+                    "name": "relion_image_handler.highpass",
+                    "label": "High-pass (Å):",
+                    "paramClass": "FloatParam",
+                    "default": -1,
+                    "allowsEmpty": true,
+                    "help": "High-pass filter resolution in Å (--highpass). Use -1 for none."
+                },
+                {
+                    "name": "relion_image_handler.filter_edge_width",
+                    "label": "Filter edge width (shells):",
+                    "paramClass": "IntParam",
+                    "default": 2,
+                    "help": "Width of the raised cosine edge of the low/high-pass filters, in resolution shells (--filter_edge_width)."
+                },
+                {
+                    "name": "relion_image_handler.bfactor",
+                    "label": "B-factor (Å²):",
+                    "paramClass": "FloatParam",
+                    "default": 0,
+                    "help": "Apply this B-factor (--bfactor): negative values sharpen, positive values blur. Use 0 for none."
+                },
+                {
+                    "name": "relion_image_handler.remove_nan",
+                    "label": "Remove NaN/inf:",
+                    "paramClass": "BooleanParam",
+                    "default": false,
+                    "help": "Replace non-numerical values (NaN, inf) with 0 (--remove_nan)."
+                }
+            ]
+        },
+        {
+            "label": "Compute",
+            "params": [
+                {
+                    "label": "Launchers",
+                    "paramClass": "Group",
+                    "collapsed": true,
+                    "params": [
+                        {
+                            "name": "launcher_relion",
+                            "label": "RELION",
+                            "paramClass": "StringParam",
+                            "allowsEmpty": true,
+                            "help": "Launcher to use for Relion"
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}

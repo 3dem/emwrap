@@ -1,6 +1,6 @@
 {
     "name": "emw-relion-symmetrize_volume",
-    "help": "Apply point-group symmetry to a volume using relion_image_handler --symmetrize. Input: a Volume. Output: symmetrized Volume.",
+    "help": "Align a volume to the RELION convention for a point-group symmetry using relion_align_symmetry: it searches the orientation that best fits the symmetry, re-centres the map and rotates it onto the RELION symmetry axes. The symmetry itself is not applied. Input: a Volume. Output: the aligned Volume.",
     "sections": [
         {
             "label": "General",
@@ -10,14 +10,14 @@
                     "label": "Input volume:",
                     "paramClass": "PathParam",
                     "pointerClass": "Volume",
-                    "help": "Input volume (MRC) to symmetrize. This will be passed as --i to relion_align_symmetry."
+                    "help": "Input volume (MRC) to align (--i)."
                 },
                 {
                     "name": "relion_align_symmetry.sym",
                     "label": "Symmetry:",
                     "paramClass": "StringParam",
                     "default": "C1",
-                    "help": "Symmetry group to apply (e.g. C1, C2, C3, D2, I1, I2, I3, I4). Passed as --sym to relion_image_handler. For asymmetric volumes use C1."
+                    "help": "Target point group the volume is aligned to (--sym), e.g. C2, C3, D2, O, I1, I2, I3, I4. With C1 there are no symmetry axes, so the volume is only re-centred."
                 }
             ]
         },
