@@ -14,7 +14,7 @@
 # *
 # **************************************************************************
 
-""" Binary 3D masks made of geometric shapes (sphere, cylinder and box),
+""" 3D masks made of geometric shapes (sphere, cylinder and box),
 used by the emw-geometry-mask job and its wizard (GeometryMaskWizard).
 
 Each shape has a center (px, from the first voxel of the box, x y z), the
@@ -26,7 +26,10 @@ Euler angles rot, tilt, psi (degrees, ZYZ as Relion) and its sizes (px):
 
 A voxel r is inside a shape if the local coordinates A · (r - center) are,
 where A is Relion's Euler matrix of (rot, tilt, psi). The mask is the union
-of the shapes: 1 inside any of them, 0 outside.
+of the shapes: 1 inside any of them, 0 outside. With a soft edge of width W
+(px), as relion_mask_create --width_soft_edge, the voxels outside the shapes
+at a distance d < W of the nearest one get a raised cosine
+0.5 + 0.5 cos(pi d / W); the distances to the shapes are exact.
 
 The job emw-geometry-mask (GeometryMaskPipeline) writes the mask on the box
 (and pixel size) of the optional input volume, or of the box size param.
@@ -35,6 +38,7 @@ Params:
     input_volume: optional map, gives the box and pixel size
     box_x, box_y, box_z: box size (px), without input volume
     angpix: pixel size (A) of the mask, empty: the one of the volume (or 1)
+    soft_edge: width (px) of the raised cosine soft edge, 0: binary mask
     shapes: TableParam, one row per shape (COLUMNS)
 
 Output: mask.mrc (VolumeMask)
@@ -108,6 +112,17 @@ def parse_shapes(rows, dimensions):
     return shapes
 
 
+def parse_soft_edge(value):
+    """ The soft edge width (px, >= 0; empty: 0); ValueError if not valid. """
+    try:
+        width = _number(value) or 0.0
+    except (TypeError, ValueError):
+        width = -1
+    if width < 0:
+        raise ValueError(["The soft edge should be a number of pixels (0 or more)."])
+    return width
+
+
 def euler_matrix(rot, tilt, psi):
     """ Relion's Euler matrix (Euler_angles2matrix) of the angles in degrees. """
     a, b, g = (math.radians(v) for v in (rot, tilt, psi))
@@ -119,25 +134,31 @@ def euler_matrix(rot, tilt, psi):
                      [sc, ss, cb]])
 
 
-def _inside(shape, u, v, w):
-    """ Boolean array: local coordinates (u, v, w) inside the shape. """
+def _distance(shape, u, v, w):
+    """ Signed distance (px) of the local coordinates (u, v, w) to the
+    surface of the shape: negative inside, exact outside. """
     kind = shape['shape']
     if kind == 'sphere':
-        return u ** 2 + v ** 2 + w ** 2 <= shape['radius'] ** 2
+        return np.sqrt(u ** 2 + v ** 2 + w ** 2) - shape['radius']
     if kind == 'cylinder':
-        return ((u ** 2 + v ** 2 <= shape['radius'] ** 2)
-                & (np.abs(w) <= shape['height'] / 2))
-    return ((np.abs(u) <= shape['size_x'] / 2)
-            & (np.abs(v) <= shape['size_y'] / 2)
-            & (np.abs(w) <= shape['size_z'] / 2))
+        q = [np.sqrt(u ** 2 + v ** 2) - shape['radius'],
+             np.abs(w) - shape['height'] / 2]
+    else:
+        q = [np.abs(c) - shape[k] / 2
+             for c, k in zip((u, v, w), SHAPE_SIZES['box'])]
+    outside = np.sqrt(sum(np.maximum(c, 0) ** 2 for c in q))
+    return outside + np.minimum(np.maximum.reduce(q), 0)
 
 
-def geometry_mask(shapes, dimensions, binning=1):
-    """ Mask (float32 0/1, (z, y, x)) of the union of the shapes (see
+def geometry_mask(shapes, dimensions, binning=1, soft_edge=0):
+    """ Mask (float32 0-1, (z, y, x)) of the union of the shapes (see
     parse_shapes) on a box of dimensions [X, Y, Z] px, downscaled by an
     integer binning (the voxels of the binned grid are sampled at their
-    center, in px of the full box). It is computed slice by slice. """
+    center, in px of the full box), with a raised cosine soft edge of
+    soft_edge px outside the shapes (0: binary). It is computed slice by
+    slice. """
     f = max(1, int(binning))
+    width = float(soft_edge or 0)
     axes = [np.arange(math.ceil(n / f)) * f + (f - 1) / 2 for n in dimensions]
     xs, ys, zs = axes
     mask = np.zeros((len(zs), len(ys), len(xs)), dtype=np.float32)
@@ -145,12 +166,16 @@ def geometry_mask(shapes, dimensions, binning=1):
     prepared = [(s, euler_matrix(*(s[k] for k in ANGLES)),
                  np.array([s[k] for k in CENTER])) for s in shapes]
     for iz, z in enumerate(zs):
-        inside = np.zeros(y2.shape, dtype=bool)
+        dist = np.full(y2.shape, np.inf)
         for s, A, c in prepared:
             dx, dy, dz = x2 - c[0], y2 - c[1], z - c[2]
             u, v, w = (A[i, 0] * dx + A[i, 1] * dy + A[i, 2] * dz for i in range(3))
-            inside |= _inside(s, u, v, w)
-        mask[iz] = inside
+            dist = np.minimum(dist, _distance(s, u, v, w))
+        if width > 0:
+            soft = np.clip(dist / width, 0, 1)
+            mask[iz] = 0.5 + 0.5 * np.cos(np.pi * soft)
+        else:
+            mask[iz] = dist <= 0
     return mask
 
 
@@ -212,6 +237,7 @@ class GeometryMaskPipeline(ProcessingPipeline):
             if isinstance(rows, str):
                 rows = _parse_table_param_value(rows)
             shapes = parse_shapes(rows, dims)
+            softEdge = parse_soft_edge(args.get('soft_edge'))
         except ValueError as e:
             errors = e.args[0] if isinstance(e.args[0], list) else [str(e)]
             raise Exception('\n'.join(errors))
@@ -219,12 +245,13 @@ class GeometryMaskPipeline(ProcessingPipeline):
             raise Exception("Add at least one shape to the mask.")
 
         self.log(f"Box: {Color.bold(' x '.join(map(str, dims)))} px, "
-                 f"pixel size: {Color.bold(angpix or 1.0)} A")
+                 f"pixel size: {Color.bold(angpix or 1.0)} A, "
+                 f"soft edge: {Color.bold(f'{softEdge:g}')} px")
         for i, s in enumerate(shapes):
             self.log(f"Shape {i + 1}: {Color.green(s['shape'])} "
                      + ', '.join(f"{k}={s[k]:g}" for k in s if s[k] != '' and k != 'shape'))
 
-        mask = geometry_mask(shapes, dims)
+        mask = geometry_mask(shapes, dims, soft_edge=softEdge)
         outMask = self.join(self.OUTPUT_MASK)
         with mrcfile.new(outMask, overwrite=True) as mrc:
             mrc.set_data(mask)
@@ -237,7 +264,7 @@ class GeometryMaskPipeline(ProcessingPipeline):
             self.log(Color.warn("The mask is empty: the shapes are outside the box."))
 
         self.info['summary'] = {'shapes': len(shapes), 'dimensions': dims,
-                                'angpix': angpix or 1.0,
+                                'angpix': angpix or 1.0, 'soft_edge': softEdge,
                                 'mask_fraction': round(fraction, 4)}
         self.writeRelionOutputNodes([[self.toProjectPath(outMask), self.OUTPUT_TYPE]])
         self.writeInfo()

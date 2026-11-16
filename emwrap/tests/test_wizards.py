@@ -394,23 +394,34 @@ class TestWizards(unittest.TestCase):
         self.assertEqual((x.max() - x.min(), y.max() - y.min()), (10, 20))
         with self.assertRaises(ValueError):
             parse_shapes([{'shape': 'cone'}], dims)
+        # A soft edge of 6 px: 1 inside, a raised cosine down to 0 outside
+        soft = geometry_mask(sphere, dims, soft_edge=6)
+        self.assertTrue((soft[geometry_mask(sphere, dims) == 1] == 1).all())
+        np.testing.assert_allclose(soft[20, 25, 40:47],
+                                   [1, 0.933, 0.75, 0.5, 0.25, 0.067, 0], atol=0.001)
 
         # Wizard: the box of the volume, a sphere to start with
         self._write_mrc('Refine3D/job020/map.mrc', (40, 50, 300), angpix=2.5)
-        params = {'input_volume': 'Refine3D/job020/map.mrc', 'shapes': '[]'}
+        params = {'input_volume': 'Refine3D/job020/map.mrc', 'shapes': '[]',
+                  'soft_edge': '4'}
         result = Wizards.open(self.project, GEOMETRY_MASK, 'geometry_mask', params)
         self.assertEqual(result['ui'], 'GeometryMaskWizard')
         self.assertEqual(result['data']['dimensions'], [300, 50, 40])
         self.assertEqual(result['data']['binning'], 3)
         self.assertEqual(result['data']['mask']['shape'], [14, 17, 100])
         self.assertEqual(len(result['inputs']['shapes']), 1)
+        self.assertEqual(result['inputs']['soft_edge'], 4)
 
         shapes = result['inputs']['shapes'] + [
             {'shape': 'box', 'center_x': 250, 'size_x': 30, 'size_y': 30, 'size_z': 30}]
         result = Wizards.apply(self.project, GEOMETRY_MASK, 'geometry_mask',
-                               params, {'shapes': shapes})
+                               params, {'shapes': shapes, 'soft_edge': 3})
         self.assertEqual([s['shape'] for s in result['params']['shapes']],
                          ['sphere', 'box'])
+        self.assertEqual(result['params']['soft_edge'], 3)
+        with self.assertRaises(WizardError):  # A negative soft edge
+            Wizards.apply(self.project, GEOMETRY_MASK, 'geometry_mask',
+                          params, {'shapes': shapes, 'soft_edge': -1})
         with self.assertRaises(WizardError):  # A box without sizes
             Wizards.apply(self.project, GEOMETRY_MASK, 'geometry_mask',
                           params, {'shapes': [{'shape': 'box'}]})

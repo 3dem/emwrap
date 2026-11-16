@@ -637,8 +637,9 @@ class GeometryMaskWizard(Wizard):
         angpix: pixel size (A), optional
         shapes: list of shapes (rows of geometry_mask.COLUMNS); without
             them the wizard starts with a sphere at the center of the box
+        soft_edge: width (px) of the raised cosine soft edge (0: binary)
 
-    Outputs (from the UI): shapes
+    Outputs (from the UI): shapes, soft_edge
     Preview data: mask (VolumeDensity), mask_fraction
     """
     ui = 'GeometryMaskWizard'
@@ -647,7 +648,8 @@ class GeometryMaskWizard(Wizard):
     PREVIEW_SIZE = 128
 
     def prepare(self, inputs):
-        from .geometry_mask import mask_box, parse_shapes, default_shape
+        from .geometry_mask import (mask_box, parse_shapes, parse_soft_edge,
+                                    default_shape)
 
         try:
             dims, angpix = mask_box(self.project, inputs)
@@ -661,9 +663,15 @@ class GeometryMaskWizard(Wizard):
             warnings += _shape_errors(e) + ["The shapes of the form are not "
                                             "valid, starting with a new one."]
             shapes = []
+        try:
+            softEdge = parse_soft_edge(inputs.get('soft_edge'))
+        except ValueError as e:
+            warnings += _shape_errors(e)
+            softEdge = 0.0
         volume = inputs.get('volume')
         return {
-            'inputs': {'shapes': shapes or [default_shape('sphere', dims)]},
+            'inputs': {'shapes': shapes or [default_shape('sphere', dims)],
+                       'soft_edge': softEdge},
             'data': {
                 'volume': ({'kind': 'volume', 'path': volume, 'dimensions': dims,
                             'voxelSize': angpix} if volume else None),
@@ -675,23 +683,32 @@ class GeometryMaskWizard(Wizard):
             'warnings': warnings
         }
 
-    def _shapes(self, outputs, prepared):
-        from .geometry_mask import parse_shapes
+    def _values(self, outputs, prepared):
+        """ The validated shapes and soft edge of the outputs. """
+        from .geometry_mask import parse_shapes, parse_soft_edge
+        errors = []
         try:
             shapes = parse_shapes(outputs.get('shapes'), prepared['data']['dimensions'])
+            if not shapes:
+                errors.append("Add at least one shape to the mask.")
         except ValueError as e:
-            raise WizardError(_shape_errors(e))
-        if not shapes:
-            raise WizardError("Add at least one shape to the mask.")
-        return shapes
+            errors += _shape_errors(e)
+        try:
+            softEdge = parse_soft_edge(outputs.get('soft_edge'))
+        except ValueError as e:
+            errors += _shape_errors(e)
+        if errors:
+            raise WizardError(errors)
+        return {'shapes': shapes, 'soft_edge': softEdge}
 
     def preview(self, outputs, prepared):
         from .geometry_mask import geometry_mask
         from .volume_mask import density_from_array
 
-        shapes = self._shapes(outputs, prepared)
+        values = self._values(outputs, prepared)
         f = prepared['data']['binning']
-        mask = geometry_mask(shapes, prepared['data']['dimensions'], binning=f)
+        mask = geometry_mask(values['shapes'], prepared['data']['dimensions'],
+                             binning=f, soft_edge=values['soft_edge'])
         fraction = float(mask.mean())
         warnings = ["The mask is empty: the shapes are outside the box."] if fraction == 0 else []
         return {
@@ -701,7 +718,7 @@ class GeometryMaskWizard(Wizard):
         }
 
     def finalize(self, outputs, prepared):
-        return {'outputs': {'shapes': self._shapes(outputs, prepared)}, 'warnings': []}
+        return {'outputs': self._values(outputs, prepared), 'warnings': []}
 
 
 class GeometryMaskAdaptor(WizardAdaptor):
@@ -721,8 +738,9 @@ class GeometryMaskAdaptor(WizardAdaptor):
             'volume': params.get('input_volume'),
             'box': [params.get(f'box_{a}') for a in 'xyz'],
             'angpix': params.get('angpix'),
+            'soft_edge': params.get('soft_edge'),
             'shapes': shapes
         }
 
     def fromWizard(self, outputs, params):
-        return {'shapes': outputs['shapes']}
+        return {'shapes': outputs['shapes'], 'soft_edge': outputs['soft_edge']}

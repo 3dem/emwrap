@@ -341,24 +341,28 @@ them) and emflow displays them.
   `A · (r - center)` is inside the shape) and its sizes in px: sphere
   `radius`, cylinder `radius` and `height` (along the rotated z), box
   `size_x`, `size_y`, `size_z`. The box and pixel size are those of the
-  optional `input_volume`, else `box_x/y/z` (and `angpix`). The shapes are a
-  `TableParam` (`shapes`, one row per shape). Output `mask.mrc` (mask3d node,
+  optional `input_volume`, else `box_x/y/z` (and `angpix`). `soft_edge` (px)
+  adds a raised cosine outside the shapes, as `relion_mask_create
+  --width_soft_edge`, over the exact distance to the nearest shape (signed
+  distance functions; 0: a binary mask). The shapes are a `TableParam`
+  (`shapes`, one row per shape) in the Shapes group of the Input section. Output `mask.mrc` (mask3d node,
   `VolumeMask`); EMhub's output viewer shows it over `input_volume`.
-- **Wizard** (`emwrap/base/wizards.py`): inputs `volume`, `box`, `angpix`
-  and `shapes`. `prepare()` resolves the box (a volume or the box size, else
+- **Wizard** (`emwrap/base/wizards.py`): inputs `volume`, `box`, `angpix`,
+  `soft_edge` and `shapes`. `prepare()` resolves the box (a volume or the box size, else
   it refuses to open); without valid shapes it starts with a sphere at the
   center (invalid ones add warnings). `data.defaults` are the new shapes of
   each kind. `preview()` (also on open) computes the mask on the box binned
   to at most 128 px (`data.binning`), sent inline (`data.mask`,
-  `mask_fraction`). Outputs: `shapes` (validated, the sizes not used by a
-  shape empty).
+  `mask_fraction`), with the soft edge. Outputs: `shapes` (validated, the
+  sizes not used by a shape empty) and `soft_edge`.
 - **UI** (`GeometryMaskWizard.tsx`): the list of shapes (select one, remove
-  it, Add shape: a new shape of the current kind at the center) and the
-  editor of the selected one (kind, center, angles, sizes) on the left; the
+  it, Add shape: a new shape of the current kind at the center), the
+  editor of the selected one (kind, center, angles, sizes) and the soft edge
+  (px, with its Å) on the left; the
   volume with the mask over it (without volume: the mask alone) in a
   VolumeViewer, with Re-calculate as in MaskCreateWizard.
-- **Adaptor** (`GeometryMaskAdaptor`): the wand is on the `shapes` table; OK
-  sets its rows (`ProtocolForm` sets a list, or a JSON list, returned for a
+- **Adaptor** (`GeometryMaskAdaptor`): the wand is on `soft_edge` and the
+  `shapes` table; OK sets the soft edge and the rows (`ProtocolForm` sets a list, or a JSON list, returned for a
   `TableParam` as its rows).
 
 ## Tests
