@@ -53,6 +53,7 @@ REFINE3D = 'relion.refine3d.tomo'
 MASK_CREATE = 'emw-relion-mask_create'
 MTOOLS_CREATE = 'emw-warp-mtools_create'
 PYTOM_TEMPLATE = 'emw-pytom-create_template'
+GEOMETRY_MASK = 'emw-geometry-mask'
 
 
 class TestWizards(unittest.TestCase):
@@ -369,6 +370,59 @@ class TestWizards(unittest.TestCase):
                   {'create_species.particles_relion': 'Other/job020/run_data.star'}]:
             with self.assertRaises(WizardError):
                 Wizards.open(self.project, MTOOLS_CREATE, 'mask', {**params, **p})
+
+    def test_geometry_mask(self):
+        import numpy as np
+        from emwrap.base.geometry_mask import parse_shapes, geometry_mask
+
+        dims = [60, 50, 40]
+        # A sphere: about 4/3 pi r^3 voxels, at the center of the box
+        sphere = parse_shapes([{'shape': 'sphere', 'radius': 10}], dims)
+        self.assertEqual(sphere[0]['center_x'], 30)
+        self.assertAlmostEqual(geometry_mask(sphere, dims).sum(),
+                               4 / 3 * np.pi * 1000, delta=50)
+        # A cylinder tilted 90 degrees lies along x
+        cyl = parse_shapes([{'shape': 'cylinder', 'radius': 4, 'height': 40,
+                             'tilt': 90}], dims)
+        z, y, x = np.nonzero(geometry_mask(cyl, dims))
+        self.assertEqual((x.min(), x.max()), (10, 50))
+        self.assertLessEqual(z.max() - z.min(), 8)
+        # A box rotated 90 degrees (rot) swaps x and y
+        box = parse_shapes([{'shape': 'box', 'size_x': 20, 'size_y': 10,
+                             'size_z': 4, 'rot': 90}], dims)
+        z, y, x = np.nonzero(geometry_mask(box, dims))
+        self.assertEqual((x.max() - x.min(), y.max() - y.min()), (10, 20))
+        with self.assertRaises(ValueError):
+            parse_shapes([{'shape': 'cone'}], dims)
+
+        # Wizard: the box of the volume, a sphere to start with
+        self._write_mrc('Refine3D/job020/map.mrc', (40, 50, 300), angpix=2.5)
+        params = {'input_volume': 'Refine3D/job020/map.mrc', 'shapes': '[]'}
+        result = Wizards.open(self.project, GEOMETRY_MASK, 'geometry_mask', params)
+        self.assertEqual(result['ui'], 'GeometryMaskWizard')
+        self.assertEqual(result['data']['dimensions'], [300, 50, 40])
+        self.assertEqual(result['data']['binning'], 3)
+        self.assertEqual(result['data']['mask']['shape'], [14, 17, 100])
+        self.assertEqual(len(result['inputs']['shapes']), 1)
+
+        shapes = result['inputs']['shapes'] + [
+            {'shape': 'box', 'center_x': 250, 'size_x': 30, 'size_y': 30, 'size_z': 30}]
+        result = Wizards.apply(self.project, GEOMETRY_MASK, 'geometry_mask',
+                               params, {'shapes': shapes})
+        self.assertEqual([s['shape'] for s in result['params']['shapes']],
+                         ['sphere', 'box'])
+        with self.assertRaises(WizardError):  # A box without sizes
+            Wizards.apply(self.project, GEOMETRY_MASK, 'geometry_mask',
+                          params, {'shapes': [{'shape': 'box'}]})
+
+        # Without volume: the box size of the form is required
+        params = {'box_x': '32', 'box_y': '32', 'box_z': '', 'shapes': ''}
+        with self.assertRaises(WizardError):
+            Wizards.open(self.project, GEOMETRY_MASK, 'geometry_mask', params)
+        params['box_z'] = '16'
+        result = Wizards.open(self.project, GEOMETRY_MASK, 'geometry_mask', params)
+        self.assertIsNone(result['data']['volume'])
+        self.assertEqual(result['data']['dimensions'], [32, 32, 16])
 
     def test_errors(self):
         with self.assertRaises(WizardError):

@@ -618,3 +618,111 @@ class MaskCreateWizard(Wizard):
 
     def finalize(self, outputs, prepared):
         return {'outputs': self._values(outputs), 'warnings': []}
+
+
+def _shape_errors(e):
+    """ The errors of a ValueError of emwrap.base.geometry_mask. """
+    return e.args[0] if e.args and isinstance(e.args[0], list) else [str(e)]
+
+
+class GeometryMaskWizard(Wizard):
+    """ A binary mask made of geometric shapes (sphere, cylinder, box), each
+    with its center, Euler angles and sizes in px (emwrap.base.geometry_mask),
+    shown over the optional volume. The preview is the mask on the box
+    downscaled to at most PREVIEW_SIZE px.
+
+    Inputs (from the adaptor):
+        volume: map, optional; gives the box and pixel size
+        box: [X, Y, Z] box size (px), without volume
+        angpix: pixel size (A), optional
+        shapes: list of shapes (rows of geometry_mask.COLUMNS); without
+            them the wizard starts with a sphere at the center of the box
+
+    Outputs (from the UI): shapes
+    Preview data: mask (VolumeDensity), mask_fraction
+    """
+    ui = 'GeometryMaskWizard'
+    label = 'Geometry mask'
+    preview_on_open = True
+    PREVIEW_SIZE = 128
+
+    def prepare(self, inputs):
+        from .geometry_mask import mask_box, parse_shapes, default_shape
+
+        try:
+            dims, angpix = mask_box(self.project, inputs)
+        except ValueError as e:
+            raise WizardError(str(e))
+        warnings = []
+        try:
+            shapes = parse_shapes(inputs.get('shapes'), dims)
+        except ValueError as e:
+            # Start from scratch, the user fixes the shapes in the wizard
+            warnings += _shape_errors(e) + ["The shapes of the form are not "
+                                            "valid, starting with a new one."]
+            shapes = []
+        volume = inputs.get('volume')
+        return {
+            'inputs': {'shapes': shapes or [default_shape('sphere', dims)]},
+            'data': {
+                'volume': ({'kind': 'volume', 'path': volume, 'dimensions': dims,
+                            'voxelSize': angpix} if volume else None),
+                'dimensions': dims,
+                'angpix': angpix,
+                'binning': max(1, -(-max(dims) // self.PREVIEW_SIZE)),
+                'defaults': {k: default_shape(k, dims) for k in ('sphere', 'cylinder', 'box')}
+            },
+            'warnings': warnings
+        }
+
+    def _shapes(self, outputs, prepared):
+        from .geometry_mask import parse_shapes
+        try:
+            shapes = parse_shapes(outputs.get('shapes'), prepared['data']['dimensions'])
+        except ValueError as e:
+            raise WizardError(_shape_errors(e))
+        if not shapes:
+            raise WizardError("Add at least one shape to the mask.")
+        return shapes
+
+    def preview(self, outputs, prepared):
+        from .geometry_mask import geometry_mask
+        from .volume_mask import density_from_array
+
+        shapes = self._shapes(outputs, prepared)
+        f = prepared['data']['binning']
+        mask = geometry_mask(shapes, prepared['data']['dimensions'], binning=f)
+        fraction = float(mask.mean())
+        warnings = ["The mask is empty: the shapes are outside the box."] if fraction == 0 else []
+        return {
+            'data': {'mask': density_from_array(mask, f),
+                     'mask_fraction': round(fraction, 4)},
+            'warnings': warnings
+        }
+
+    def finalize(self, outputs, prepared):
+        return {'outputs': {'shapes': self._shapes(outputs, prepared)}, 'warnings': []}
+
+
+class GeometryMaskAdaptor(WizardAdaptor):
+    """ emw-geometry-mask <-> GeometryMaskWizard. The shapes are the rows of
+    the 'shapes' TableParam (a JSON list in the form values). """
+    wizard = GeometryMaskWizard
+
+    def toWizard(self, params):
+        from .job_form import _parse_table_param_value
+        shapes = params.get('shapes') or []
+        if isinstance(shapes, str):
+            try:
+                shapes = _parse_table_param_value(shapes)
+            except ValueError:
+                shapes = []
+        return {
+            'volume': params.get('input_volume'),
+            'box': [params.get(f'box_{a}') for a in 'xyz'],
+            'angpix': params.get('angpix'),
+            'shapes': shapes
+        }
+
+    def fromWizard(self, outputs, params):
+        return {'shapes': outputs['shapes']}

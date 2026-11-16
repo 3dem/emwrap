@@ -75,6 +75,11 @@ class ProcessingConfig:
             "label": "EMwrap Merge Sets",
             "output": "EMwrap"
         },
+        "emw-geometry-mask": {
+            "launcher": "emwrap.base.geometry_mask",
+            "label": "EMwrap Geometry Mask",
+            "output": "GeometryMask"
+        },
         "emw-warp-mctf": {
             "launcher": "emwrap.warp.warp_mctf",
             "label": "Warp Motion and CTF",

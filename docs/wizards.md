@@ -27,6 +27,9 @@ The wizards so far:
 - `PyTomTemplateWizard` (`emwrap/pytom/wizards.py`): the template and mask
   of `emw-pytom-create_template`, with a tentative template and mask
   computed on the server (preview).
+- `GeometryMaskWizard`: the shapes (sphere, cylinder, box) of a binary mask,
+  with the mask computed on the server (preview), used by
+  `emw-geometry-mask`.
 
 ## Architecture
 
@@ -328,6 +331,35 @@ them) and emflow displays them.
   `output-voxel-size-angstrom`, `box-size`, `center`, `invert`, `mirror`)
   and `pytom_create_mask.radius` / `sigma`. The wand is on the Voxel Size
   line and on the mask radius and sigma; OK sets all of them.
+
+## Example: GeometryMaskWizard
+
+- **Job** (`emwrap/base/geometry_mask.py`, `emw-geometry-mask`): a binary
+  mask, the union of shapes, each with a center (px, from the first voxel;
+  empty: the center of the box `N // 2`), Euler angles `rot`, `tilt`, `psi`
+  (degrees, ZYZ, Relion's `Euler_angles2matrix`: a voxel is inside if
+  `A · (r - center)` is inside the shape) and its sizes in px: sphere
+  `radius`, cylinder `radius` and `height` (along the rotated z), box
+  `size_x`, `size_y`, `size_z`. The box and pixel size are those of the
+  optional `input_volume`, else `box_x/y/z` (and `angpix`). The shapes are a
+  `TableParam` (`shapes`, one row per shape). Output `mask.mrc` (mask3d node,
+  `VolumeMask`); EMhub's output viewer shows it over `input_volume`.
+- **Wizard** (`emwrap/base/wizards.py`): inputs `volume`, `box`, `angpix`
+  and `shapes`. `prepare()` resolves the box (a volume or the box size, else
+  it refuses to open); without valid shapes it starts with a sphere at the
+  center (invalid ones add warnings). `data.defaults` are the new shapes of
+  each kind. `preview()` (also on open) computes the mask on the box binned
+  to at most 128 px (`data.binning`), sent inline (`data.mask`,
+  `mask_fraction`). Outputs: `shapes` (validated, the sizes not used by a
+  shape empty).
+- **UI** (`GeometryMaskWizard.tsx`): the list of shapes (select one, remove
+  it, Add shape: a new shape of the current kind at the center) and the
+  editor of the selected one (kind, center, angles, sizes) on the left; the
+  volume with the mask over it (without volume: the mask alone) in a
+  VolumeViewer, with Re-calculate as in MaskCreateWizard.
+- **Adaptor** (`GeometryMaskAdaptor`): the wand is on the `shapes` table; OK
+  sets its rows (`ProtocolForm` sets a list, or a JSON list, returned for a
+  `TableParam` as its rows).
 
 ## Tests
 
