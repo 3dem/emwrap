@@ -52,6 +52,7 @@ CLASS3D = 'relion.class3d.tomo'
 REFINE3D = 'relion.refine3d.tomo'
 MASK_CREATE = 'emw-relion-mask_create'
 MTOOLS_CREATE = 'emw-warp-mtools_create'
+PYTOM_TEMPLATE = 'emw-pytom-create_template'
 
 
 class TestWizards(unittest.TestCase):
@@ -224,6 +225,58 @@ class TestWizards(unittest.TestCase):
         with self.assertRaises(WizardError):
             Wizards.apply(self.project, MASK_CREATE, 'mask_create', params,
                           {'threshold': 0.3, 'soft_edge': -1})
+
+    def test_pytom_template(self):
+        import numpy as np
+        from emwrap.base.volume_mask import spherical_mask
+
+        # A ball of radius 20 px off-centre (+10 px in x) in a 120 px box, 2 A/px
+        n = 120
+        z, y, x = np.mgrid[:n, :n, :n]
+        r = np.sqrt((x - 70) ** 2 + (y - 60) ** 2 + (z - 60) ** 2)
+        self._write_mrc('Import/job001/map.mrc', (n, n, n), angpix=2.0,
+                        data=(r < 20).astype(np.float32))
+        T, M = 'pytom_create_template.', 'pytom_create_mask.'
+        params = {T + 'input-map': 'Import/job001/map.mrc',
+                  T + 'input-voxel-size-angstrom': '',
+                  T + 'output-voxel-size-angstrom': '4',
+                  T + 'box-size': '', T + 'center': True,
+                  T + 'invert': True, T + 'mirror': False,
+                  M + 'radius': '', M + 'sigma': ''}
+        result = Wizards.open(self.project, PYTOM_TEMPLATE, 'template', params)
+        self.assertEqual(result['ui'], 'PyTomTemplateWizard')
+        inputs = result['inputs']
+        self.assertEqual((inputs['in_angpix'], inputs['out_angpix'], inputs['box']),
+                         (2.0, 4.0, 60))  # The map box at the output pixel size
+        self.assertEqual(inputs['radius'], 24.0)
+        data = result['data']
+        self.assertEqual(data['template']['shape'], [60, 60, 60])
+        self.assertEqual(data['binning'], 1)
+
+        # Centred and inverted: the minimum at the centre of the box
+        from emwrap.base.volume_mask import load_binned_map, compute_template
+        binned = load_binned_map(self.project.join('Import/job001/map.mrc'))
+        tmpl, f = compute_template(binned, 2.0, 4.0, 60, center=True, invert=True)
+        com = [(g * (tmpl < -0.5)).sum() / (tmpl < -0.5).sum()
+               for g in np.indices(tmpl.shape)]
+        np.testing.assert_allclose(com, [29.5, 29.5, 29.5], atol=1)
+        # A larger box is downscaled to at most 100 px
+        tmpl, f = compute_template(binned, 2.0, 1.0, 240)
+        self.assertEqual((f, tmpl.shape), (3, (80, 80, 80)))
+
+        mask = spherical_mask(60, 20, sigma=2)
+        self.assertEqual(mask[30, 30, 30], 1)
+        self.assertTrue(((mask > 0.05) & (mask < 0.95)).any())
+
+        result = Wizards.apply(self.project, PYTOM_TEMPLATE, 'template', params,
+                               {**inputs, 'box': 64, 'radius': 40, 'sigma': 3})
+        self.assertEqual(result['params'][T + 'box-size'], 64)
+        self.assertEqual(result['params'][M + 'radius'], 40)
+        self.assertEqual(result['params'][M + 'sigma'], 3)
+        self.assertEqual(len(result['warnings']), 1)  # radius > box / 2
+        with self.assertRaises(WizardError):
+            Wizards.apply(self.project, PYTOM_TEMPLATE, 'template', params,
+                          {**inputs, 'radius': 0})
 
     def test_class3d_mask(self):
         self._write_mrc('Refine3D/job010/run_class001.mrc', (40, 40, 40))

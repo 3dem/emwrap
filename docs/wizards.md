@@ -24,6 +24,9 @@ The wizards so far:
 - `MaskCreateWizard`: the parameters of a mask created from a map, with a
   tentative mask computed on the server (preview), used by
   `emw-relion-mask_create`.
+- `PyTomTemplateWizard` (`emwrap/pytom/wizards.py`): the template and mask
+  of `emw-pytom-create_template`, with a tentative template and mask
+  computed on the server (preview).
 
 ## Architecture
 
@@ -297,6 +300,34 @@ them) and emflow displays them.
   `relion_mask_create.volume.*`: `i`, `ini_threshold`, `lowpass` (-1: none),
   `extend_inimask`, `width_soft_edge`, `invert` and `angpix`. The wand is on
   the threshold, extend, soft edge and lowpass.
+
+## Example: PyTomTemplateWizard
+
+- **Wizard** (`emwrap/pytom/wizards.py`, PyTom specific): inputs `volume`
+  (required), `in_angpix` (default: the map header), `out_angpix` (default:
+  the input one), `box` (default: the map box at the output pixel size),
+  `radius` (default: 40% of the box) and `sigma` (default 1) in px of the
+  output box, and `center`, `invert`, `mirror`. `preview()` (also on open)
+  repeats PyTom's operations with numpy on the map downscaled to about
+  100 px (`load_binned_map`, shared with MaskCreateWizard):
+  `volume_mask.compute_template` centres it by the centre of mass of the
+  positive density, resamples it to the output pixel size (Fourier crop or
+  pad), crops or pads it to the output box, inverts and mirrors it (x);
+  `volume_mask.spherical_mask` is the mask of `pytom_create_mask.py` (1
+  inside the radius, a Gaussian fall-off of sigma, cut at 3 sigmas). Both
+  are on the output box binned to at most 100 px and sent inline
+  (`data.template`, `data.mask`, with `data.box`, `data.binning`,
+  `data.angpix`). Warnings: an upsampled map, a radius larger than half of
+  the box. The job still runs PyTom; the preview skips its lowpass.
+- **UI** (`PyTomTemplateWizard.tsx`): the values on the left and the
+  template with the mask over it in a VolumeViewer. It shares the
+  Re-calculate button, its status and the viewer pane with
+  `MaskCreateWizard` (`WizardPreview.tsx`).
+- **Adaptor** (`PyTomCreateTemplateAdaptor`): maps
+  `pytom_create_template.*` (`input-map`, `input-voxel-size-angstrom`,
+  `output-voxel-size-angstrom`, `box-size`, `center`, `invert`, `mirror`)
+  and `pytom_create_mask.radius` / `sigma`. The wand is on the Voxel Size
+  line and on the mask radius and sigma; OK sets all of them.
 
 ## Tests
 
