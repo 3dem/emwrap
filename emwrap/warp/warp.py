@@ -24,7 +24,7 @@ import tifffile
 
 from emtools.utils import FolderManager, Path
 from emtools.metadata import (StarFile, Table, RelionStar, WarpXml, Imod,
-                              WarpPopulation)
+                              WarpPopulation, Mdoc)
 from emtools.jobs import Batch, Args
 from emtools.image import Image
 from emwrap.base import ProcessingPipeline
@@ -1072,6 +1072,30 @@ class WarpBaseTsAlign(WarpBasePipeline):
         """ Abstract method that should be implemented in subclasses. """
         raise Exception("Missing implementation in base class.")
 
+    def _copyMdocTilts(self, tsRow, src, dst):
+        """ Copy the mdoc ``src`` to ``dst`` keeping only the tilts whose
+        movies are in the tilt-series STAR file of ``tsRow``. Tilts with
+        missing or corrupted movies (skipped by the import) have no frame
+        series, and WarpTools ts_import fails for the whole series (and then
+        crashes) if the mdoc references them.
+        """
+        tsStar = getattr(tsRow, 'rlnTomoTiltSeriesStarFile', None)
+        if not tsStar or not os.path.exists(tsStar):
+            shutil.copy(src, dst)
+            return
+        tsTable = StarFile.getTableFromFile(tsRow.rlnTomoName, tsStar,
+                                            guessType=False)
+        movies = {os.path.basename(r.rlnMicrographMovieName) for r in tsTable}
+        mdoc = Mdoc.parse(src)
+        removed = [k for k, s in mdoc.zsections()
+                   if Mdoc.getSubFrameBase(s) not in movies]
+        for k in removed:
+            del mdoc[k]
+        mdoc.write(dst)
+        if removed:
+            self.log(f"TS {tsRow.rlnTomoName}: removed {len(removed)} tilt(s) "
+                     f"not in {tsStar} from the mdoc")
+
     def _importMdocs(self, inputFolder, tsAllTable):
         """ Create the ``mdocs`` folder with copies of the mdoc files of the
         tilt series in the input STAR only. Files are copied, not linked,
@@ -1102,7 +1126,7 @@ class WarpBaseTsAlign(WarpBasePipeline):
             if not os.path.exists(src):
                 missing.append(src)
                 continue
-            shutil.copy(src, os.path.join(dstFolder, mdocName))
+            self._copyMdocTilts(tsRow, src, os.path.join(dstFolder, mdocName))
 
         if missing:
             raise Exception("Missing expected mdoc file(s): " + ', '.join(missing))
