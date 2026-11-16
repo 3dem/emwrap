@@ -722,9 +722,73 @@ class ProcessingPipeline(Pipeline, FolderManager):
             return os.path.relpath(path, self.workingDir)
         return path
 
+    def relativizePaths(self, obj, mapping=None):
+        """ Return a copy of obj (dict/list/str, e.g. a loaded JSON) where
+        every absolute path string is made relative to the project root.
+
+        Absolute paths are fine during the processing (e.g. for programs
+        running in a tmp/scratch folder), but persisted outputs must use
+        project-root-relative paths. 'mapping' optionally maps absolute
+        paths (e.g. of tmp files) to their final project path; other
+        absolute paths inside the project are made relative to it. Paths
+        are compared after resolving symlinks, since the same folder can
+        be reached through different mounts. Absolute paths outside the
+        project (e.g. programs) are left unchanged.
+        """
+        mapping = {os.path.realpath(k): v for k, v in (mapping or {}).items()}
+        roots = [os.path.realpath(self.workingDir),
+                 os.path.abspath(self.workingDir)]
+
+        def _fixPath(p):
+            real = os.path.realpath(p)
+            if real in mapping:
+                return mapping[real]
+            for path, root in ((real, roots[0]), (os.path.normpath(p), roots[1])):
+                if path == root or path.startswith(root + os.sep):
+                    return os.path.relpath(path, root)
+            return p
+
+        def _fix(v):
+            if isinstance(v, dict):
+                return {k: _fix(x) for k, x in v.items()}
+            if isinstance(v, (list, tuple)):
+                return type(v)(_fix(x) for x in v)
+            if isinstance(v, str) and os.path.isabs(v):
+                return _fixPath(v)
+            return v
+
+        return _fix(obj)
+
+    def relativizeStar(self, starFile, mapping=None):
+        """ Rewrite starFile (written by an external program) making its
+        absolute paths relative to the project root (see relativizePaths).
+        Returns True if the file was modified. """
+        tables = StarFile.getTablesDict(starFile, guessType=False)
+        changed = False
+        newTables = {}
+        for name, table in tables.items():
+            newTable = Table(table.getColumnNames())
+            for row in table:
+                values = row._asdict()
+                newValues = self.relativizePaths(values, mapping)
+                changed = changed or newValues != values
+                newTable.addRowValues(**newValues)
+            newTables[name] = newTable
+
+        if changed:
+            with StarFile(starFile, 'w') as sf:
+                for name, table in newTables.items():
+                    sf.writeTable(name, table, computeFormat='left')
+        return changed
+
+    def projectFile(self, path):
+        """Full path of a project-root-relative (or absolute) path, to open
+        it whatever the current folder is."""
+        return os.path.join(self.workingDir, self.toProjectPath(path))
+
     def projectExists(self, path):
         """Return True when a project-root-relative path exists on disk."""
-        return os.path.exists(os.path.join(self.workingDir, self.toProjectPath(path)))
+        return os.path.exists(self.projectFile(path))
 
     def linkProjectPath(self, dest_folder, src_path, name=None):
         """Symlink src_path into dest_folder using project-root-relative paths."""
