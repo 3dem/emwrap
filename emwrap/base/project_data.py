@@ -648,11 +648,6 @@ class ProjectData(FolderManager):
                         text += f', {ptsInfo["ps"]:0.3f} Å/px'
                     text += f', Tomograms: {info["rlnTomoTomogramsFile"]["size"]}'
                     return {'type': datatype, 'info': text}
-                elif filepath.endswith('distances.star'):
-                    # emw-coordinates-compare output
-                    with StarFile(filepath) as sf:
-                        n = sf.getTableSize('distances')
-                    return {'type': 'CoordinatesDistances', 'info': f'{n} pairs'}
                 elif spaInfo := self._spaStarInfo(output_id, filepath):
                     return spaInfo
             except Exception as e:

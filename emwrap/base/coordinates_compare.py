@@ -20,15 +20,46 @@ from collections import OrderedDict
 
 import numpy as np
 
-from emtools.utils import Color, Pretty
-from emtools.metadata import StarFile, Table, RelionStar
+from emtools.utils import Color
+from emtools.metadata import StarFile, RelionStar
 
 from emwrap.base import ProcessingPipeline
+from emwrap.base.wizards import to_bool, to_float
 
 
 # Max number of float64 distances computed at once (rows x cols of a block),
 # ~64 MB, so a very large tomogram does not need the full matrix in memory.
 _BLOCK_SIZE = 8 * 1024 * 1024
+
+# Score of the coordinates (the first column found), to keep the best one of
+# the duplicates: picking scores first, then the refinement one
+SCORE_COLUMNS = ('rlnLCCmax', 'rlnAutopickFigureOfMerit', 'rlnScore',
+                 'rlnConfidence', 'rlnMaxValueProbDistribution')
+
+
+def duplicates(matrix, distance, scores=None):
+    """ The duplicates of a tomogram compared to itself (bool array of
+    its coordinates), with the (n, n) distance matrix.
+
+    Without scores, as Relion's 'remove duplicates': i is a duplicate if a
+    later coordinate (j > i) is within the distance.  With scores, from the
+    highest score down, a coordinate is kept and the ones within the
+    distance of it are duplicates (on equal scores, the later one is kept).
+    """
+    near = np.asarray(matrix) <= distance
+    n = near.shape[0]
+    if scores is None:
+        return np.triu(near, k=1).any(axis=1)
+    scores = np.nan_to_num(np.asarray(scores, dtype=np.float64), nan=-np.inf)
+    dup = np.zeros(n, dtype=bool)
+    # lexsort: last key first, score descending, then index descending
+    for i in np.lexsort((-np.arange(n), -scores)):
+        if not dup[i]:
+            # None of i's neighbours was kept (i would be a duplicate)
+            dup |= near[i]
+            dup[i] = False
+    return dup
+
 
 
 class CoordinatesComparePipeline(ProcessingPipeline):
@@ -46,57 +77,32 @@ class CoordinatesComparePipeline(ProcessingPipeline):
     (pixel coordinates, rlnCoordinate(X/Y/Z), are converted to Angstrom
     with the tomogram pixel size from the tomograms.star file).
 
-    Outputs:
-        distances.star: table 'distances', one row per pair within the
-            maximum distance (all pairs if not set): rlnTomoName,
-            emwIndex1, emwIndex2 (1-based rows in the particles table of
-            set 1 and set 2) and emwDistanceAngst.  When comparing a set to
-            itself, only pairs with emwIndex1 < emwIndex2 are written.
-        nearest.star: the particles table of set 1 (plus its 'general' and
-            'optics' tables) with: emwNearestIndex and
-            emwNearestDistanceAngst (closest coordinate in set 2, or 0 and
-            -1 if the tomogram is not in set 2) and emwNeighbors (number of
-            coordinates in set 2 within the maximum distance).
-        distances.npz (optional): per tomogram, the full float32 distance
-            matrix (key = rlnTomoName) and the 1-based rows of set 1 and set
-            2 ('<tomo>.index1', '<tomo>.index2').
+    Output: distances.npz, per tomogram in both sets, the full float32
+    distance matrix (key = rlnTomoName; rows: set 1, columns: set 2, in the
+    order of their particles tables), the 1-based rows of set 1 and set 2
+    in their particles tables ('<tomo>.index1', '<tomo>.index2') and, when
+    the set is compared to itself and it has one of SCORE_COLUMNS, the
+    score of its coordinates ('<tomo>.score', to keep the best of the
+    duplicates, see duplicates()).  EMhub
+    reads it to show the results at any distance (its 'Coordinates
+    Distances' view); the maximum distance is the one it shows first.
+
+    The job registers no output node: its results are not a set to use as
+    input of other jobs (EMhub shows them as a job view, a 'fake' output).
+    The inputs and the maximum distance are in info.json ('inputs').
     """
     name = 'emw-coordinates-compare'
-    OUTPUT_TYPE = 'TomogramGroupMetadata.star.emwrap.CoordinatesDistances'
-    OUTPUT_STAR = 'distances.star'
-    NEAREST_STAR = 'nearest.star'
     OUTPUT_NPZ = 'distances.npz'
 
     def __init__(self, args, output):
         ProcessingPipeline.__init__(self, args, output)
         self.inputSet = (args.get('input_set') or '').strip()
-        self.compareSelf = self._bool(args.get('compare_self', False))
+        self.compareSelf = to_bool(args.get('compare_self', False))
         self.secondSet = (args.get('second_set') or '').strip()
-        self.maxDistance = self._float(args.get('max_distance'), 'max_distance')
-        self.writeNpz = self._bool(args.get('write_npz', False))
-
-    # ------------------------------------------------------------------
-    # Params
-    # ------------------------------------------------------------------
-    @staticmethod
-    def _bool(value):
-        """ A form boolean, which may come as text ('false', '0', 'no'). """
-        if isinstance(value, str):
-            return value.strip().lower() not in ('false', '0', 'no', '')
-        return bool(value)
-
-    @staticmethod
-    def _float(value, name):
-        """ A positive float, or None for an empty (or 0) value. """
-        if value is None or str(value).strip() == '':
-            return None
-        try:
-            v = float(value)
-        except ValueError:
-            raise Exception(f"Invalid value for '{name}': {value}")
-        if v < 0:
-            raise Exception(f"'{name}' can not be negative: {value}")
-        return v or None
+        self.maxDistance = to_float(args.get('max_distance'))
+        if not self.maxDistance or self.maxDistance <= 0:
+            raise Exception("'max_distance' must be a distance > 0 (Angstrom), "
+                            f"got: {args.get('max_distance')!r}")
 
     # ------------------------------------------------------------------
     # Input
@@ -104,9 +110,9 @@ class CoordinatesComparePipeline(ProcessingPipeline):
     def _loadSet(self, inputStar, label):
         """ Read a TomoCoordinates / TomoParticles set.
 
-        Returns a dict with the particles STAR file, its tables, and the
-        positions (Angstrom) grouped by tomogram:
-            {tomoName: (indexes (1-based rows), Nx3 float64 array)}
+        Returns {'size': coordinates, 'scoreColumn': score column or None,
+        'positions': {tomoName: (indexes (1-based rows), Nx3 float64
+        array of positions in Angstrom, scores or None)}}
         """
         if not inputStar:
             raise Exception(f"Missing {label}.")
@@ -134,20 +140,17 @@ class CoordinatesComparePipeline(ProcessingPipeline):
                 f"{label}: {particlesStar} is not a tomography particles "
                 "STAR file (needs rlnTomoName and coordinate columns).")
 
-        tables = StarFile.getTablesDict(particlesStar)
-        table = tables['particles']
-        positions = self._positions(table, tomoStar, label)
+        table = StarFile.getTableFromFile('particles', particlesStar)
+        scoreColumn = next((c for c in SCORE_COLUMNS if table.hasColumn(c)), None)
+        positions = self._positions(table, tomoStar, label, scoreColumn)
 
         self.log(f"{label}: {Color.cyan(inputStar)}, "
                  f"{Color.green(len(table))} coordinates in "
-                 f"{Color.green(len(positions))} tomograms")
+                 f"{Color.green(len(positions))} tomograms, score: "
+                 f"{Color.cyan(scoreColumn or 'none')}")
 
-        return {
-            'input': inputStar,
-            'particlesStar': particlesStar,
-            'tables': tables,
-            'positions': positions
-        }
+        return {'size': len(table), 'scoreColumn': scoreColumn,
+                'positions': positions}
 
     @staticmethod
     def _column(table, name, default=0.0):
@@ -156,8 +159,9 @@ class CoordinatesComparePipeline(ProcessingPipeline):
             return np.array(table.getColumnValues(name), dtype=np.float64)
         return np.full(len(table), default, dtype=np.float64)
 
-    def _positions(self, table, tomoStar, label):
-        """ Return {tomoName: (indexes, Nx3 positions in Angstrom)}. """
+    def _positions(self, table, tomoStar, label, scoreColumn):
+        """ Return {tomoName: (indexes, Nx3 positions in Angstrom,
+        scores or None)}. """
         tomoNames = table.getColumnValues('rlnTomoName')
         origin = np.stack([self._column(table, f'rlnOrigin{a}Angst')
                            for a in 'XYZ'], axis=1)
@@ -189,13 +193,15 @@ class CoordinatesComparePipeline(ProcessingPipeline):
             coords *= np.array([pixelSizes[t] for t in tomoNames])[:, None]
 
         coords -= origin
+        scores = self._column(table, scoreColumn) if scoreColumn else None
 
         groups = OrderedDict()
         for i, tomoName in enumerate(tomoNames):
             groups.setdefault(tomoName, []).append(i)
 
         return OrderedDict(
-            (tomoName, (np.array(rows) + 1, coords[rows]))
+            (tomoName, (np.array(rows) + 1, coords[rows],
+                        None if scores is None else scores[rows]))
             for tomoName, rows in groups.items())
 
     # ------------------------------------------------------------------
@@ -216,98 +222,21 @@ class CoordinatesComparePipeline(ProcessingPipeline):
             np.maximum(d2, 0.0, out=d2)  # Rounding can give tiny negatives
             yield start, np.sqrt(d2, out=d2)
 
-    def _compareTomo(self, idx1, pos1, idx2, pos2):
-        """ Compare the coordinates of one tomogram.
-
-        Returns (pairs, nearestIndex, nearestDist, neighbors, matrix):
-            pairs: (i1, i2, dist) arrays of the pairs to write (1-based rows).
-            nearest*/neighbors: per coordinate of set 1.
-            matrix: the full float32 matrix (only if writing the npz file).
-        """
-        n1, n2 = len(pos1), len(pos2)
-        nearestIndex = np.zeros(n1, dtype=np.int64)
-        nearestDist = np.full(n1, -1.0)
-        neighbors = np.zeros(n1, dtype=np.int64)
-        matrix = np.empty((n1, n2), dtype=np.float32) if self.writeNpz else None
-        pairs1, pairs2, pairsD = [], [], []
-
+    def _distanceMatrix(self, pos1, pos2):
+        """ float32 (n1, n2) distances (Angstrom) of a tomogram. """
+        matrix = np.empty((len(pos1), len(pos2)), dtype=np.float32)
         for start, d in self._distanceBlocks(pos1, pos2):
-            rows = np.arange(start, start + len(d))
-            if matrix is not None:
-                matrix[start:start + len(d)] = d
-            if self.compareSelf:
-                # Skip i == j and keep each pair once (i < j)
-                d[np.arange(len(d)), rows] = np.inf
-                keep = rows[:, None] < np.arange(n2)[None, :]
-            else:
-                keep = np.ones(d.shape, dtype=bool)
+            matrix[start:start + len(d)] = d
+        return matrix
 
-            if n2:
-                j = np.argmin(d, axis=1)
-                dmin = d[np.arange(len(d)), j]
-                valid = np.isfinite(dmin)
-                nearestIndex[rows[valid]] = idx2[j[valid]]
-                nearestDist[rows[valid]] = dmin[valid]
-
-            within = (d <= self.maxDistance) if self.maxDistance else np.isfinite(d)
-            neighbors[rows] = within.sum(axis=1)
-
-            r, c = np.nonzero(within & keep)
-            pairs1.append(idx1[rows[r]])
-            pairs2.append(idx2[c])
-            pairsD.append(d[r, c])
-
-        def _cat(arrays, dtype):
-            return np.concatenate(arrays) if arrays else np.empty(0, dtype=dtype)
-
-        pairs = (_cat(pairs1, np.int64), _cat(pairs2, np.int64),
-                 _cat(pairsD, np.float64))
-        return pairs, nearestIndex, nearestDist, neighbors, matrix
-
-    # ------------------------------------------------------------------
-    # Output
-    # ------------------------------------------------------------------
-    def _writeDistances(self, results):
-        """ Write the pairs to distances.star (fast, column-wise lines). """
-        outStar = self.join(self.OUTPUT_STAR)
-        columns = ['rlnTomoName', 'emwIndex1', 'emwIndex2', 'emwDistanceAngst']
-        with open(outStar, 'w') as f:
-            f.write(f"\n# Created by {self.name} at {Pretty.now()}\n\n"
-                    "data_distances\n\nloop_\n")
-            for i, c in enumerate(columns):
-                f.write(f"_{c} #{i + 1}\n")
-            for tomoName, (i1, i2, d) in results:
-                if len(d):
-                    lines = [f"{tomoName}\t{a}\t{b}\t{x:.3f}\n"
-                             for a, b, x in zip(i1.tolist(), i2.tolist(),
-                                                d.tolist())]
-                    f.writelines(lines)
-            f.write('\n')
-        return outStar
-
-    def _writeNearest(self, set1, nearestIndex, nearestDist, neighbors):
-        """ Write set 1 particles with the nearest neighbour columns. """
-        tables = set1['tables']
-        table = tables['particles']
-        newColumns = ['emwNearestIndex', 'emwNearestDistanceAngst', 'emwNeighbors']
-        columns = [c for c in table.getColumnNames() if c not in newColumns]
-        outTable = Table(columns + newColumns)
-        for i, row in enumerate(table):
-            values = {c: getattr(row, c) for c in columns}
-            values['emwNearestIndex'] = int(nearestIndex[i])
-            values['emwNearestDistanceAngst'] = round(float(nearestDist[i]), 3)
-            values['emwNeighbors'] = int(neighbors[i])
-            outTable.addRowValues(**values)
-
-        outStar = self.join(self.NEAREST_STAR)
-        with StarFile(outStar, 'w') as sfOut:
-            sfOut.writeTimeStamp()
-            if general := tables.get('general'):
-                sfOut.writeTable('general', general, singleRow=True)
-            if optics := tables.get('optics'):
-                sfOut.writeTable('optics', optics, computeFormat='left')
-            sfOut.writeTable('particles', outTable, computeFormat='left')
-        return outStar
+    def _withNeighbors(self, matrix, scores):
+        """ Coordinates of set 1 with another one (of set 2) within the
+        maximum distance, for the job summary: the duplicates when the set
+        is compared to itself. """
+        if self.compareSelf:
+            return int(duplicates(matrix, self.maxDistance, scores).sum())
+        within = matrix <= self.maxDistance
+        return int(within.any(axis=1).sum()) if within.size else 0
 
     # ------------------------------------------------------------------
     # Job
@@ -320,76 +249,59 @@ class CoordinatesComparePipeline(ProcessingPipeline):
         else:
             set2 = self._loadSet(self.secondSet, 'Second set')
 
-        maxDistStr = (f"{self.maxDistance} A" if self.maxDistance
-                      else "none (all pairs)")
-        self.log(f"Maximum distance: {Color.green(maxDistStr)}")
+        self.log(f"Maximum distance: {Color.green(self.maxDistance)} A")
+        self.inputs = {
+            'input_set': self.inputSet,
+            'second_set': '' if self.compareSelf else self.secondSet,
+            'compare_self': self.compareSelf,
+            'max_distance': self.maxDistance,
+        }
 
-        n1 = len(set1['tables']['particles'])
-        nearestIndex = np.zeros(n1, dtype=np.int64)
-        nearestDist = np.full(n1, -1.0)
-        neighbors = np.zeros(n1, dtype=np.int64)
-        results = []
         npzArrays = {}
-        nCompared = 0
+        nTomos = nCompared = nNeighbors = 0
         t0 = time.time()
-
-        for tomoName, (idx1, pos1) in set1['positions'].items():
+        for tomoName, (idx1, pos1, scores) in set1['positions'].items():
             if tomoName not in set2['positions']:
                 continue
-            idx2, pos2 = set2['positions'][tomoName]
-            pairs, nIdx, nDist, nNeigh, matrix = self._compareTomo(
-                idx1, pos1, idx2, pos2)
-            rows = idx1 - 1
-            nearestIndex[rows] = nIdx
-            nearestDist[rows] = nDist
-            neighbors[rows] = nNeigh
-            results.append((tomoName, pairs))
-            nCompared += len(pos1) * len(pos2)
-            if matrix is not None:
-                npzArrays[tomoName] = matrix
-                npzArrays[f'{tomoName}.index1'] = idx1.astype(np.int32)
-                npzArrays[f'{tomoName}.index2'] = idx2.astype(np.int32)
-
-        tCompute = time.time() - t0
-        nPairs = sum(len(p[2]) for _, p in results)
-        self.log(f"Compared {Color.green(len(results))} tomograms, "
-                 f"{Color.green(nCompared)} distances in {tCompute:.3f} s")
+            idx2, pos2, _ = set2['positions'][tomoName]
+            if not self.compareSelf:
+                scores = None
+            matrix = self._distanceMatrix(pos1, pos2)
+            nNeighbors += self._withNeighbors(matrix, scores)
+            nTomos += 1
+            nCompared += matrix.size
+            npzArrays[tomoName] = matrix
+            npzArrays[f'{tomoName}.index1'] = idx1.astype(np.int32)
+            npzArrays[f'{tomoName}.index2'] = idx2.astype(np.int32)
+            if scores is not None:
+                npzArrays[f'{tomoName}.score'] = scores.astype(np.float32)
+        self.log(f"Compared {Color.green(nTomos)} tomograms, "
+                 f"{Color.green(nCompared)} distances in {time.time() - t0:.3f} s")
 
         t0 = time.time()
-        outStar = self._writeDistances(results)
-        self.log(f"Wrote {Color.green(nPairs)} pairs to {Color.cyan(outStar)} "
+        npzFile = self.join(self.OUTPUT_NPZ)
+        np.savez(npzFile, **npzArrays)
+        self.log(f"Wrote distance matrices to {Color.cyan(npzFile)} "
                  f"({time.time() - t0:.2f} s)")
-        nearestStar = self._writeNearest(set1, nearestIndex, nearestDist, neighbors)
-        self.log(f"Wrote nearest neighbours to {Color.cyan(nearestStar)}")
+        if self.compareSelf:
+            self.log(f"{Color.warn(nNeighbors)} of {set1['size']} coordinates are "
+                     f"duplicates at {self.maxDistance} A (kept the "
+                     + (f"highest {set1['scoreColumn']})" if set1['scoreColumn']
+                        else "last one, no score)"))
+        else:
+            self.log(f"{Color.warn(nNeighbors)} of {set1['size']} coordinates have "
+                     f"at least one neighbour within {self.maxDistance} A")
 
-        outputs = {
-            'type': 'CoordinatesDistances',
-            'star': self.fixOutputPath(self.OUTPUT_STAR),
-            'nearest': self.fixOutputPath(self.NEAREST_STAR)
-        }
-        if self.writeNpz:
-            t0 = time.time()
-            npzFile = self.join(self.OUTPUT_NPZ)
-            np.savez(npzFile, **npzArrays)
-            self.log(f"Wrote distance matrices to {Color.cyan(npzFile)} "
-                     f"({time.time() - t0:.2f} s)")
-            outputs['npz'] = self.fixOutputPath(self.OUTPUT_NPZ)
-
-        if self.maxDistance:
-            nDup = int((neighbors > 0).sum())
-            self.log(f"{Color.warn(nDup)} of {n1} coordinates have at least "
-                     f"one neighbour within {self.maxDistance} A")
-
-        self.outputs = outputs
+        # A file of the job, not an output node (see the class docstring)
+        self.outputs = {'npz': self.fixOutputPath(self.OUTPUT_NPZ)}
         self.info['summary'] = {
-            'tomograms': len(results),
-            'coordinates': n1,
-            'pairs': nPairs,
+            'tomograms': nTomos,
+            'coordinates': set1['size'],
             'max_distance': self.maxDistance,
-            'with_neighbors': int((neighbors > 0).sum())
+            'with_neighbors': nNeighbors,
+            'score_column': set1['scoreColumn'] if self.compareSelf else None,
         }
-        self.writeRelionOutputNodes(
-            [[self.fixOutputPath(self.OUTPUT_STAR), self.OUTPUT_TYPE]])
+        self.writeRelionOutputNodes([])
         self.writeInfo()
 
 

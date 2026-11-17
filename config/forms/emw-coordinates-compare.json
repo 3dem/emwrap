@@ -1,7 +1,7 @@
 {
     "name": "emw-coordinates-compare",
     "label": "EMwrap Coordinates Compare",
-    "help": "Compute the distances between the coordinates (or particles) of two tomography sets, tomogram by tomogram (only coordinates with the same rlnTomoName are compared). The set can also be compared to itself, to find duplicated particles.\n\nPositions are in Angstrom and include the refined shifts (rlnCenteredCoordinate - rlnOrigin, or pixel coordinates times the tomogram pixel size).\n\nOutput:\n*distances.star*: one row per pair within the maximum distance (rlnTomoName, emwIndex1, emwIndex2, emwDistanceAngst), the indexes being the 1-based rows in each particles table. When comparing a set to itself, each pair is written once (emwIndex1 < emwIndex2).\n*nearest.star*: the particles of the input set with their nearest coordinate in the second set (emwNearestIndex, emwNearestDistanceAngst) and the number of them within the maximum distance (emwNeighbors).\n*distances.npz* (optional): the full distance matrix of each tomogram, in binary (NumPy) format.",
+    "help": "Compute the distances between the coordinates (or particles) of two tomography sets, tomogram by tomogram (only coordinates with the same rlnTomoName are compared). The set can also be compared to itself, to find duplicated particles: of the coordinates within the distance of each other, the one with the highest score is kept (rlnLCCmax, rlnAutopickFigureOfMerit, rlnScore, rlnConfidence or rlnMaxValueProbDistribution, the first one in the set, stored in the output), or the last one without a score, as Relion's 'remove duplicates'.\n\nPositions are in Angstrom and include the refined shifts (rlnCenteredCoordinate - rlnOrigin, or pixel coordinates times the tomogram pixel size).\n\nOutput: *distances.npz*, the full distance matrix of each tomogram (binary NumPy format).\n\nIn EMhub, the job has a 'Coordinates Distances' view (not an output set, it can not be the input of other jobs): one row per tomogram with the counts (case 1, the set compared to itself: coordinates and duplicates; case 2, A compared to B: A, B, A - B, B - A and A & B), and the tomogram with the sets in different colors, recomputed for any distance. For a set compared to itself, its 'Remove duplicates' button launches an *emw-remove-duplicates* job: the subset without the duplicates at the selected distance.",
     "sections": [
         {
             "label": "Input",
@@ -37,15 +37,8 @@
                     "name": "max_distance",
                     "label": "Maximum distance (A)",
                     "paramClass": "FloatParam",
-                    "allowsEmpty": true,
-                    "help": "Only pairs closer than this distance (in Angstrom) are written to distances.star and counted as neighbours. Leave empty (or 0) to write all pairs: this can be a large file (n1 x n2 rows per tomogram, ~500,000 rows for 1,000 coordinates compared to themselves)."
-                },
-                {
-                    "name": "write_npz",
-                    "label": "Write distance matrices (NumPy)?",
-                    "paramClass": "BooleanParam",
-                    "default": false,
-                    "help": "If Yes, the full distance matrix of each tomogram (float32, n1 x n2) is also written to distances.npz, with the particle rows of each set ('<tomo>.index1', '<tomo>.index2'). Read it with numpy.load()."
+                    "help": "Coordinates closer than this distance (in Angstrom) are neighbours (duplicates, or present in both sets). It is the distance the EMhub viewer shows first: all the distances are kept in distances.npz, so the viewer can show the results at any other distance.",
+                    "default": 50
                 }
             ]
         }
