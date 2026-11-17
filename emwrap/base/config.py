@@ -75,6 +75,11 @@ class ProcessingConfig:
             "label": "EMwrap Merge Sets",
             "output": "EMwrap"
         },
+        "emw-coordinates-compare": {
+            "launcher": "emwrap.base.coordinates_compare",
+            "label": "EMwrap Coordinates Compare",
+            "output": "EMwrap"
+        },
         "emw-geometry-mask": {
             "launcher": "emwrap.base.geometry_mask",
             "label": "EMwrap Geometry Mask",
