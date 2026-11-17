@@ -174,6 +174,7 @@ class ProjectData(FolderManager):
         self._outputs = self._loadOutputs()
         self._jobFiles = self._data.setdefault('job_files', {})
         self.restoreJobStatuses()
+        self.restoreOutputInfo()
 
     def reload(self):
         """Reload project.json from disk and re-sync workflow job statuses."""
@@ -193,6 +194,7 @@ class ProjectData(FolderManager):
         self._outputs = self._loadOutputs()
         self._jobFiles = self._data.setdefault('job_files', {})
         self.restoreJobStatuses()
+        self.restoreOutputInfo()
 
     def _loadOutputs(self):
         """ Return the cached outputs info, without the info of the outputs
@@ -419,6 +421,20 @@ class ProjectData(FolderManager):
         for job in self._wf.jobs():
             job['status'] = self._resolveJobStatus(job)
 
+    def restoreOutputInfo(self):
+        """ Apply the cached output datatypes and info (project.json) after
+        loading the Relion pipeline. The pipeline only stores the Relion
+        node type labels (e.g. 'DensityMap.mrc.relion.refine3d'), so without
+        this a workflow reloaded from disk without updating it (e.g. in the
+        project write transactions) shows those instead of our datatypes.
+        Only the cache is used here (no files are read), the next update
+        computes the info that is missing or stale. """
+        for job in self._wf.jobs():
+            for data in job.outputs:
+                if cached := self._outputs.get(data.id):
+                    data['datatype'] = cached.get('type', data.get('datatype'))
+                    data['info'] = cached.get('info', '')
+
     def _debug(self, message, **kwargs):
         self._project._print(f">>> ProjectData:: {message}", level=2)
 
@@ -632,6 +648,11 @@ class ProjectData(FolderManager):
                         text += f', {ptsInfo["ps"]:0.3f} Å/px'
                     text += f', Tomograms: {info["rlnTomoTomogramsFile"]["size"]}'
                     return {'type': datatype, 'info': text}
+                elif filepath.endswith('distances.star'):
+                    # emw-coordinates-compare output
+                    with StarFile(filepath) as sf:
+                        n = sf.getTableSize('distances')
+                    return {'type': 'CoordinatesDistances', 'info': f'{n} pairs'}
                 elif spaInfo := self._spaStarInfo(output_id, filepath):
                     return spaInfo
             except Exception as e:
