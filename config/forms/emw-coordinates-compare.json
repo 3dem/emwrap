@@ -1,0 +1,46 @@
+{
+    "name": "emw-coordinates-compare",
+    "label": "EMwrap Coordinates Compare",
+    "help": "Compute the distances between the coordinates (or particles) of two tomography sets, tomogram by tomogram (only coordinates with the same rlnTomoName are compared). The set can also be compared to itself, to find duplicated particles: of the coordinates within the distance of each other, the one with the highest score is kept (rlnLCCmax, rlnAutopickFigureOfMerit, rlnScore, rlnConfidence or rlnMaxValueProbDistribution, the first one in the set, stored in the output), or the last one without a score, as Relion's 'remove duplicates'.\n\nPositions are in Angstrom and include the refined shifts (rlnCenteredCoordinate - rlnOrigin, or pixel coordinates times the tomogram pixel size).\n\nOutput: *distances.npz*, the full distance matrix of each tomogram (binary NumPy format) and, when the tomogram sizes are known (optimisation sets), the distance of each coordinate to the tomogram box edges.\n\nIn EMhub, the job has a 'Coordinates Distances' view (not an output set, it can not be the input of other jobs): one row per tomogram with the counts (case 1, the set compared to itself: coordinates and duplicates; case 2, A compared to B: A, B, A - B, B - A and A & B), and the tomogram with the sets in different colors, recomputed for any distance; with an edge distance, the coordinates closer than it to the tomogram box edges are shown apart (Near edge) and left out of the subsets. For a set compared to itself, its 'Remove duplicates' button launches an *emw-subset-ts* job ('Remove duplicate particles' mode): the subset without the duplicates at the selected distance, computing the distances again.",
+    "sections": [
+        {
+            "label": "Input",
+            "params": [
+                {
+                    "name": "input_set",
+                    "label": "Input set:",
+                    "paramClass": "PathParam",
+                    "pointerClass": "TomoCoordinates, TomoParticles",
+                    "help": "TomoCoordinates or TomoParticles set: optimisation_set.star (or particles.star)."
+                },
+                {
+                    "name": "compare_self",
+                    "label": "Compare to itself (duplicates)?",
+                    "paramClass": "BooleanParam",
+                    "default": false,
+                    "help": "If Yes, the input set is compared to itself (each coordinate to the other ones in its tomogram) to detect duplicates. If No, it is compared to the second set below."
+                },
+                {
+                    "name": "second_set",
+                    "label": "Second set:",
+                    "paramClass": "PathParam",
+                    "pointerClass": "TomoCoordinates, TomoParticles",
+                    "condition": "compare_self == False",
+                    "help": "TomoCoordinates or TomoParticles set to compare the input set to: optimisation_set.star (or particles.star)."
+                }
+            ]
+        },
+        {
+            "label": "Distances",
+            "params": [
+                {
+                    "name": "max_distance",
+                    "label": "Maximum distance (A)",
+                    "paramClass": "FloatParam",
+                    "help": "Coordinates closer than this distance (in Angstrom) are neighbours (duplicates, or present in both sets). It is the distance the EMhub viewer shows first: all the distances are kept in distances.npz, so the viewer can show the results at any other distance.",
+                    "default": 50
+                }
+            ]
+        }
+    ]
+}

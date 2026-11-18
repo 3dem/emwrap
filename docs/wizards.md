@@ -18,10 +18,18 @@ The wizards so far:
   from tilt-series, used by Warp `emw-warp-export_particles` and Relion
   `relion.pseudosubtomo`.
 - `VolumeMaskWizard`: the mask of a map (a mask map or a sphere), used by
-  Relion `relion.class3d.tomo` and `relion.refine3d.tomo`.
+  Relion `relion.class3d.tomo` and `relion.refine3d.tomo`, and by Warp
+  `emw-warp-mtools_create` (the species mask over the last Relion volume of
+  the input `_data.star`, `WarpCreateSpeciesMaskAdaptor`).
 - `MaskCreateWizard`: the parameters of a mask created from a map, with a
   tentative mask computed on the server (preview), used by
   `emw-relion-mask_create`.
+- `PyTomTemplateWizard` (`emwrap/pytom/wizards.py`): the template and mask
+  of `emw-pytom-create_template`, with a tentative template and mask
+  computed on the server (preview).
+- `GeometryMaskWizard`: the shapes (sphere, cylinder, box) of a binary mask,
+  with the mask computed on the server (preview), used by
+  `emw-geometry-mask`.
 
 ## Architecture
 
@@ -295,6 +303,67 @@ them) and emflow displays them.
   `relion_mask_create.volume.*`: `i`, `ini_threshold`, `lowpass` (-1: none),
   `extend_inimask`, `width_soft_edge`, `invert` and `angpix`. The wand is on
   the threshold, extend, soft edge and lowpass.
+
+## Example: PyTomTemplateWizard
+
+- **Wizard** (`emwrap/pytom/wizards.py`, PyTom specific): inputs `volume`
+  (required), `in_angpix` (default: the map header), `out_angpix` (default:
+  the input one), `box` (default: the map box at the output pixel size),
+  `radius` (default: 40% of the box) and `sigma` (default 1) in px of the
+  output box, and `center`, `invert`, `mirror`. `preview()` (also on open)
+  repeats PyTom's operations with numpy on the map downscaled to about
+  100 px (`load_binned_map`, shared with MaskCreateWizard):
+  `volume_mask.compute_template` centres it by the centre of mass of the
+  positive density, resamples it to the output pixel size (Fourier crop or
+  pad), crops or pads it to the output box, inverts and mirrors it (x);
+  `volume_mask.spherical_mask` is the mask of `pytom_create_mask.py` (1
+  inside the radius, a Gaussian fall-off of sigma, cut at 3 sigmas). Both
+  are on the output box binned to at most 100 px and sent inline
+  (`data.template`, `data.mask`, with `data.box`, `data.binning`,
+  `data.angpix`). Warnings: an upsampled map, a radius larger than half of
+  the box. The job still runs PyTom; the preview skips its lowpass.
+- **UI** (`PyTomTemplateWizard.tsx`): the values on the left and the
+  template with the mask over it in a VolumeViewer. It shares the
+  Re-calculate button, its status and the viewer pane with
+  `MaskCreateWizard` (`WizardPreview.tsx`).
+- **Adaptor** (`PyTomCreateTemplateAdaptor`): maps
+  `pytom_create_template.*` (`input-map`, `input-voxel-size-angstrom`,
+  `output-voxel-size-angstrom`, `box-size`, `center`, `invert`, `mirror`)
+  and `pytom_create_mask.radius` / `sigma`. The wand is on the Voxel Size
+  line and on the mask radius and sigma; OK sets all of them.
+
+## Example: GeometryMaskWizard
+
+- **Job** (`emwrap/base/geometry_mask.py`, `emw-geometry-mask`): a binary
+  mask, the union of shapes, each with a center (px, from the first voxel;
+  empty: the center of the box `N // 2`), Euler angles `rot`, `tilt`, `psi`
+  (degrees, ZYZ, Relion's `Euler_angles2matrix`: a voxel is inside if
+  `A · (r - center)` is inside the shape) and its sizes in px: sphere
+  `radius`, cylinder `radius` and `height` (along the rotated z), box
+  `size_x`, `size_y`, `size_z`. The box and pixel size are those of the
+  optional `input_volume`, else `box_x/y/z` (and `angpix`). `soft_edge` (px)
+  adds a raised cosine outside the shapes, as `relion_mask_create
+  --width_soft_edge`, over the exact distance to the nearest shape (signed
+  distance functions; 0: a binary mask). The shapes are a `TableParam`
+  (`shapes`, one row per shape) in the Shapes group of the Input section. Output `mask.mrc` (mask3d node,
+  `VolumeMask`); EMhub's output viewer shows it over `input_volume`.
+- **Wizard** (`emwrap/base/wizards.py`): inputs `volume`, `box`, `angpix`,
+  `soft_edge` and `shapes`. `prepare()` resolves the box (a volume or the box size, else
+  it refuses to open); without valid shapes it starts with a sphere at the
+  center (invalid ones add warnings). `data.defaults` are the new shapes of
+  each kind. `preview()` (also on open) computes the mask on the box binned
+  to at most 128 px (`data.binning`), sent inline (`data.mask`,
+  `mask_fraction`), with the soft edge. Outputs: `shapes` (validated, the
+  sizes not used by a shape empty) and `soft_edge`.
+- **UI** (`GeometryMaskWizard.tsx`): the list of shapes (select one, remove
+  it, Add shape: a new shape of the current kind at the center), the
+  editor of the selected one (kind, center, angles, sizes) and the soft edge
+  (px, with its Å) on the left; the
+  volume with the mask over it (without volume: the mask alone) in a
+  VolumeViewer, with Re-calculate as in MaskCreateWizard.
+- **Adaptor** (`GeometryMaskAdaptor`): the wand is on `soft_edge` and the
+  `shapes` table; OK sets the soft edge and the rows (`ProtocolForm` sets a list, or a JSON list, returned for a
+  `TableParam` as its rows).
 
 ## Tests
 

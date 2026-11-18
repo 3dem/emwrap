@@ -119,5 +119,72 @@ class TestQueueParams(unittest.TestCase):
         self.assertIsNone(self._submission({'queue.name': 'None', 'cpus': '1'}))
 
 
+class TestQueueInspect(unittest.TestCase):
+    """ ProjectManager.inspectJob: runs the 'inspect' command of the queue. """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix='emwrap_inspect_')
+        self.script = os.path.join(self.tmp, 'inspect.sh')
+        with open(self.script, 'w') as f:
+            f.write('#!/bin/bash\n'
+                    'if [ "$2" = "--json" ]; then echo "{\\"id\\": \\"$1\\"}"; '
+                    'else echo "job $1 text"; fi\n')
+        os.chmod(self.script, 0o755)
+        self.queue = {'name': 'cryoem', 'cancel': 'bkill {job_id}',
+                      'inspect': self.script + ' {job_id} --json'}
+        config = {'queues': [{'name': 'None'}, self.queue]}
+        for patcher in [
+            unittest.mock.patch.object(ProcessingConfig, '_config', config),
+            unittest.mock.patch.object(ProjectManager, '_getJob', lambda pm, j: j),
+            unittest.mock.patch.object(ProjectManager, '_readJobParams',
+                                       lambda pm, j: {'queue.name': 'cryoem'})]:
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+        self.pm = ProjectManager.__new__(ProjectManager)
+        FolderManager.__init__(self.pm, self.tmp)
+        self.pm._verbose = 0
+        self.jobId = 'External/job001'
+        os.makedirs(os.path.join(self.tmp, self.jobId))
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def _writeClusterId(self, clusterId):
+        with open(self.pm.join(self.jobId, ProjectManager.JOB_CLUSTER_ID_FILE), 'w') as f:
+            f.write(clusterId + '\n')
+
+    def test_json_output(self):
+        self._writeClusterId('330047105')
+        self.assertTrue(self.pm.canInspectJob(self.jobId))
+        result = self.pm.inspectJob(self.jobId)
+        self.assertEqual(result['format'], 'json')
+        self.assertEqual(result['data'], {'id': '330047105'})
+        self.assertEqual(result['job_id'], '330047105')
+        self.assertEqual(result['queue'], 'cryoem')
+
+    def test_text_output(self):
+        self.queue['inspect'] = self.script + ' {job_id}'
+        self._writeClusterId('123[4]')
+        result = self.pm.inspectJob(self.jobId)
+        self.assertEqual(result['format'], 'text')
+        self.assertEqual(result['text'], 'job 123[4] text')
+
+    def test_invalid_cluster_id(self):
+        self._writeClusterId('123; rm -rf /')
+        with self.assertRaisesRegex(Exception, 'Invalid cluster job id'):
+            self.pm.inspectJob(self.jobId)
+
+    def test_no_inspect_command(self):
+        del self.queue['inspect']
+        self._writeClusterId('123')
+        self.assertFalse(self.pm.canInspectJob(self.jobId))
+        with self.assertRaisesRegex(Exception, "No 'inspect' command"):
+            self.pm.inspectJob(self.jobId)
+
+    def test_no_cluster_id(self):
+        self.assertFalse(self.pm.canInspectJob(self.jobId))
+
+
 if __name__ == '__main__':
     unittest.main()

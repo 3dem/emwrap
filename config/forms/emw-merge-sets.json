@@ -1,7 +1,7 @@
 {
     "name": "emw-merge-sets",
     "label": "EMwrap Merge Sets",
-    "help": "Merge multiple tilt-series, tomogram, or particle/coordinate sets of the same type into one output set.",
+    "help": "Merge multiple tilt-series, tomogram, or particle/coordinate sets of the same type into one output set. Particle/coordinate sets can be merged without their overlapping particles (see 'Overlap distance'), and with different columns (see 'Common columns').",
     "sections": [
         {
             "label": "Input",
@@ -13,6 +13,53 @@
                     "pointerClass": "TiltSeriesMovies, TiltSeries, Tomograms, TomoParticles, TomoCoordinates",
                     "min": 2,
                     "help": "Two or more STAR files of the same type: tilt_series.star, tomograms.star, or optimisation_set.star (TomoParticles / TomoCoordinates)."
+                }
+            ]
+        },
+        {
+            "label": "Particles",
+            "params": [
+                {
+                    "name": "overlap_distance",
+                    "label": "Overlap distance (A)",
+                    "paramClass": "FloatParam",
+                    "allowsEmpty": true,
+                    "help": "Only for TomoParticles / TomoCoordinates sets. Empty: every particle is merged (particles with the same name or coordinates only once). Otherwise, a particle within this distance (Angstrom, same tomogram, positions with the shifts) of a particle of an earlier input set is not added: the earlier one is. The particles are then in parts, per tomogram: 'overlap', the ones in more than one set (from the first one), and 'set1', 'set2'... the ones only in that input set. With two sets A and B: set1 is A - B, set2 is B - A and overlap is A & B."
+                },
+                {
+                    "name": "edge_distance",
+                    "label": "Edge distance (A)",
+                    "paramClass": "FloatParam",
+                    "allowsEmpty": true,
+                    "help": "Only for TomoParticles / TomoCoordinates sets. Particles closer than this distance (Angstrom) to the edges of the tomogram box (X, Y and Z; positions with the shifts, sizes from the tomograms.star of each set) are not merged; they are left out before the overlaps. Empty: none."
+                },
+                {
+                    "name": "exclude_parts",
+                    "label": "Exclude parts",
+                    "paramClass": "TableParam",
+                    "allowsEmpty": true,
+                    "help": "Optional, with an overlap distance: the parts left out of some tomograms, e.g. 'TS_01: set2' merges only A - B and A & B of TS_01. The tomogram name '*' is every tomogram, e.g. '*: set1 set2' keeps only the overlaps (a consensus of the sets).",
+                    "params": [
+                        {
+                            "name": "tomoName",
+                            "label": "Tomo name",
+                            "paramClass": "StringParam",
+                            "help": "rlnTomoName of the tomogram, or '*' for every tomogram."
+                        },
+                        {
+                            "name": "parts",
+                            "label": "Parts",
+                            "paramClass": "StringParam",
+                            "help": "Parts to leave out, separated by spaces: 'overlap', 'set1', 'set2'..."
+                        }
+                    ]
+                },
+                {
+                    "name": "common_columns",
+                    "label": "Common columns",
+                    "paramClass": "BooleanParam",
+                    "default": false,
+                    "help": "Only for TomoParticles / TomoCoordinates sets. No: the sets must have the same particle columns. Yes: only the particle columns of every set are written (an origin missing in a set is 0), e.g. to merge picked coordinates with extracted particles; the optics tables only if every set has one. The output is TomoParticles if every set is, else TomoCoordinates."
                 }
             ]
         }

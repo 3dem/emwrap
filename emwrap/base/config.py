@@ -75,6 +75,16 @@ class ProcessingConfig:
             "label": "EMwrap Merge Sets",
             "output": "EMwrap"
         },
+        "emw-coordinates-compare": {
+            "launcher": "emwrap.base.coordinates_compare",
+            "label": "EMwrap Coordinates Compare",
+            "output": "EMwrap"
+        },
+        "emw-geometry-mask": {
+            "launcher": "emwrap.base.geometry_mask",
+            "label": "EMwrap Geometry Mask",
+            "output": "GeometryMask"
+        },
         "emw-warp-mctf": {
             "launcher": "emwrap.warp.warp_mctf",
             "label": "Warp Motion and CTF",
@@ -122,6 +132,11 @@ class ProcessingConfig:
         },
         "emw-relion-symmetrize_volume": {"launcher": "emwrap.relion.symmetrize_volume"},
         "emw-relion-mask_create": {"launcher": "emwrap.relion.mask_create"},
+        "emw-relion-transform_volume": {
+            "launcher": "emwrap.relion.transform_volume",
+            "label": "Relion Transform Volume",
+            "output": "TransformVolume"
+        },
         "emw-warp-mtools_create": {
             "launcher": "emwrap.warp.warp_mtools_create",
             "label": "Warp M Create Population",

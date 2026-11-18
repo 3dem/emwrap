@@ -15,6 +15,7 @@
 # **************************************************************************
 
 import os
+import re
 import sys
 import shlex
 import json
@@ -822,6 +823,61 @@ class ProjectManager(FolderManager):
         self.runJob(job_id, wait=False, update=True)
         return True
 
+    # Cluster job id as written by bsub/sbatch, also an LSF array element
+    CLUSTER_JOB_ID_RE = re.compile(r'^\d+(\[\d+\])?$')
+
+    def getJobQueue(self, jobId):
+        """ Name and config of the queue used by a job (from its params), or
+        (name, None) if it was not submitted to a configured queue. """
+        qname = self._readJobParams(self._getJob(jobId)).get('queue.name', 'NO-NAME')
+        if qname in ('', 'None', 'NO-NAME', 'NO-QUEUE'):
+            return qname, None
+        return qname, ProcessingConfig.get_queue(qname)
+
+    def canInspectJob(self, jobId):
+        """ True if the job has a cluster job id and its queue defines an
+        'inspect' command (see inspectJob). """
+        if not self.exists(jobId, self.JOB_CLUSTER_ID_FILE):
+            return False
+        _, queue = self.getJobQueue(jobId)
+        return bool(queue and queue.get('inspect'))
+
+    def inspectJob(self, jobId, timeout=90):
+        """ Run the 'inspect' command of the job's queue for its cluster job,
+        e.g. "inspect": "$SCRIPTS/lsf_inspect_job.sh {job_id} --json".
+        It queries the queueing system, so it is meant for launched or
+        running jobs. Returns a dict with: job_id, queue, command and either
+        format='json' + data (if the output is JSON) or format='text' + text.
+        """
+        with open(self.join(jobId, self.JOB_CLUSTER_ID_FILE)) as f:
+            cluster_job_id = f.readline().strip()
+        if not self.CLUSTER_JOB_ID_RE.match(cluster_job_id):
+            raise Exception(f"Invalid cluster job id '{cluster_job_id}' for job {jobId}.")
+
+        qname, queue = self.getJobQueue(jobId)
+        if not queue or not queue.get('inspect'):
+            raise Exception(f"No 'inspect' command configured for queue '{qname}'.")
+
+        cmd = queue['inspect'].format(job_id=cluster_job_id)
+        try:
+            p = subprocess.run(shlex.split(cmd), capture_output=True, text=True,
+                               timeout=timeout)
+        except subprocess.TimeoutExpired:
+            raise Exception(f"Timeout ({timeout} s) inspecting cluster job "
+                            f"{cluster_job_id}: {cmd}")
+        except OSError as e:
+            raise Exception(f"Could not run inspect command '{cmd}': {e}")
+
+        result = {'job_id': cluster_job_id, 'queue': qname, 'command': cmd}
+        try:
+            result.update(format='json', data=json.loads(p.stdout))
+        except ValueError:
+            text = (p.stdout or '').strip()
+            if p.returncode != 0 and p.stderr.strip():
+                text = (text + '\n' + p.stderr.strip()).strip()
+            result.update(format='text', text=text)
+        return result
+
     def _stopClusterJob(self, jobId):
         """Cancel a job that was submitted to a cluster queue."""
         with open(self.join(jobId, self.JOB_CLUSTER_ID_FILE)) as f:
@@ -998,22 +1054,7 @@ class ProjectManager(FolderManager):
     def _count_job_gpus(job_params):
         """Return the number of GPUs of a job, from Relion's native gpu_ids
         param or from the emwrap gpus param."""
-        gpu_ids = job_params.get('gpu_ids')
-        if gpu_ids is not None and str(gpu_ids).strip():
-            return ProjectManager._count_relion_gpus(gpu_ids)
-
-        return ProcessingPipeline.count_gpus(job_params.get('gpus', ''))
-
-    @staticmethod
-    def _count_relion_gpus(gpu_ids):
-        """Return the number of different GPU ids in Relion's --gpu syntax,
-        where ':' separates MPI processes and ',' threads (e.g. "0,1:0,1" -> 2)."""
-        ids = set()
-        for mpi_part in str(gpu_ids).split(':'):
-            for token in mpi_part.split(','):
-                if t := token.strip():
-                    ids.add(int(t))
-        return len(ids)
+        return len(ProcessingPipeline.get_job_gpu_list(job_params))
 
     @staticmethod
     def _relionJobIsContinue(job_dir):
@@ -1113,19 +1154,7 @@ class ProjectManager(FolderManager):
         script_log = os.path.join(folder_path, 'job.log')
         gpus = self._count_job_gpus(job_params)
 
-        def _load_cpus(gpus):
-            mpi, threads = 1, 1
-            if 'nr_mpi' in job_params or 'nr_threads' in job_params:
-                mpi = int(job_params.get('nr_mpi', 1))
-                threads = int(job_params.get('nr_threads', 1))
-            elif cpus_str := job_params.get('cpus', ''):
-                if 'x' in cpus_str:
-                    mpi, threads = map(int, cpus_str.split('x'))
-                else:
-                    mpi, threads = int(cpus_str), 1
-            return mpi * threads
-
-        cpus = _load_cpus(gpus)
+        cpus = ProcessingPipeline.count_job_cpus(job_params)
 
         gpu_type = qparams.get('gpu_type', 'any')
 

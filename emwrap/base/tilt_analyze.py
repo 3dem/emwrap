@@ -246,14 +246,16 @@ class TiltAnalyzePipeline(ProcessingPipeline):
         job continued keeps what the dashboard saved), or it was loaded from
         another file than the one asked for now. """
         path = tqc.Config.path(self.outputDir)
-        loaded = os.path.abspath(self.inputConfig) if self.inputConfig else None
+        # Persisted relative to the project root (absolute if outside it)
+        loadedAbs = os.path.abspath(self.inputConfig) if self.inputConfig else None
+        loaded = self.relativizePaths(loadedAbs) if loadedAbs else None
         if os.path.exists(path):
             try:
                 current = tqc.Config.read_file(path)
             except (OSError, ValueError) as e:
                 current = None
                 self.log(f"WARNING: {path} cannot be read, written again: {e}")
-            if current and (not loaded or current.get('loadedFrom') == loaded):
+            if current and (not loaded or current.get('loadedFrom') in (loaded, loadedAbs)):
                 self.log(f"Tilt QC configuration: {Color.bold(path)} (kept)")
                 return
         if self.inputConfig:

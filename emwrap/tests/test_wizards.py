@@ -51,6 +51,9 @@ RELION = 'relion.pseudosubtomo'
 CLASS3D = 'relion.class3d.tomo'
 REFINE3D = 'relion.refine3d.tomo'
 MASK_CREATE = 'emw-relion-mask_create'
+MTOOLS_CREATE = 'emw-warp-mtools_create'
+PYTOM_TEMPLATE = 'emw-pytom-create_template'
+GEOMETRY_MASK = 'emw-geometry-mask'
 
 
 class TestWizards(unittest.TestCase):
@@ -224,6 +227,58 @@ class TestWizards(unittest.TestCase):
             Wizards.apply(self.project, MASK_CREATE, 'mask_create', params,
                           {'threshold': 0.3, 'soft_edge': -1})
 
+    def test_pytom_template(self):
+        import numpy as np
+        from emwrap.base.volume_mask import spherical_mask
+
+        # A ball of radius 20 px off-centre (+10 px in x) in a 120 px box, 2 A/px
+        n = 120
+        z, y, x = np.mgrid[:n, :n, :n]
+        r = np.sqrt((x - 70) ** 2 + (y - 60) ** 2 + (z - 60) ** 2)
+        self._write_mrc('Import/job001/map.mrc', (n, n, n), angpix=2.0,
+                        data=(r < 20).astype(np.float32))
+        T, M = 'pytom_create_template.', 'pytom_create_mask.'
+        params = {T + 'input-map': 'Import/job001/map.mrc',
+                  T + 'input-voxel-size-angstrom': '',
+                  T + 'output-voxel-size-angstrom': '4',
+                  T + 'box-size': '', T + 'center': True,
+                  T + 'invert': True, T + 'mirror': False,
+                  M + 'radius': '', M + 'sigma': ''}
+        result = Wizards.open(self.project, PYTOM_TEMPLATE, 'template', params)
+        self.assertEqual(result['ui'], 'PyTomTemplateWizard')
+        inputs = result['inputs']
+        self.assertEqual((inputs['in_angpix'], inputs['out_angpix'], inputs['box']),
+                         (2.0, 4.0, 60))  # The map box at the output pixel size
+        self.assertEqual(inputs['radius'], 24.0)
+        data = result['data']
+        self.assertEqual(data['template']['shape'], [60, 60, 60])
+        self.assertEqual(data['binning'], 1)
+
+        # Centred and inverted: the minimum at the centre of the box
+        from emwrap.base.volume_mask import load_binned_map, compute_template
+        binned = load_binned_map(self.project.join('Import/job001/map.mrc'))
+        tmpl, f = compute_template(binned, 2.0, 4.0, 60, center=True, invert=True)
+        com = [(g * (tmpl < -0.5)).sum() / (tmpl < -0.5).sum()
+               for g in np.indices(tmpl.shape)]
+        np.testing.assert_allclose(com, [29.5, 29.5, 29.5], atol=1)
+        # A larger box is downscaled to at most 100 px
+        tmpl, f = compute_template(binned, 2.0, 1.0, 240)
+        self.assertEqual((f, tmpl.shape), (3, (80, 80, 80)))
+
+        mask = spherical_mask(60, 20, sigma=2)
+        self.assertEqual(mask[30, 30, 30], 1)
+        self.assertTrue(((mask > 0.05) & (mask < 0.95)).any())
+
+        result = Wizards.apply(self.project, PYTOM_TEMPLATE, 'template', params,
+                               {**inputs, 'box': 64, 'radius': 40, 'sigma': 3})
+        self.assertEqual(result['params'][T + 'box-size'], 64)
+        self.assertEqual(result['params'][M + 'radius'], 40)
+        self.assertEqual(result['params'][M + 'sigma'], 3)
+        self.assertEqual(len(result['warnings']), 1)  # radius > box / 2
+        with self.assertRaises(WizardError):
+            Wizards.apply(self.project, PYTOM_TEMPLATE, 'template', params,
+                          {**inputs, 'radius': 0})
+
     def test_class3d_mask(self):
         self._write_mrc('Refine3D/job010/run_class001.mrc', (40, 40, 40))
         self._write_mrc('MaskCreate/job011/mask.mrc', (40, 40, 40))
@@ -277,6 +332,108 @@ class TestWizards(unittest.TestCase):
         result = Wizards.apply(self.project, REFINE3D, 'mask', params,
                                {'diameter': 50})
         self.assertEqual(result['params'], {'particle_diameter': 50})
+
+    def test_mtools_create_mask(self):
+        self._write('Refine3D/job010/run_data.star', 'data_particles\n')
+        self._write('Refine3D/job010/run_it012_data.star', 'data_particles\n')
+        self._write_mrc('Refine3D/job010/run_it011_class001.mrc', (40, 40, 40))
+        self._write_mrc('Refine3D/job010/run_it012_class001.mrc', (40, 40, 40))
+        self._write_mrc('MaskCreate/job011/mask.mrc', (40, 40, 40))
+        params = {'create_species.particles_relion': 'Refine3D/job010/run_data.star',
+                  'create_species.mask': 'MaskCreate/job011/mask.mrc'}
+
+        # Before the final volume: the last iteration
+        result = Wizards.open(self.project, MTOOLS_CREATE, 'mask', params)
+        self.assertEqual(result['ui'], 'VolumeMaskWizard')
+        self.assertEqual(result['data']['volume']['path'],
+                         'Refine3D/job010/run_it012_class001.mrc')
+        self.assertEqual(result['data']['mask']['path'], params['create_species.mask'])
+        self.assertEqual(Wizards.apply(self.project, MTOOLS_CREATE, 'mask',
+                                       params, {})['params'], {})
+
+        # The final volume, or the one of the given iteration
+        self._write_mrc('Refine3D/job010/run_class001.mrc', (40, 40, 40))
+        result = Wizards.open(self.project, MTOOLS_CREATE, 'mask', params)
+        self.assertEqual(result['data']['volume']['path'],
+                         'Refine3D/job010/run_class001.mrc')
+        result = Wizards.open(self.project, MTOOLS_CREATE, 'mask', {
+            **params, 'create_species.particles_relion': 'Refine3D/job010/run_it012_data.star'})
+        self.assertEqual(result['data']['volume']['path'],
+                         'Refine3D/job010/run_it012_class001.mrc')
+
+        # Missing mask or particles, or particles without a volume
+        self._write('Other/job020/run_data.star', 'data_particles\n')
+        for p in [{'create_species.mask': ''},
+                  {'create_species.mask': 'missing.mrc'},
+                  {'create_species.particles_relion': ''},
+                  {'create_species.particles_relion': 'missing_data.star'},
+                  {'create_species.particles_relion': 'Other/job020/run_data.star'}]:
+            with self.assertRaises(WizardError):
+                Wizards.open(self.project, MTOOLS_CREATE, 'mask', {**params, **p})
+
+    def test_geometry_mask(self):
+        import numpy as np
+        from emwrap.base.geometry_mask import parse_shapes, geometry_mask
+
+        dims = [60, 50, 40]
+        # A sphere: about 4/3 pi r^3 voxels, at the center of the box
+        sphere = parse_shapes([{'shape': 'sphere', 'radius': 10}], dims)
+        self.assertEqual(sphere[0]['center_x'], 30)
+        self.assertAlmostEqual(geometry_mask(sphere, dims).sum(),
+                               4 / 3 * np.pi * 1000, delta=50)
+        # A cylinder tilted 90 degrees lies along x
+        cyl = parse_shapes([{'shape': 'cylinder', 'radius': 4, 'height': 40,
+                             'tilt': 90}], dims)
+        z, y, x = np.nonzero(geometry_mask(cyl, dims))
+        self.assertEqual((x.min(), x.max()), (10, 50))
+        self.assertLessEqual(z.max() - z.min(), 8)
+        # A box rotated 90 degrees (rot) swaps x and y
+        box = parse_shapes([{'shape': 'box', 'size_x': 20, 'size_y': 10,
+                             'size_z': 4, 'rot': 90}], dims)
+        z, y, x = np.nonzero(geometry_mask(box, dims))
+        self.assertEqual((x.max() - x.min(), y.max() - y.min()), (10, 20))
+        with self.assertRaises(ValueError):
+            parse_shapes([{'shape': 'cone'}], dims)
+        # A soft edge of 6 px: 1 inside, a raised cosine down to 0 outside
+        soft = geometry_mask(sphere, dims, soft_edge=6)
+        self.assertTrue((soft[geometry_mask(sphere, dims) == 1] == 1).all())
+        np.testing.assert_allclose(soft[20, 25, 40:47],
+                                   [1, 0.933, 0.75, 0.5, 0.25, 0.067, 0], atol=0.001)
+
+        # Wizard: the box of the volume, a sphere to start with
+        self._write_mrc('Refine3D/job020/map.mrc', (40, 50, 300), angpix=2.5)
+        params = {'input_volume': 'Refine3D/job020/map.mrc', 'shapes': '[]',
+                  'soft_edge': '4'}
+        result = Wizards.open(self.project, GEOMETRY_MASK, 'geometry_mask', params)
+        self.assertEqual(result['ui'], 'GeometryMaskWizard')
+        self.assertEqual(result['data']['dimensions'], [300, 50, 40])
+        self.assertEqual(result['data']['binning'], 3)
+        self.assertEqual(result['data']['mask']['shape'], [14, 17, 100])
+        self.assertEqual(len(result['inputs']['shapes']), 1)
+        self.assertEqual(result['inputs']['soft_edge'], 4)
+
+        shapes = result['inputs']['shapes'] + [
+            {'shape': 'box', 'center_x': 250, 'size_x': 30, 'size_y': 30, 'size_z': 30}]
+        result = Wizards.apply(self.project, GEOMETRY_MASK, 'geometry_mask',
+                               params, {'shapes': shapes, 'soft_edge': 3})
+        self.assertEqual([s['shape'] for s in result['params']['shapes']],
+                         ['sphere', 'box'])
+        self.assertEqual(result['params']['soft_edge'], 3)
+        with self.assertRaises(WizardError):  # A negative soft edge
+            Wizards.apply(self.project, GEOMETRY_MASK, 'geometry_mask',
+                          params, {'shapes': shapes, 'soft_edge': -1})
+        with self.assertRaises(WizardError):  # A box without sizes
+            Wizards.apply(self.project, GEOMETRY_MASK, 'geometry_mask',
+                          params, {'shapes': [{'shape': 'box'}]})
+
+        # Without volume: the box size of the form is required
+        params = {'box_x': '32', 'box_y': '32', 'box_z': '', 'shapes': ''}
+        with self.assertRaises(WizardError):
+            Wizards.open(self.project, GEOMETRY_MASK, 'geometry_mask', params)
+        params['box_z'] = '16'
+        result = Wizards.open(self.project, GEOMETRY_MASK, 'geometry_mask', params)
+        self.assertIsNone(result['data']['volume'])
+        self.assertEqual(result['data']['dimensions'], [32, 32, 16])
 
     def test_errors(self):
         with self.assertRaises(WizardError):

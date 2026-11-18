@@ -1,4 +1,15 @@
 {
+    "wizards": [
+        {
+            "id": "template",
+            "label": "Template and mask wizard",
+            "adaptor": "emwrap.pytom.wizards.PyTomCreateTemplateAdaptor",
+            "params": ["pytom_create_template.input-voxel-size-angstrom",
+                       "pytom_create_template.output-voxel-size-angstrom",
+                       "pytom_create_mask.radius",
+                       "pytom_create_mask.sigma"]
+        }
+    ],
     "sections": [
 
     {

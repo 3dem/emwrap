@@ -133,14 +133,22 @@ class PyTomPipeline(ProcessingPipeline):
         def _out(s):
             return self.join('Coordinates', f'{tsName}_{s}')
 
+        found = {}  # suffix -> batch output file
         for suffix in self.OUTPUT_SUFFICES:
             if files := batch.glob(f'output/*_{suffix}'):
-                f = files[0]
-                dst = _out(suffix)
-                shutil.copy(f, dst)
-                outFiles[suffix] = dst
+                found[suffix] = files[0]
             else:
                 missing.append(suffix)
+
+        # tmp absolute path -> final project path
+        copied = {os.path.abspath(f): _out(s) for s, f in found.items()}
+        for suffix, f in found.items():
+            dst = _out(suffix)
+            if suffix == 'job.json':
+                self._writeJobJson(batch, f, dst, copied)
+            else:
+                shutil.copy(f, dst)
+            outFiles[suffix] = dst
         if missing:
             with open(_out('missing.json'), 'w') as f:
                 json.dump(missing, f)
@@ -148,6 +156,27 @@ class PyTomPipeline(ProcessingPipeline):
             os.remove(_out('missing.json'))
 
         return outFiles
+
+    def _writeJobJson(self, batch, src, dst, copied):
+        """ Copy PyTom's job json, that contains absolute paths to the batch
+        tmp folder, rewriting them relative to the project root: copied
+        outputs point to their file in Coordinates, the linked inputs to
+        the original files and the rest to their (tmp) project path. """
+        with open(src) as f:
+            data = json.load(f)
+
+        mapping = dict(copied)
+        mapping[batch.join('output')] = self.join('Coordinates')
+        # Inputs linked into the batch folder: point to the original files
+        pytomArgs = self._pytom_args['pytom']
+        for src in [batch.get('tomogram', None),
+                    pytomArgs.get('template', None), pytomArgs.get('mask', None)]:
+            if src:
+                link = batch.join(os.path.basename(src))
+                mapping[link] = self.relativizePaths(os.path.abspath(src))
+
+        with open(dst, 'w') as f:
+            json.dump(self.relativizePaths(data, mapping), f, indent=4)
 
     def _coordsFile(self, tsName, suffix):
         return self.join('Coordinates', f'{tsName}_{suffix}')
