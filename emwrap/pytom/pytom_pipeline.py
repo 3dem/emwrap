@@ -36,6 +36,12 @@ from .pytom import PyTom
 class PyTomPipeline(ProcessingPipeline):
     """ Pipeline PyTom picking in a set of tomograms. """
     name = 'emw-pytom'
+    # Program (EMWRAP_CONFIG['programs'] key), label for the logs and
+    # sub-arguments (prefixes of the form params) of the wrapped program,
+    # redefined in subclasses wrapping other template matching programs
+    PROGRAM = 'PYTOM'
+    LABEL = 'PyTom'
+    SUBARGS = ('pytom', 'pytom_extract')
 
     # Expected suffices after running PyTom in one batch
     OUTPUT_SUFFICES = ['angles.mrc',
@@ -64,7 +70,7 @@ class PyTomPipeline(ProcessingPipeline):
         # EMWRAP_CONFIG
         self.launcher_form = args.get('launcher', '') or None
         self.launcher = (self.launcher_form
-                         or ProcessingPipeline.get_launcher('PYTOM'))
+                         or ProcessingPipeline.get_launcher(self.PROGRAM))
 
         self.inTomoStar = self._args['input_tomograms']
         self.acq = self.loadAcquisition(self.inTomoStar)
@@ -81,10 +87,26 @@ class PyTomPipeline(ProcessingPipeline):
             'sleep': int(args.get('wait.sleep', 30)),
         }
 
-        self._pytom_args = {
-            'pytom': self.get_subargs('pytom'),
-            'pytom_extract': self.get_subargs('pytom_extract')
-        }
+        self._pytom_args = {k: self.get_subargs(k) for k in self.SUBARGS}
+
+    def _createPicker(self, args, gpu):
+        """ Create the object that picks one tomogram (batch), with its
+        process_batch(batch, launcher=...) method. """
+        args['pytom']['g'] = gpu
+        return PyTom(self.acq, args)
+
+    def _gpuGroups(self):
+        """ GPUs used by each processing thread (one tomogram at a time):
+        pairs of GPUs if there is an even number of them. """
+        n = len(self.gpuList)
+        if n % 2 == 0:
+            return [self.gpuList[i:i+2] for i in range(0, n, 2)]
+        return [[g] for g in self.gpuList]
+
+    def _coordinateValues(self, coord):
+        """ Values of the output particles (PARTICLES_COLUMNS) from a row
+        of the program coordinates (relion5) STAR file. """
+        return {c: getattr(coord, c) for c in self.PARTICLES_COLUMNS}
 
     def get_pytom_proc(self, gpu):
 
@@ -96,9 +118,8 @@ class PyTomPipeline(ProcessingPipeline):
                 return batch
             try:
                 args = {k: dict(v) for k, v in self._pytom_args.items()}
-                args['pytom']['g'] = gpu
-                pytom = PyTom(self.acq, args)
-                pytom.process_batch(batch, launcher=self.launcher)
+                picker = self._createPicker(args, gpu)
+                picker.process_batch(batch, launcher=self.launcher)
             except Exception as e:
                 batch.error = f"{e}\n{traceback.format_exc()}"
             return batch
@@ -175,7 +196,7 @@ class PyTomPipeline(ProcessingPipeline):
         for coord in coordsTable:
             if coord is None:
                 continue
-            values = {c: getattr(coord, c) for c in self.PARTICLES_COLUMNS}
+            values = self._coordinateValues(coord)
             values['rlnTomoName'] = tsName
             ptsTable.addRowValues(**values)
 
@@ -443,8 +464,8 @@ class PyTomPipeline(ProcessingPipeline):
         bin = first.rlnTomoTomogramBinning
 
     def prerun(self):
-        self.log("Setting up PyTom picking pipeline.")
-        print_launcher('launcher' if self.launcher_form else 'PYTOM',
+        self.log(f"Setting up {self.LABEL} picking pipeline.")
+        print_launcher('launcher' if self.launcher_form else self.PROGRAM,
                        self.launcher)
 
         self._dims = None
@@ -456,11 +477,7 @@ class PyTomPipeline(ProcessingPipeline):
         self.mkdir('Coordinates')
         n = len(self.gpuList)
         self.log(f"Total GPUs: {n}.", flush=True)
-
-        if n % 2 == 0:
-            gpu_groups = [self.gpuList[i:i+2] for i in range(0, n, 2)]
-        else:
-            gpu_groups = [[g] for g in self.gpuList]
+        gpu_groups = self._gpuGroups()
 
         self.log(f"Creating {len(gpu_groups)} processing threads.")
 
