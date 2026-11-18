@@ -15,6 +15,7 @@
 # **************************************************************************
 
 import os
+import re
 import sys
 import shlex
 import json
@@ -821,6 +822,61 @@ class ProjectManager(FolderManager):
             jobFile=job_log, flush=True)
         self.runJob(job_id, wait=False, update=True)
         return True
+
+    # Cluster job id as written by bsub/sbatch, also an LSF array element
+    CLUSTER_JOB_ID_RE = re.compile(r'^\d+(\[\d+\])?$')
+
+    def getJobQueue(self, jobId):
+        """ Name and config of the queue used by a job (from its params), or
+        (name, None) if it was not submitted to a configured queue. """
+        qname = self._readJobParams(self._getJob(jobId)).get('queue.name', 'NO-NAME')
+        if qname in ('', 'None', 'NO-NAME', 'NO-QUEUE'):
+            return qname, None
+        return qname, ProcessingConfig.get_queue(qname)
+
+    def canInspectJob(self, jobId):
+        """ True if the job has a cluster job id and its queue defines an
+        'inspect' command (see inspectJob). """
+        if not self.exists(jobId, self.JOB_CLUSTER_ID_FILE):
+            return False
+        _, queue = self.getJobQueue(jobId)
+        return bool(queue and queue.get('inspect'))
+
+    def inspectJob(self, jobId, timeout=90):
+        """ Run the 'inspect' command of the job's queue for its cluster job,
+        e.g. "inspect": "$SCRIPTS/lsf_inspect_job.sh {job_id} --json".
+        It queries the queueing system, so it is meant for launched or
+        running jobs. Returns a dict with: job_id, queue, command and either
+        format='json' + data (if the output is JSON) or format='text' + text.
+        """
+        with open(self.join(jobId, self.JOB_CLUSTER_ID_FILE)) as f:
+            cluster_job_id = f.readline().strip()
+        if not self.CLUSTER_JOB_ID_RE.match(cluster_job_id):
+            raise Exception(f"Invalid cluster job id '{cluster_job_id}' for job {jobId}.")
+
+        qname, queue = self.getJobQueue(jobId)
+        if not queue or not queue.get('inspect'):
+            raise Exception(f"No 'inspect' command configured for queue '{qname}'.")
+
+        cmd = queue['inspect'].format(job_id=cluster_job_id)
+        try:
+            p = subprocess.run(shlex.split(cmd), capture_output=True, text=True,
+                               timeout=timeout)
+        except subprocess.TimeoutExpired:
+            raise Exception(f"Timeout ({timeout} s) inspecting cluster job "
+                            f"{cluster_job_id}: {cmd}")
+        except OSError as e:
+            raise Exception(f"Could not run inspect command '{cmd}': {e}")
+
+        result = {'job_id': cluster_job_id, 'queue': qname, 'command': cmd}
+        try:
+            result.update(format='json', data=json.loads(p.stdout))
+        except ValueError:
+            text = (p.stdout or '').strip()
+            if p.returncode != 0 and p.stderr.strip():
+                text = (text + '\n' + p.stderr.strip()).strip()
+            result.update(format='text', text=text)
+        return result
 
     def _stopClusterJob(self, jobId):
         """Cancel a job that was submitted to a cluster queue."""
