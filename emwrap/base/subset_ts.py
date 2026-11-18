@@ -43,10 +43,14 @@ MODE_RANDOM = 2          # 'subset_random_count' (+ optional 'subset_random_seed
 MODE_RANDOM_PARTICLES = 3  # 'subset_random_particles' (+ optional 'subset_random_seed'),
                            # only for TomoCoordinates / TomoParticles inputs.
 MODE_EXCLUDE_SET = 4     # 'subset_exclude_set': keep names not found in a 2nd set.
+MODE_REMOVE_DUPLICATES = 5  # 'subset_duplicates_distance' / 'subset_edge_distance':
+                            # remove the duplicate particles and those near the
+                            # tomogram edges (TomoCoordinates / TomoParticles).
 
 MODE_LABELS = ("0 (explicit names list), 1 (match a second set), "
                "2 (random selection of N tomograms), 3 (random selection "
-               "of M particles), or 4 (exclude names from a second set)")
+               "of M particles), 4 (exclude names from a second set) or "
+               "5 (remove duplicate / near-edge particles)")
 
 
 class SubsetTsPipeline(ProcessingPipeline):
@@ -67,6 +71,10 @@ class SubsetTsPipeline(ProcessingPipeline):
         # (rows of the input particles table) of the selected ones.
         self.randomParticles = None
         self.particleIndexes = None
+        # Mode 5: particles closer than this distance (A) are duplicates, and
+        # those closer than edgeDistance (A) to the tomogram edges are removed
+        self.duplicatesDistance = None
+        self.edgeDistance = None
 
         if self.mode == MODE_EXPLICIT_NAMES:
             names = (args.get('subset_tomo_names') or '').replace(',', ' ')
@@ -80,6 +88,14 @@ class SubsetTsPipeline(ProcessingPipeline):
                 args.get('subset_random_count'), 'subset_random_count',
                 'tomograms', 2)
             self.randomSeed = self._parseRandomSeed(args.get('subset_random_seed'))
+        elif self.mode == MODE_REMOVE_DUPLICATES:
+            self.duplicatesDistance = self._parseDistance(
+                args.get('subset_duplicates_distance'), 'subset_duplicates_distance')
+            self.edgeDistance = self._parseDistance(
+                args.get('subset_edge_distance'), 'subset_edge_distance')
+            if not self.duplicatesDistance and not self.edgeDistance:
+                raise Exception("Mode 5 needs a 'subset_duplicates_distance' "
+                                "and/or a 'subset_edge_distance' (Angstrom).")
         else:  # MODE_RANDOM_PARTICLES
             self.randomParticles = self._parseRandomCount(
                 args.get('subset_random_particles'), 'subset_random_particles',
@@ -90,9 +106,11 @@ class SubsetTsPipeline(ProcessingPipeline):
         # are known ahead of the run: Mode 0 (explicit list), Mode 1 (matched
         # against a second set), and Mode 4 (excluding a second set). In Modes
         # 2 and 3 (random selection) the names are not known until the job
-        # actually runs, so it's ignored even if a stale value is present.
+        # actually runs, so it's ignored even if a stale value is present
+        # (and in Mode 5, a selection of particles).
         self.excludedTiltsMap = (
-            {} if self.mode in (MODE_RANDOM, MODE_RANDOM_PARTICLES)
+            {} if self.mode in (MODE_RANDOM, MODE_RANDOM_PARTICLES,
+                                MODE_REMOVE_DUPLICATES)
             else self._parseExcludeTiltsParam(args))
 
     @staticmethod
@@ -106,7 +124,8 @@ class SubsetTsPipeline(ProcessingPipeline):
             raise Exception(
                 f"Invalid 'mode' value: {value!r}. Expected {MODE_LABELS}.")
         if mode not in (MODE_EXPLICIT_NAMES, MODE_MATCH_SET, MODE_RANDOM,
-                        MODE_RANDOM_PARTICLES, MODE_EXCLUDE_SET):
+                        MODE_RANDOM_PARTICLES, MODE_EXCLUDE_SET,
+                        MODE_REMOVE_DUPLICATES):
             raise Exception(
                 f"Invalid 'mode' value: {mode}. Expected {MODE_LABELS}.")
         return mode
@@ -130,6 +149,20 @@ class SubsetTsPipeline(ProcessingPipeline):
             raise Exception(
                 f"'{paramName}' must be a positive integer, got {count}.")
         return count
+
+    @staticmethod
+    def _parseDistance(value, paramName):
+        """ Parse a distance of Mode 5 into a float > 0, None if empty. """
+        if value is None or str(value).strip() == '':
+            return None
+        try:
+            distance = float(value)
+        except (TypeError, ValueError):
+            distance = -1
+        if distance < 0:
+            raise Exception(f"'{paramName}' must be a distance >= 0 "
+                            f"(Angstrom), got: {value!r} (Mode 5).")
+        return distance or None
 
     @staticmethod
     def _parseRandomSeed(value):
@@ -561,6 +594,9 @@ class SubsetTsPipeline(ProcessingPipeline):
             self.log(f"Randomly selected {Color.green(len(self.subsetNames))} / "
                      f"{Color.bold(len(allNames))} tomogram(s){seedMsg}.")
 
+        elif self.mode == MODE_REMOVE_DUPLICATES:
+            self._resolveDuplicates(inputStar)
+
         else:  # MODE_RANDOM_PARTICLES
             self._resolveRandomParticles(inputStar)
 
@@ -601,6 +637,50 @@ class SubsetTsPipeline(ProcessingPipeline):
                  f"{Color.bold(len(candidates))} particle(s){seedMsg}, from "
                  f"{Color.green(len(self.subsetNames))} / "
                  f"{Color.bold(len(allTomoNames))} tomogram(s).")
+
+    def _resolveDuplicates(self, inputStar):
+        """ Mode 5: keep the particles of a TomoCoordinates / TomoParticles
+        input (self.particleIndexes) not closer than self.edgeDistance to
+        the tomogram box edges and, of the others, not duplicates, computing
+        the distances between the particles of each tomogram: of those
+        within self.duplicatesDistance of each other, the one with the
+        highest score is kept, or without a score, the last one (as Relion's
+        'remove duplicates'), see coordinates_compare.remove_duplicates.
+        Every tomogram is kept (self.subsetNames). """
+        from emwrap.base.coordinates_compare import remove_duplicates, tomo_geometry
+
+        if not RelionStar.isTomoOptimisationSet(inputStar):
+            msg = ("'Remove duplicate / near-edge particles' mode is only valid "
+                   "for TomoCoordinates or TomoParticles inputs (optimisation_set "
+                   f"STAR file), got: {inputStar}")
+            self.log(Color.red(f"ERROR: {msg}"))
+            raise Exception(msg)
+
+        ptsStar = self._getParticlesStar(inputStar)
+        if not RelionStar.isTomoParticles(ptsStar):
+            raise Exception(
+                f"{ptsStar} is not a compliant tomography particles STAR file.")
+        particlesTable = StarFile.getTableFromFile(
+            RelionStar.TOMO_PARTICLES_TABLE, ptsStar)
+        # For pixel coordinates and the edges
+        tomograms = tomo_geometry(self._absPath(self._getTomogramsStar(inputStar)))
+        kept, scoreColumn, nEdge, nDup = remove_duplicates(
+            particlesTable, self.duplicatesDistance, tomograms, self.edgeDistance)
+        self.particleIndexes = set(kept)
+        self.subsetNames = self._resolveAllTomoNames(inputStar)
+        total = len(particlesTable)
+        if self.edgeDistance:
+            self.log(f"Edge distance: {Color.green(self.edgeDistance)} A, removing "
+                     f"{Color.warn(nEdge)} of {total} particles near the edges")
+        if self.duplicatesDistance:
+            self.log(f"Duplicates distance: {Color.green(self.duplicatesDistance)} A, "
+                     f"removing {Color.warn(nDup)} duplicates (kept the "
+                     + (f"highest {scoreColumn})" if scoreColumn
+                        else "last one, no score)"))
+        self.info['summary'] = {
+            'distance': self.duplicatesDistance, 'edge_distance': self.edgeDistance,
+            'particles': total, 'near_edge': nEdge, 'duplicates': nDup,
+            'kept': len(kept), 'score_column': scoreColumn}
 
     # ------------------------------------------------------------------
     # The deselection: what each subset job decides its own way.

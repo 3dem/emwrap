@@ -46,7 +46,12 @@ def duplicates(matrix, distance, scores=None):
     highest score down, a coordinate is kept and the ones within the
     distance of it are duplicates (on equal scores, the later one is kept).
     """
-    near = np.asarray(matrix) <= distance
+    return duplicates_near(np.asarray(matrix) <= distance, scores)
+
+
+def duplicates_near(near, scores=None):
+    """ duplicates() with the (n, n) bool matrix of the coordinates within
+    the distance of each other. """
     n = near.shape[0]
     if scores is None:
         return np.triu(near, k=1).any(axis=1)
@@ -60,6 +65,171 @@ def duplicates(matrix, distance, scores=None):
             dup[i] = False
     return dup
 
+
+
+def score_column(table):
+    """ The first of SCORE_COLUMNS in the particles table, None if none. """
+    return next((c for c in SCORE_COLUMNS if table.hasColumn(c)), None)
+
+
+def column(table, name, default=0.0):
+    """ Column values as a float64 array (default if missing). """
+    if table.hasColumn(name):
+        return np.array(table.getColumnValues(name), dtype=np.float64)
+    return np.full(len(table), default, dtype=np.float64)
+
+
+def tomo_positions(table, tomograms=None, scoreColumn=None):
+    """ The positions (Angstrom, from the tomogram center, with the shifts)
+    of the coordinates of a particles table, by tomogram:
+        {tomoName: (indexes (1-based rows), Nx3 float64 array, scores or None)}
+
+        pos = rlnCenteredCoordinate(X/Y/Z)Angst - rlnOrigin(X/Y/Z)Angst
+
+    tomograms (tomo_geometry) is needed for pixel coordinates
+    (rlnCoordinateX/Y/Z, in the reconstructed tomogram): times its pixel
+    size, minus half of its size. """
+    tomoNames = table.getColumnValues('rlnTomoName')
+    origin = np.stack([column(table, f'rlnOrigin{a}Angst') for a in 'XYZ'], axis=1)
+
+    if table.hasAllColumns(RelionStar.TOMO_PARTICLES_CENTERED_COORD_COLUMNS):
+        coords = np.stack([column(table, c)
+                           for c in RelionStar.TOMO_PARTICLES_CENTERED_COORD_COLUMNS],
+                          axis=1)
+    else:
+        if not tomograms:
+            raise Exception("Pixel coordinates (rlnCoordinateX/Y/Z) need the "
+                            "tomogram pixel sizes (a tomograms.star file).")
+        if missing := set(tomoNames) - set(tomograms):
+            raise Exception("Tomograms without a pixel size: "
+                            f"{', '.join(sorted(missing)[:10])}")
+        coords = np.stack([column(table, c)
+                           for c in RelionStar.TOMO_PARTICLES_PIXEL_COORD_COLUMNS],
+                          axis=1)
+        coords *= np.array([tomograms[t]['pixel_size'] for t in tomoNames])[:, None]
+        coords -= np.array([tomograms[t]['size'] for t in tomoNames]) / 2
+
+    coords -= origin
+    scores = column(table, scoreColumn) if scoreColumn else None
+
+    groups = OrderedDict()
+    for i, tomoName in enumerate(tomoNames):
+        groups.setdefault(tomoName, []).append(i)
+
+    return OrderedDict(
+        (tomoName, (np.array(rows) + 1, coords[rows],
+                    None if scores is None else scores[rows]))
+        for tomoName, rows in groups.items())
+
+
+def tomo_geometry(tomoStar):
+    """ {tomoName: {'pixel_size', 'size'}} of a tomograms.star file: the
+    pixel size of the reconstructed tomogram and its size (X, Y, Z) in
+    Angstrom (rlnTomoSize* are in tilt series pixels), None if unknown. """
+    geometry = {}
+    for row in StarFile.getTableFromFile('global', tomoStar):
+        size = None
+        if all(hasattr(row, f'rlnTomoSize{a}') for a in 'XYZ'):
+            size = (np.array([float(getattr(row, f'rlnTomoSize{a}')) for a in 'XYZ'])
+                    * float(getattr(row, 'rlnTomoTiltSeriesPixelSize', 0)))
+        geometry[row.rlnTomoName] = {'pixel_size': RelionStar.getTomoPixelSize(row),
+                                     'size': size}
+    return geometry
+
+
+def edge_distances(pos, size):
+    """ Distance (Angstrom) of each position (from the tomogram center) to
+    the nearest edge of the tomogram box (size: X, Y, Z in Angstrom),
+    negative outside of it. """
+    return (np.asarray(size) / 2 - np.abs(pos)).min(axis=1) if len(pos) else np.zeros(0)
+
+
+def near_edge(edges, edge):
+    """ The coordinates closer than edge (Angstrom) to the tomogram box
+    edges (edges: edge_distances), none without an edge (None or 0). """
+    edges = np.asarray(edges)
+    return edges < edge if edge else np.zeros(len(edges), bool)
+
+
+def distance_blocks(pos1, pos2):
+    """ Yield (rowStart, block) with the distances of a block of rows of
+    pos1 to all pos2, so memory is bounded for large tomograms. """
+    n2 = max(len(pos2), 1)
+    step = max(1, _BLOCK_SIZE // n2)
+    sq2 = np.einsum('ij,ij->i', pos2, pos2)
+    for start in range(0, len(pos1), step):
+        p1 = pos1[start:start + step]
+        sq1 = np.einsum('ij,ij->i', p1, p1)
+        # |a - b|^2 = |a|^2 + |b|^2 - 2 a.b (fast, matrix product)
+        d2 = sq1[:, None] + sq2[None, :] - 2.0 * (p1 @ pos2.T)
+        np.maximum(d2, 0.0, out=d2)  # Rounding can give tiny negatives
+        yield start, np.sqrt(d2, out=d2)
+
+
+def distance_matrix(pos1, pos2):
+    """ float32 (n1, n2) distances (Angstrom) of a tomogram. """
+    matrix = np.empty((len(pos1), len(pos2)), dtype=np.float32)
+    for start, d in distance_blocks(pos1, pos2):
+        matrix[start:start + len(d)] = d
+    return matrix
+
+
+def within_distance(pos1, pos2, distance):
+    """ (n1, n2) bool matrix of the coordinates of pos1 within the distance
+    of those of pos2 (no distance matrix kept in memory). """
+    near = np.empty((len(pos1), len(pos2)), dtype=bool)
+    for start, d in distance_blocks(pos1, pos2):
+        near[start:start + len(d)] = d <= distance
+    return near
+
+
+def tomo_edges(positions, tomograms, edge):
+    """ {tomoName: near_edge mask} of tomo_positions, with the tomogram
+    sizes of tomograms (tomo_geometry); None without an edge. """
+    if not edge:
+        return None
+    edges = {}
+    for tomo, (_, pos, _) in positions.items():
+        size = (tomograms or {}).get(tomo, {}).get('size')
+        if size is None:
+            raise Exception(f"No size of tomogram {tomo} (rlnTomoSizeX/Y/Z in "
+                            "its tomograms.star) to know its edges.")
+        edges[tomo] = near_edge(edge_distances(pos, size), edge)
+    return edges
+
+
+def remove_duplicates(table, distance=None, tomograms=None, edge=None):
+    """ The rows (0-based) of a particles table that are not closer than
+    edge (Angstrom) to the tomogram box edges, and of the others, not
+    duplicates at the distance (duplicates(), with its score if it has
+    one), computing the distances.  Returns (kept rows, score column or
+    None, near the edges, duplicates). """
+    scoreColumn = score_column(table)
+    positions = tomo_positions(table, tomograms, scoreColumn)
+    edges = tomo_edges(positions, tomograms, edge)
+    kept, nEdge, nDup = [], 0, 0
+    for tomo, (index, pos, scores) in positions.items():
+        valid = ~edges[tomo] if edges else np.ones(len(pos), bool)
+        index, pos = index[valid], pos[valid]
+        nEdge += int((~valid).sum())
+        if distance:
+            dup = duplicates_near(within_distance(pos, pos, distance),
+                                  None if scores is None else scores[valid])
+            index = index[~dup]
+            nDup += int(dup.sum())
+        kept.extend(int(i) - 1 for i in index)
+    return kept, scoreColumn, nEdge, nDup
+
+
+def cross_sets(matrix, distance):
+    """ (a_in_b, b_in_a) bool arrays of a tomogram of two sets, with the
+    (nA, nB) distance matrix: the coordinates of A with one of B within the
+    distance (A & B; the other ones are A - B), and those of B with one of A
+    (the other ones are B - A). """
+    near = np.asarray(matrix) <= distance
+    if not near.size:
+        return np.zeros(near.shape[0], bool), np.zeros(near.shape[1], bool)
+    return near.any(axis=1), near.any(axis=0)
 
 
 class CoordinatesComparePipeline(ProcessingPipeline):
@@ -83,7 +253,11 @@ class CoordinatesComparePipeline(ProcessingPipeline):
     in their particles tables ('<tomo>.index1', '<tomo>.index2') and, when
     the set is compared to itself and it has one of SCORE_COLUMNS, the
     score of its coordinates ('<tomo>.score', to keep the best of the
-    duplicates, see duplicates()).  EMhub
+    duplicates, see duplicates()).  When the tomogram sizes are known
+    (tomograms.star of an optimisation set), the distance (Angstrom) of the
+    coordinates of every tomogram of set 1 and set 2 to the tomogram box
+    edges ('<tomo>.edge1', '<tomo>.edge2'; only edge1 for the set compared
+    to itself, see edge_distances), to leave out those near the edges.  EMhub
     reads it to show the results at any distance (its 'Coordinates
     Distances' view); the maximum distance is the one it shows first.
 
@@ -141,8 +315,17 @@ class CoordinatesComparePipeline(ProcessingPipeline):
                 "STAR file (needs rlnTomoName and coordinate columns).")
 
         table = StarFile.getTableFromFile('particles', particlesStar)
-        scoreColumn = next((c for c in SCORE_COLUMNS if table.hasColumn(c)), None)
-        positions = self._positions(table, tomoStar, label, scoreColumn)
+        scoreColumn = score_column(table)
+        tomograms = (tomo_geometry(tomoStar)
+                     if tomoStar and os.path.exists(tomoStar) else None)
+        positions = self._positions(table, tomograms, label, scoreColumn)
+        # Distance of each coordinate to the tomogram box edges (if the
+        # tomogram sizes are known), for EMhub's 'Near edge' set
+        edges = {}
+        for tomo, (_, pos, _) in positions.items():
+            size = (tomograms or {}).get(tomo, {}).get('size')
+            if size is not None:
+                edges[tomo] = edge_distances(pos, size)
 
         self.log(f"{label}: {Color.cyan(inputStar)}, "
                  f"{Color.green(len(table))} coordinates in "
@@ -150,85 +333,27 @@ class CoordinatesComparePipeline(ProcessingPipeline):
                  f"{Color.cyan(scoreColumn or 'none')}")
 
         return {'size': len(table), 'scoreColumn': scoreColumn,
-                'positions': positions}
+                'positions': positions, 'edges': edges}
 
-    @staticmethod
-    def _column(table, name, default=0.0):
-        """ Column values as a float64 array (default if missing). """
-        if table.hasColumn(name):
-            return np.array(table.getColumnValues(name), dtype=np.float64)
-        return np.full(len(table), default, dtype=np.float64)
-
-    def _positions(self, table, tomoStar, label, scoreColumn):
+    def _positions(self, table, tomograms, label, scoreColumn):
         """ Return {tomoName: (indexes, Nx3 positions in Angstrom,
-        scores or None)}. """
-        tomoNames = table.getColumnValues('rlnTomoName')
-        origin = np.stack([self._column(table, f'rlnOrigin{a}Angst')
-                           for a in 'XYZ'], axis=1)
-
-        if table.hasAllColumns(RelionStar.TOMO_PARTICLES_CENTERED_COORD_COLUMNS):
-            coords = np.stack(
-                [self._column(table, c)
-                 for c in RelionStar.TOMO_PARTICLES_CENTERED_COORD_COLUMNS],
-                axis=1)
-        else:
+        scores or None)}, see tomo_positions. """
+        if (not tomograms and not table.hasAllColumns(
+                RelionStar.TOMO_PARTICLES_CENTERED_COORD_COLUMNS)):
             # Pixel coordinates (in the reconstructed tomogram), they need
             # the tomogram pixel size to be in Angstrom
-            if not tomoStar or not os.path.exists(tomoStar):
-                raise Exception(
-                    f"{label} has pixel coordinates (rlnCoordinateX/Y/Z): a "
-                    "tomograms.star file (from an optimisation_set.star) is "
-                    "needed for the tomogram pixel sizes.")
-            pixelSizes = {row.rlnTomoName: RelionStar.getTomoPixelSize(row)
-                          for row in StarFile.getTableFromFile('global', tomoStar)}
-            missing = set(tomoNames) - set(pixelSizes)
-            if missing:
-                raise Exception(
-                    f"{label}: tomograms not found in {tomoStar}: "
-                    f"{', '.join(sorted(missing)[:10])}")
-            coords = np.stack(
-                [self._column(table, c)
-                 for c in RelionStar.TOMO_PARTICLES_PIXEL_COORD_COLUMNS],
-                axis=1)
-            coords *= np.array([pixelSizes[t] for t in tomoNames])[:, None]
-
-        coords -= origin
-        scores = self._column(table, scoreColumn) if scoreColumn else None
-
-        groups = OrderedDict()
-        for i, tomoName in enumerate(tomoNames):
-            groups.setdefault(tomoName, []).append(i)
-
-        return OrderedDict(
-            (tomoName, (np.array(rows) + 1, coords[rows],
-                        None if scores is None else scores[rows]))
-            for tomoName, rows in groups.items())
+            raise Exception(
+                f"{label} has pixel coordinates (rlnCoordinateX/Y/Z): a "
+                "tomograms.star file (from an optimisation_set.star) is "
+                "needed for the tomogram pixel sizes.")
+        try:
+            return tomo_positions(table, tomograms, scoreColumn)
+        except Exception as e:
+            raise Exception(f"{label}: {e}")
 
     # ------------------------------------------------------------------
     # Distances
     # ------------------------------------------------------------------
-    @staticmethod
-    def _distanceBlocks(pos1, pos2):
-        """ Yield (rowStart, block) with the distances of a block of rows of
-        pos1 to all pos2, so memory is bounded for large tomograms. """
-        n2 = max(len(pos2), 1)
-        step = max(1, _BLOCK_SIZE // n2)
-        sq2 = np.einsum('ij,ij->i', pos2, pos2)
-        for start in range(0, len(pos1), step):
-            p1 = pos1[start:start + step]
-            sq1 = np.einsum('ij,ij->i', p1, p1)
-            # |a - b|^2 = |a|^2 + |b|^2 - 2 a.b (fast, matrix product)
-            d2 = sq1[:, None] + sq2[None, :] - 2.0 * (p1 @ pos2.T)
-            np.maximum(d2, 0.0, out=d2)  # Rounding can give tiny negatives
-            yield start, np.sqrt(d2, out=d2)
-
-    def _distanceMatrix(self, pos1, pos2):
-        """ float32 (n1, n2) distances (Angstrom) of a tomogram. """
-        matrix = np.empty((len(pos1), len(pos2)), dtype=np.float32)
-        for start, d in self._distanceBlocks(pos1, pos2):
-            matrix[start:start + len(d)] = d
-        return matrix
-
     def _withNeighbors(self, matrix, scores):
         """ Coordinates of set 1 with another one (of set 2) within the
         maximum distance, for the job summary: the duplicates when the set
@@ -266,7 +391,7 @@ class CoordinatesComparePipeline(ProcessingPipeline):
             idx2, pos2, _ = set2['positions'][tomoName]
             if not self.compareSelf:
                 scores = None
-            matrix = self._distanceMatrix(pos1, pos2)
+            matrix = distance_matrix(pos1, pos2)
             nNeighbors += self._withNeighbors(matrix, scores)
             nTomos += 1
             nCompared += matrix.size
@@ -275,6 +400,13 @@ class CoordinatesComparePipeline(ProcessingPipeline):
             npzArrays[f'{tomoName}.index2'] = idx2.astype(np.int32)
             if scores is not None:
                 npzArrays[f'{tomoName}.score'] = scores.astype(np.float32)
+        # Edge distances of every tomogram of each set (also those not in
+        # the other set)
+        for key, s in (('edge1', set1), ('edge2', set2)):
+            if key == 'edge2' and self.compareSelf:
+                break
+            for tomoName, edges in s['edges'].items():
+                npzArrays[f'{tomoName}.{key}'] = edges.astype(np.float32)
         self.log(f"Compared {Color.green(nTomos)} tomograms, "
                  f"{Color.green(nCompared)} distances in {time.time() - t0:.3f} s")
 

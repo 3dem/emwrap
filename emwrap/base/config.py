@@ -80,11 +80,6 @@ class ProcessingConfig:
             "label": "EMwrap Coordinates Compare",
             "output": "EMwrap"
         },
-        "emw-remove-duplicates": {
-            "launcher": "emwrap.base.remove_duplicates",
-            "label": "EMwrap Remove Duplicates",
-            "output": "EMwrap"
-        },
         "emw-geometry-mask": {
             "launcher": "emwrap.base.geometry_mask",
             "label": "EMwrap Geometry Mask",
