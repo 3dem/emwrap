@@ -120,12 +120,16 @@ class ProcessingConfig:
             "label": "PyTom Template Matching",
             "output": "PyTom"
         },
+        "emw-pytme": {
+            "launcher": "emwrap.pytme.pytme_pipeline",
+            "label": "pyTME Template Matching",
+            "output": "PyTME"
+        },
         "emw-warp-export_particles": {
             "launcher": "emwrap.warp.warp_export_particles",
             "label": "Warp Export Particles",
             "output": "WarpExportParticles"
         },
-        "emw-pytme": {"launcher": "emwrap.pytme", "visible": False},        
         "emw-relion-symmetrize_volume": {"launcher": "emwrap.relion.symmetrize_volume"},
         "emw-relion-mask_create": {"launcher": "emwrap.relion.mask_create"},
         "emw-relion-transform_volume": {
@@ -246,6 +250,7 @@ class ProcessingConfig:
         { "name": "warp", "prefixes": ["emw-warp"] },
         { "name": "relion", "prefixes": ["emw-relion", "relion."] },
         { "name": "pytom", "prefixes": ["emw-pytom"] },
+        { "name": "pytme", "prefixes": ["emw-pytme"] },
         { "name": "aretomo", "prefixes": ["emw-aretomo", "emw-denoiset"] },
         { "name": "spa", "prefixes": ["emw-import-movies", "emw-preprocessing", "emw-rln2d"] }
     ]

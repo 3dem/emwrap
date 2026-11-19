@@ -15,6 +15,7 @@
 # **************************************************************************
 
 from .processing_pipeline import ProcessingPipeline, launcher_banner, print_launcher
+from .picking_pipeline import PickingPipeline
 from .project_manager import ProjectManager
 from .config import ProcessingConfig
 from .job_form import JobForm, JobValidationError

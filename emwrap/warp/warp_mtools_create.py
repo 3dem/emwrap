@@ -42,6 +42,23 @@ class WarpMtoolsCreate(WarpBasePipeline):
         """Project-relative path to the Warp particles STAR under m/."""
         return f'{self.M}/{self.WARP_PARTICLES_STAR}'
 
+    def _findHalfMap(self, particles_relion, i):
+        """ Return the Relion half map matching a particles STAR file.
+
+        The final iteration (run_data.star) writes run_half1_class001_unfil.mrc,
+        while intermediate ones (run_it013_data.star) only write
+        run_it013_half1_class001.mrc. Return the first existing candidate,
+        or the first one (to report it) if none exists.
+        """
+        candidates = [
+            particles_relion.replace('_data.star', f'_half{i}_class001{suffix}.mrc')
+            for suffix in ('_unfil', '')
+        ]
+        for c in candidates:
+            if os.path.exists(self.project.join(c)):
+                return c
+        return candidates[0]
+
     @staticmethod
     def _tomogramsStarFromParticlePath(particle_path):
         """Infer a project-relative tomograms.star from a particle image path."""
@@ -394,8 +411,7 @@ class WarpMtoolsCreate(WarpBasePipeline):
         if prepared_particles_relion:
             subargs['--particles_relion'] = self._warpParticlesStarPath()
             for i in range(1, 3):
-                half = original_particles_relion.replace(
-                    '_data.star', f'_half{i}_class001_unfil.mrc')
+                half = self._findHalfMap(original_particles_relion, i)
                 if _validate(f'half{i} map', half):
                     subargs[f'--half{i}'] = self.link(half)
 
