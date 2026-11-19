@@ -36,6 +36,7 @@ from .job_form import JobForm, JobValidationError
 from .job_star import read_job_params, clear_job_star_backup
 from . import workflow_refs
 from .processing_pipeline import ProcessingPipeline
+from .job_resources import get_job_gpu_list, count_job_cpus
 from .project_data import ProjectData, PROJECT_JSON, LABELS_JSON, EMHUB_DIR
 from .project_labels import ProjectLabels
 from .project_lock import ProjectLock, read_consistent, file_signature
@@ -1054,7 +1055,7 @@ class ProjectManager(FolderManager):
     def _count_job_gpus(job_params):
         """Return the number of GPUs of a job, from Relion's native gpu_ids
         param or from the emwrap gpus param."""
-        return len(ProcessingPipeline.get_job_gpu_list(job_params))
+        return len(get_job_gpu_list(job_params))
 
     @staticmethod
     def _relionJobIsContinue(job_dir):
@@ -1154,7 +1155,7 @@ class ProjectManager(FolderManager):
         script_log = os.path.join(folder_path, 'job.log')
         gpus = self._count_job_gpus(job_params)
 
-        cpus = ProcessingPipeline.count_job_cpus(job_params)
+        cpus = count_job_cpus(job_params)
 
         gpu_type = qparams.get('gpu_type', 'any')
 
