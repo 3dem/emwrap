@@ -27,16 +27,16 @@ from emwrap.base import ProcessingPipeline
 class PyTME:
     """ pyTME wrapper to pick one tomogram in a batch folder.
 
-    It runs (pyTME 0.3.x executables, as provided by SBGrid):
-        match_template: template matching, writes the scores (pickle)
-        postprocess: peak calling, once per output format:
+    It runs (pyTME >= 0.3.6, the 'pytme' command):
+        pytme match: template matching, writes the scores (pickle)
+        pytme postprocess: peak calling, once per output format:
             relion5 -> <tsName>_particles_relion5.star (centered Angstroms)
             relion4 -> <tsName>_particles_default.star (voxel coordinates)
             orientations -> <tsName>_orientations.tsv
 
     Units of pyTME arguments: --defocus and --spherical-aberration are in
     Angstrom, --acceleration-voltage in kV, --min-distance and
-    --min-boundary-distance of postprocess in voxels of the tomogram.
+    --min-boundary-distance of 'pytme postprocess' in voxels of the tomogram.
     """
 
     # CTF models: no CTF, a single defocus (mean of the tilts) or per-tilt
@@ -77,17 +77,21 @@ class PyTME:
         tomogram = batch.link(batch['tomogram'], absolute=True)
         pickleFn = f'output/{tsName}_match.pickle'
 
+        template = batch.link(matchArgs['template'], absolute=True)
+        mask = matchArgs.get('template-mask', None)
+        mask = batch.link(mask, absolute=True) if mask else None
+
         args = Args({
-            'match_template': '',
+            'pytme': 'match',
             '-m': tomogram,
-            '-i': batch.link(matchArgs['template'], absolute=True),
+            '-i': template,
             '-o': pickleFn,
             '-s': matchArgs.get('score', 'FLCSphericalMask') or 'FLCSphericalMask',
             # The command runs inside the batch folder
             '--temp-directory': os.path.abspath(batch.path),
         })
-        if mask := matchArgs.get('template-mask', None):
-            args['-I'] = batch.link(mask, absolute=True)
+        if mask:
+            args['-I'] = mask
 
         if angular := matchArgs.get('angular-sampling', None):
             args['-a'] = angular
@@ -138,7 +142,7 @@ class PyTME:
                 args['--no-flip-phase'] = ''
 
         if extra_args_str := matchArgs.get('extra_args', ''):
-            # Free-form extra arguments for match_template. Any option
+            # Free-form extra arguments for 'pytme match'. Any option
             # already set above (by its own form field or computed from the
             # acquisition/batch data) is rejected, to avoid confusion.
             extra = Args.fromString(extra_args_str)
@@ -175,7 +179,7 @@ class PyTME:
         # Peak calling, once for each output format
         pixelSize = float(self.acq.pixel_size)
         ppBase = Args({
-            'postprocess': '',
+            'pytme': 'postprocess',
             '--input-file': pickleFn,
             '--peak-caller': ppArgs.get('peak-caller', 'PeakCallerMaximumFilter')
                              or 'PeakCallerMaximumFilter',
@@ -204,7 +208,7 @@ class PyTME:
             outFn = f'output/{prefix}.{ext}'
             returncode = _call(label, cmdArgs)
             if returncode and not batch.error and self._noPeaks(batch):
-                # postprocess exits with an error when no peaks are found,
+                # 'pytme postprocess' exits with an error when no peaks are found,
                 # this tomogram is picked with 0 particles
                 print(f">>> {label}: no peaks found, writing empty {outFn}")
                 self._writeEmpty(batch.join(outFn), fmt)
@@ -233,7 +237,7 @@ class PyTME:
         return any('Found no peaks' in line for line in lines)
 
     def _writeEmpty(self, fn, fmt):
-        """ Write the output of postprocess with no particles. """
+        """ Write the output of 'pytme postprocess' with no particles. """
         columns = {
             'relion5': ['rlnCenteredCoordinateXAngst', 'rlnCenteredCoordinateYAngst',
                         'rlnCenteredCoordinateZAngst'],
@@ -290,8 +294,7 @@ class PyTME:
 
     def _writeCtf(self, batch, ctf):
         """ Per-tilt CTF file for --ctf-file, as a STOPGAP wedge list (the
-        only STAR layout in pyTME 0.3.3 with the tilt angles: its RELION
-        'data_' reader has none and match_template fails). The units are
+        STAR layout with the tilt angles read by pyTME). The units are
         the STOPGAP ones: defocus in um, spherical aberration in mm and
         voltage in kV. It has one defocus per tilt, so the astigmatism is
         not used (mean of defocus U and V). """

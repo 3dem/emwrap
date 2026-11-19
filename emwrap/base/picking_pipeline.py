@@ -464,7 +464,9 @@ class PickingPipeline(ProcessingPipeline):
         monitor = StarMonitor(self.inTomoStar, 'global',
                               lambda row: row.rlnTomoName,
                               timeout=self.wait['timeout'],
-                              blacklist=blacklist)
+                              wait=self.wait['sleep'],
+                              blacklist=blacklist,
+                              tableKwargs={'guessType': False})
 
         # This will keep monitor the star files for new tomograms until timed out.
         for row in monitor.newItems():
