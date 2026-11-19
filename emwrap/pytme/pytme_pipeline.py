@@ -14,19 +14,16 @@
 # *
 # **************************************************************************
 
-from emwrap.base import ProcessingPipeline
-from emwrap.pytom.pytom_pipeline import PyTomPipeline
+from emwrap.base import ProcessingPipeline, PickingPipeline
 
 from .pytme import PyTME
 
 
-class PyTMEPipeline(PyTomPipeline):
+class PyTMEPipeline(PickingPipeline):
     """ pyTME template matching in a set of tomograms.
 
-    Same inputs, outputs and bookkeeping as emw-pytom (see PyTomPipeline):
-    tomograms.star (with rlnCoordinatesMetadata and rlnParticleNumber),
-    particles.star (relion5 centered coordinates, rlnLCCmax is the pyTME
-    score), optimisation_set.star and failed_tomograms.star, with the
+    Same inputs, outputs and bookkeeping as emw-pytom (see PickingPipeline),
+    with the pyTME score as rlnLCCmax in particles.star and the
     per-tomogram pyTME outputs in Coordinates/.
     """
     name = 'emw-pytme'
@@ -45,7 +42,7 @@ class PyTMEPipeline(PyTomPipeline):
         """ Without GPUs, pyTME runs on CPU (in a single thread). """
         if not str(gpus or '').strip():
             return '' if as_string else []
-        return PyTomPipeline.get_gpu_list(gpus, as_string=as_string)
+        return PickingPipeline.get_gpu_list(gpus, as_string=as_string)
 
     def _gpuGroups(self):
         """ GPUs used by each processing thread (one tomogram at a time),
@@ -69,14 +66,14 @@ class PyTMEPipeline(PyTomPipeline):
 
     def prerun(self):
         self._validateTemplate()
-        PyTomPipeline.prerun(self)
+        PickingPipeline.prerun(self)
 
     def _validateTemplate(self):
         """ pyTME only warns if the template and tomogram sampling rates
         differ, but the template must be at the tomograms pixel size. """
         from emwrap.base.wizards import read_volume_header
 
-        args = self._pytom_args['pytme']
+        args = self._programArgs['pytme']
         tomoPs = float(self.acq.pixel_size)
         for key in ['template', 'template-mask']:
             if fn := args.get(key, None):
