@@ -15,6 +15,7 @@
 # **************************************************************************
 
 import os
+import re
 import sys
 import shlex
 import json
@@ -28,6 +29,7 @@ from datetime import datetime
 
 from emtools.utils import FolderManager, Process, Color, Path, Timer, Pretty
 from emtools.jobs import BatchManager, Workflow
+from emtools.hpc import ClusterJob
 from emtools.metadata import Table, StarFile, RelionStar
 
 from .config import ProcessingConfig
@@ -35,6 +37,7 @@ from .job_form import JobForm, JobValidationError
 from .job_star import read_job_params, clear_job_star_backup
 from . import workflow_refs
 from .processing_pipeline import ProcessingPipeline
+from .job_resources import get_job_gpu_list, count_job_cpus
 from .project_data import ProjectData, PROJECT_JSON, LABELS_JSON, EMHUB_DIR
 from .project_labels import ProjectLabels
 from .project_lock import ProjectLock, read_consistent, file_signature
@@ -822,28 +825,61 @@ class ProjectManager(FolderManager):
         self.runJob(job_id, wait=False, update=True)
         return True
 
+    def getJobQueue(self, jobId):
+        """ Name and config of the queue used by a job (from its params), or
+        (name, None) if it was not submitted to a configured queue. """
+        qname = self._readJobParams(self._getJob(jobId)).get('queue.name', 'NO-NAME')
+        if qname in ('', 'None', 'NO-NAME', 'NO-QUEUE'):
+            return qname, None
+        return qname, ProcessingConfig.get_queue(qname)
+
+    def _readClusterJobId(self, jobId):
+        """ Cluster job id of a job submitted to a queue (from its job.id). """
+        with open(self.join(jobId, self.JOB_CLUSTER_ID_FILE)) as f:
+            return f.readline().strip()
+
+    def canInspectJob(self, jobId):
+        """ True if the job has a cluster job id and its queue defines an
+        'inspect' command (see inspectJob). """
+        if not self.exists(jobId, self.JOB_CLUSTER_ID_FILE):
+            return False
+        _, queue = self.getJobQueue(jobId)
+        return bool(queue and queue.get('inspect'))
+
+    def inspectJob(self, jobId, timeout=90):
+        """ Run the 'inspect' command of the job's queue for its cluster job,
+        e.g. "inspect": "$SCRIPTS/lsf_inspect_job.sh {job_id} --json"
+        (see emtools.hpc.ClusterJob.inspect), adding the queue name. """
+        cluster_job_id = self._readClusterJobId(jobId)
+        qname, queue = self.getJobQueue(jobId)
+        if not queue or not queue.get('inspect'):
+            raise Exception(f"No 'inspect' command configured for queue '{qname}'.")
+        try:
+            result = ClusterJob.inspect(queue['inspect'], cluster_job_id, timeout=timeout)
+        except Exception as e:
+            raise Exception(f"Inspecting job {jobId}: {e}")
+        return {'queue': qname, **result}
+
     def _stopClusterJob(self, jobId):
         """Cancel a job that was submitted to a cluster queue."""
-        with open(self.join(jobId, self.JOB_CLUSTER_ID_FILE)) as f:
-            cluster_job_id = f.readline().strip()
-
-        job_params = self._readJobParams(self._getJob(jobId))
-        qname = job_params.get('queue.name', 'NO-NAME')
+        qname, queue = self.getJobQueue(jobId)
         if qname == 'NO-NAME':
             raise Exception(f"No queue name found for stopping job {jobId}.")
-
-        if queue := ProcessingConfig.get_queue(qname):
-            cancelCmd = queue['cancel'].format(job_id=cluster_job_id)
-        else:
+        if not queue:
             raise Exception(f"Queue {qname} not found in config for stopping job {jobId}.")
 
         scriptLog = self.join(jobId, 'job.log')
         try:
-            subprocess.run(shlex.split(cancelCmd), check=True, capture_output=True, text=True)
-            self._log(f"Stopping CLUSTER job, {cancelCmd}", jobFile=scriptLog, flush=True)
-        except subprocess.CalledProcessError as e:
+            p = ClusterJob.run(queue['cancel'], self._readClusterJobId(jobId))
+        except Exception as e:
             self._log("ERROR: Stopping CLUSTER job failed", jobFile=scriptLog)
-            self._log(f"  Error: '{e.stderr.rstrip()}'", jobFile=scriptLog)
+            self._log(f"  Error: '{e}'", jobFile=scriptLog)
+            return
+        if p.returncode == 0:
+            self._log(f"Stopping CLUSTER job, {shlex.join(p.args)}", jobFile=scriptLog, flush=True)
+        else:
+            self._log("ERROR: Stopping CLUSTER job failed", jobFile=scriptLog)
+            self._log(f"  Error: '{p.stderr.rstrip()}'", jobFile=scriptLog)
 
     def _stopLocalJob(self, jobId):
         """Kill a locally launched job using its recorded root process id."""
@@ -998,22 +1034,7 @@ class ProjectManager(FolderManager):
     def _count_job_gpus(job_params):
         """Return the number of GPUs of a job, from Relion's native gpu_ids
         param or from the emwrap gpus param."""
-        gpu_ids = job_params.get('gpu_ids')
-        if gpu_ids is not None and str(gpu_ids).strip():
-            return ProjectManager._count_relion_gpus(gpu_ids)
-
-        return ProcessingPipeline.count_gpus(job_params.get('gpus', ''))
-
-    @staticmethod
-    def _count_relion_gpus(gpu_ids):
-        """Return the number of different GPU ids in Relion's --gpu syntax,
-        where ':' separates MPI processes and ',' threads (e.g. "0,1:0,1" -> 2)."""
-        ids = set()
-        for mpi_part in str(gpu_ids).split(':'):
-            for token in mpi_part.split(','):
-                if t := token.strip():
-                    ids.add(int(t))
-        return len(ids)
+        return len(get_job_gpu_list(job_params))
 
     @staticmethod
     def _relionJobIsContinue(job_dir):
@@ -1113,19 +1134,7 @@ class ProjectManager(FolderManager):
         script_log = os.path.join(folder_path, 'job.log')
         gpus = self._count_job_gpus(job_params)
 
-        def _load_cpus(gpus):
-            mpi, threads = 1, 1
-            if 'nr_mpi' in job_params or 'nr_threads' in job_params:
-                mpi = int(job_params.get('nr_mpi', 1))
-                threads = int(job_params.get('nr_threads', 1))
-            elif cpus_str := job_params.get('cpus', ''):
-                if 'x' in cpus_str:
-                    mpi, threads = map(int, cpus_str.split('x'))
-                else:
-                    mpi, threads = int(cpus_str), 1
-            return mpi * threads
-
-        cpus = _load_cpus(gpus)
+        cpus = count_job_cpus(job_params)
 
         gpu_type = qparams.get('gpu_type', 'any')
 

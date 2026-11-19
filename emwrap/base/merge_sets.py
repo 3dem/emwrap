@@ -18,22 +18,89 @@
 import json
 import os
 
+import numpy as np
+
+from collections import OrderedDict
+
 from emtools.utils import Color
 from emtools.metadata import StarFile, Table, RelionStar
 
 from emwrap.base import ProcessingPipeline
+from emwrap.base.wizards import to_bool, to_float
 from emwrap.base.job_form import _parse_multi_pointer_param_value
 from emwrap.base.subset_ts import OUTPUT_NODE_LABELS
 
 
+# Parts of the particles of merged sets (exclude_parts), with an overlap
+# distance: 'overlap', the ones in more than one set, and 'set<N>', the ones
+# only in the N-th set (1-based)
+PART_OVERLAP = 'overlap'
+
+# Particle columns written as 0 for a set without them (common_columns)
+ORIGIN_COLUMNS = ('rlnOriginXAngst', 'rlnOriginYAngst', 'rlnOriginZAngst')
+
+
 class MergeSetsPipeline(ProcessingPipeline):
-    """Merge multiple tomography STAR sets of the same type into one output set."""
+    """Merge multiple tomography STAR sets of the same type into one output set.
+
+    Particle / coordinate sets (optimisation sets) can be merged without
+    their overlapping particles ('overlap_distance', Angstrom): a particle
+    within the distance of one of an earlier set (same tomogram, positions
+    with the shifts) is not added, the earlier one is.  The particles are
+    then in parts, per tomogram: 'overlap' (in more than one set, from the
+    first one) and 'set<N>' (only in the N-th set); 'exclude_parts' leaves
+    some of them out (rows with 'tomoName', '*' for all, and 'parts').  With
+    two sets A and B: set1 is A - B, set2 is B - A and overlap is A & B (as
+    EMhub's 'Coordinates Distances' view of emw-coordinates-compare shows
+    them, and merges them with its 'Merge' button).
+
+    'edge_distance' (Angstrom) leaves out the particles closer than it to
+    the tomogram box edges (before the overlaps).
+
+    'common_columns' writes the particle columns of all sets (instead of
+    requiring the same ones; a missing origin is 0), e.g. to merge picked
+    coordinates with extracted particles (a TomoCoordinates set).
+    """
 
     name = 'emw-merge-sets'
 
     def __init__(self, args, output):
         ProcessingPipeline.__init__(self, args, output)
         self.inputSets = self._parseInputSets(args.get('input_sets'))
+        self.overlapDistance = to_float(args.get('overlap_distance'))
+        if self.overlapDistance is not None and self.overlapDistance <= 0:
+            self.overlapDistance = None
+        self.excludeParts = self._parseExcludeParts(args.get('exclude_parts'))
+        if self.excludeParts and not self.overlapDistance:
+            raise Exception("'exclude_parts' needs an 'overlap_distance'.")
+        self.commonColumns = to_bool(args.get('common_columns', False))
+        self.edgeDistance = to_float(args.get('edge_distance'))
+        if self.edgeDistance is not None and self.edgeDistance <= 0:
+            self.edgeDistance = None
+
+    def _parseExcludeParts(self, raw):
+        """ The 'exclude_parts' TableParam (rows with 'tomoName', '*' for
+        every tomogram, and 'parts': set<N> or overlap, separated by spaces
+        or commas) as {(tomoName, part)}. """
+        if isinstance(raw, str):
+            from emwrap.base.job_form import _parse_table_param_value
+            raw = _parse_table_param_value(raw) if raw.strip() else []
+        nSets = len(self.inputSets)
+        valid = {PART_OVERLAP} | {f'set{i}' for i in range(1, nSets + 1)}
+        exclude = set()
+        for row in raw if isinstance(raw, list) else []:
+            if not isinstance(row, dict):
+                continue
+            tomoName = str(row.get('tomoName', '') or '').strip()
+            parts = str(row.get('parts', '') or '').replace(',', ' ').split()
+            if not tomoName or not parts:
+                continue
+            for part in parts:
+                if part not in valid:
+                    raise Exception(f"Invalid part {part!r} of {tomoName} in "
+                                    f"'exclude_parts': one of {', '.join(sorted(valid))}")
+                exclude.add((tomoName, part))
+        return exclude
 
     @staticmethod
     def _parseInputSets(rawValue):
@@ -336,7 +403,7 @@ class MergeSetsPipeline(ProcessingPipeline):
         return outputStar, len(merged), skipped
 
     @staticmethod
-    def _mergeGeneralTables(particlesStars, tablesList):
+    def _mergeGeneralTables(particlesStars, tablesList, strict=True):
         """ Return the 'general' table shared by all particles STAR files (or None).
 
         The 'general' block holds set-level flags such as rlnTomoSubTomosAre2DStacks,
@@ -350,19 +417,27 @@ class MergeSetsPipeline(ProcessingPipeline):
             if refStar is None:
                 refTable, refValues, refStar = generalTable, values, particlesStar
             elif values != refValues:
+                if not strict:  # Only if the same in every set
+                    return None
                 raise Exception(
                     f"Incompatible 'general' table in {particlesStar} "
                     f"({values}) vs {refStar} ({refValues})."
                 )
         return refTable
 
-    def _mergeParticlesTables(self, particlesStars):
+    def _mergeParticlesTables(self, particlesStars, rowFilters=None,
+                              dedup=True, columns=None, optics=True):
         """Merge particles.star files, renumbering optics groups and deduplicating rows.
 
         Optics groups are renumbered consecutively per input set. Group names are
         kept unless they clash with a name already used by a previous input
         (e.g. every WarpExport job names its groups opticsGroup1..N), in which
         case the group is renamed to opticsGroup<newId>.
+
+        Options of subclasses (emw-coordinates-merge): rowFilters, per input,
+        the rows (0-based) to keep (None: all); dedup=False keeps every row;
+        columns, the particle columns written (those missing in an input
+        are 0, e.g. its origin); optics=False drops the optics tables.
         """
         mergedParticles = None
         mergedOptics = None
@@ -370,9 +445,11 @@ class MergeSetsPipeline(ProcessingPipeline):
         skipped = 0
         nextOpticsGroupId = 0
         usedOpticsNames = set()
+        usedInputs = []
 
         tablesList = [StarFile.getTablesDict(p) for p in particlesStars]
-        generalTable = self._mergeGeneralTables(particlesStars, tablesList)
+        generalTable = self._mergeGeneralTables(particlesStars, tablesList,
+                                                strict=not columns)
 
         for particlesStar, tables in zip(particlesStars, tablesList):
             particlesTable = tables.get('particles')
@@ -382,11 +459,11 @@ class MergeSetsPipeline(ProcessingPipeline):
                 )
 
             if mergedParticles is None:
-                mergedParticles = Table(particlesTable.getColumnNames())
+                mergedParticles = Table(columns or particlesTable.getColumnNames())
 
             # Optics group id mapping for this input only
             opticsIdMap = {}
-            opticsTable = tables.get('optics')
+            opticsTable = tables.get('optics') if optics else None
             if opticsTable:
                 if mergedOptics is None:
                     mergedOptics = Table(opticsTable.getColumnNames())
@@ -408,13 +485,20 @@ class MergeSetsPipeline(ProcessingPipeline):
                     rowValues['rlnOpticsGroupName'] = newName
                     mergedOptics.addRowValues(**rowValues)
 
-            for row in particlesTable:
-                key = self._particleRowKey(row, particlesTable)
-                if key in seenParticleKeys:
-                    skipped += 1
+            keep = rowFilters[len(usedInputs)] if rowFilters else None
+            usedInputs.append(particlesStar)
+            for i, row in enumerate(particlesTable):
+                if keep is not None and i not in keep:
                     continue
-                seenParticleKeys.add(key)
+                if dedup:
+                    key = self._particleRowKey(row, particlesTable)
+                    if key in seenParticleKeys:
+                        skipped += 1
+                        continue
+                    seenParticleKeys.add(key)
                 rowValues = row._asdict()
+                if columns:
+                    rowValues = {c: rowValues.get(c, 0) for c in columns}
                 if mergedOptics and 'rlnOpticsGroup' in rowValues:
                     ogId = int(rowValues['rlnOpticsGroup'])
                     if ogId not in opticsIdMap:
@@ -445,13 +529,15 @@ class MergeSetsPipeline(ProcessingPipeline):
 
         return outputStar, len(mergedParticles), skipped
 
-    def _mergeOptimisationInputs(self, classifiedInputs, inputType):
-        """Merge optimisation_set inputs into tomograms, particles, and optimisation_set STAR files."""
+    def _mergeOptimisationInputs(self, classifiedInputs, inputType, **particlesArgs):
+        """Merge optimisation_set inputs into tomograms, particles, and
+        optimisation_set STAR files (particlesArgs: options of
+        _mergeParticlesTables). """
         tomoStars = [item['tomogramsStar'] for item in classifiedInputs]
         particlesStars = [item['particlesStar'] for item in classifiedInputs]
 
         self._mergeTomogramsForOptimisation(tomoStars)
-        self._mergeParticlesTables(particlesStars)
+        self._mergeParticlesTables(particlesStars, **particlesArgs)
 
         outOptimisationStar = self.join('optimisation_set.star')
         optValues = {
@@ -466,6 +552,131 @@ class MergeSetsPipeline(ProcessingPipeline):
         self.writeRelionOutputNodes(
             [[self.fixOutputPath('optimisation_set.star'), outputNode]])
         return len(StarFile.getTableFromFile('particles', self.join('particles.star')))
+
+    # ------------------------------------------------------------------
+    # Overlaps and common columns of particle sets
+    # ------------------------------------------------------------------
+    def _overlapRows(self, classified):
+        """ The rows (0-based) of each particles set to merge: not closer
+        than the edge distance to the tomogram edges and, of the others,
+        without the overlapping particles and the excluded parts; logs them. """
+        from emwrap.base.coordinates_compare import (
+            tomo_positions, tomo_geometry, tomo_edges, within_distance)
+
+        positions = []
+        nEdge = 0
+        for item in classified:
+            table = StarFile.getTableFromFile('particles', item['particlesStar'])
+            tomograms = tomo_geometry(item['tomogramsStar'])
+            pos = tomo_positions(table, tomograms)
+            if edges := tomo_edges(pos, tomograms, self.edgeDistance):
+                # Only the particles not near the edges (rows kept)
+                for tomo, near in edges.items():
+                    index, p, scores = pos[tomo]
+                    pos[tomo] = (index[~near], p[~near], None)
+                    nEdge += int(near.sum())
+            positions.append(pos)
+        if not self.overlapDistance:
+            # Only the edges: every particle left
+            return [{int(i) - 1 for p in pos.values() for i in p[0]}
+                    for pos in positions], nEdge
+
+        n = len(positions)
+        keep = [set() for _ in range(n)]
+        counts = OrderedDict((f'set{i + 1}', 0) for i in range(n))
+        counts[PART_OVERLAP] = 0
+        tomoNames = OrderedDict.fromkeys(t for p in positions for t in p)
+        for tomo in tomoNames:
+            sets = [p.get(tomo) for p in positions]
+            nearEarlier = [None if s is None else np.zeros(len(s[0]), bool) for s in sets]
+            nearLater = [None if s is None else np.zeros(len(s[0]), bool) for s in sets]
+            for j in range(n):
+                for k in range(j + 1, n):
+                    if sets[j] is None or sets[k] is None:
+                        continue
+                    near = within_distance(sets[j][1], sets[k][1], self.overlapDistance)
+                    if near.size:
+                        nearLater[j] |= near.any(axis=1)
+                        nearEarlier[k] |= near.any(axis=0)
+            for k, s in enumerate(sets):
+                if s is None:
+                    continue
+                rows = s[0] - 1  # 0-based
+                # Near an earlier set: that one is added instead
+                for part, mask in ((f'set{k + 1}', ~nearEarlier[k] & ~nearLater[k]),
+                                   (PART_OVERLAP, ~nearEarlier[k] & nearLater[k])):
+                    if ((tomo, part) in self.excludeParts
+                            or ('*', part) in self.excludeParts):
+                        continue
+                    keep[k].update(int(i) for i in rows[mask])
+                    counts[part] += int(mask.sum())
+
+        self.log(f"Overlap distance: {Color.green(self.overlapDistance)} A, merged: "
+                 + ', '.join(f"{part} {Color.green(c)}" for part, c in counts.items()))
+        if self.excludeParts:
+            self.log("Excluded parts: " + ' '.join(
+                f"{t}:{p}" for t, p in sorted(self.excludeParts)))
+        self.info['summary'] = dict(counts, overlap_distance=self.overlapDistance)
+        return keep, nEdge
+
+    def _commonColumns(self, particlesStars):
+        """ (columns, optics) of common_columns: the particle columns of all
+        sets (and the origin), and whether all have optics tables (else they
+        are not written). """
+        tables = [StarFile.getTablesDict(p) for p in particlesStars]
+        cols = [t['particles'].getColumnNames() for t in tables]
+        optics = all(t.get('optics') for t in tables)
+        allCols = list(OrderedDict.fromkeys(c for cs in cols for c in cs))
+        columns = [c for c in allCols
+                   if c in ORIGIN_COLUMNS or all(c in cs for cs in cols)]
+        if not optics and 'rlnOpticsGroup' in columns:
+            columns.remove('rlnOpticsGroup')
+        coords = [c for c in RelionStar.TOMO_PARTICLES_CENTERED_COORD_COLUMNS
+                  if c not in columns]
+        pixel = [c for c in RelionStar.TOMO_PARTICLES_PIXEL_COORD_COLUMNS
+                 if c not in columns]
+        if coords and pixel:
+            raise Exception("The sets do not have the same coordinate columns.")
+        if dropped := [c for c in allCols if c not in columns]:
+            self.log(Color.warn("Columns not in every set, not written: "
+                                f"{', '.join(dropped)}"))
+        if not optics and any(t.get('optics') for t in tables):
+            self.log(Color.warn("Optics tables not in every set, not written"))
+        return columns, optics
+
+    def _mergeParticleSets(self, classified):
+        """ Merge optimisation sets with the overlap and columns options;
+        returns (count, output type). """
+        particlesStars = [item['particlesStar'] for item in classified]
+        args = {}
+        types = {item['inputType'] for item in classified}
+        if self.commonColumns:
+            columns, optics = self._commonColumns(particlesStars)
+            args.update(columns=columns, optics=optics)
+            tomoStars = [item['tomogramsStar'] for item in classified]
+            self._validateGlobalTables(tomoStars)
+            self._validateTomogramPerTomoTables(tomoStars)
+            # Particles only if all are (their columns are then kept)
+            inputType = types.pop() if len(types) == 1 else 'TomoCoordinates'
+        else:
+            if len(types) != 1:
+                raise Exception("All input sets must have the same type (or use "
+                                f"'common_columns'). Found: {', '.join(sorted(types))}.")
+            inputType = types.pop()
+            self._validateMergeInputs(classified, inputType, 'optimisation')
+        if self.overlapDistance or self.edgeDistance:
+            rowFilters, nEdge = self._overlapRows(classified)
+            args.update(rowFilters=rowFilters)
+            if self.edgeDistance:
+                self.log(f"Edge distance: {Color.green(self.edgeDistance)} A, "
+                         f"{Color.warn(nEdge)} particles near the edges left out")
+                self.info.setdefault('summary', {}).update(
+                    edge_distance=self.edgeDistance, near_edge=nEdge)
+            if self.overlapDistance:
+                # The overlaps replace the deduplication by particle name,
+                # the names of particles of different sets may be the same
+                args.update(dedup=False)
+        return self._mergeOptimisationInputs(classified, inputType, **args), inputType
 
     def prerun(self):
         """Validate inputs, merge sets of the same type, and register Relion output nodes."""
@@ -484,6 +695,15 @@ class MergeSetsPipeline(ProcessingPipeline):
 
         classified = [self._classifyInput(inputStar) for inputStar in self.inputSets]
         inputTypes = {item['inputType'] for item in classified}
+        if self.overlapDistance or self.edgeDistance or self.commonColumns:
+            if not all(item['kind'] == 'optimisation' for item in classified):
+                raise Exception("'overlap_distance', 'edge_distance' and "
+                                "'common_columns' are only for TomoParticles / "
+                                "TomoCoordinates sets.")
+            count, inputType = self._mergeParticleSets(classified)
+            self.writeInfo()
+            self.log(f"Created merged {inputType} set with {Color.green(count)} item(s).")
+            return
         if len(inputTypes) != 1:
             raise Exception(
                 "All input sets must have the same type. Found: "

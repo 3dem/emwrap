@@ -30,6 +30,13 @@
                     "help": "This is the nominal value for the tilt-axis orientation to the Y-axis (positive is CCW from Y))"
                 },
                 {
+                    "name": "min_tilts",
+                    "label": "Min number of tilts",
+                    "paramClass": "IntParam",
+                    "default": 1,
+                    "help": "Tilt images listed in the mdoc that are missing or cannot be read (corrupted, or with different dimensions) are skipped and written to bad_tilts.star, with one table per tilt series (named by the tomoName). Tilt series with fewer good tilts than this value are not included in the output tilt_series.star."
+                },
+                {
                     "label": "Acquisition",
                     "paramClass": "Group",
                     "params": [

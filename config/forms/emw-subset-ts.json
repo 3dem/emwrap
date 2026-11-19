@@ -1,7 +1,7 @@
 {
     "name": "emw-subset-ts",
     "label": "EMwrap Subset TS",
-    "help": "Create a subset of a tilt-series, tomogram, or particle/coordinate set by selecting tomogram names (rlnTomoName). The subset can be picked in five ways (see 'Selection mode' below): an explicit list of names, matching or excluding names present in a second set, a random selection of N tomograms, or (for TomoCoordinates / TomoParticles) a random selection of M particles. Optionally, individual tilts can also be excluded from specific tomograms' tilt-series metadata.",
+    "help": "Create a subset of a tilt-series, tomogram, or particle/coordinate set by selecting tomogram names (rlnTomoName). The subset can be picked in six ways (see 'Selection mode' below): an explicit list of names, matching or excluding names present in a second set, a random selection of N tomograms, or (for TomoCoordinates / TomoParticles) a random selection of M particles or removing their duplicates. Optionally, individual tilts can also be excluded from specific tomograms' tilt-series metadata.",
     "sections": [
         {
             "label": "Input",
@@ -22,11 +22,12 @@
                         "1": "Match names from a second set",
                         "2": "Random selection of N tomograms",
                         "3": "Random selection of M particles",
-                        "4": "Exclude names from a second set"
+                        "4": "Exclude names from a second set",
+                        "5": "Remove duplicate / near-edge particles"
                     },
                     "default": "0",
-                    "order": ["0", "1", "4", "2", "3"],
-                    "help": "How to choose the rlnTomoName values to keep:\n\n*Explicit tomogram names list*: provide the names directly in 'Subset Tomo Names' below.\n*Match names from a second set*: keep the tomograms from the input set whose rlnTomoName is also present in another STAR file (matched by the 'rlnTomoName' column).\n*Exclude names from a second set*: keep only tomograms from the input set whose rlnTomoName does not appear in another STAR file.\n*Random selection of N tomograms*: randomly pick N tomograms out of the ones present in the input set.\n*Random selection of M particles*: only for TomoCoordinates / TomoParticles inputs; randomly pick M particles and keep only them and the tomograms they belong to."
+                    "order": ["0", "1", "4", "2", "3", "5"],
+                    "help": "How to choose the rlnTomoName values to keep:\n\n*Explicit tomogram names list*: provide the names directly in 'Subset Tomo Names' below.\n*Match names from a second set*: keep the tomograms from the input set whose rlnTomoName is also present in another STAR file (matched by the 'rlnTomoName' column).\n*Exclude names from a second set*: keep only tomograms from the input set whose rlnTomoName does not appear in another STAR file.\n*Random selection of N tomograms*: randomly pick N tomograms out of the ones present in the input set.\n*Random selection of M particles*: only for TomoCoordinates / TomoParticles inputs; randomly pick M particles and keep only them and the tomograms they belong to.\n*Remove duplicate / near-edge particles*: only for TomoCoordinates / TomoParticles inputs; the particles closer than 'Edge distance' to the tomogram box edges are removed and, of the others, of the particles of a tomogram closer than 'Duplicates distance' to each other, the one with the highest score is kept (rlnLCCmax, rlnAutopickFigureOfMerit, rlnScore, rlnConfidence or rlnMaxValueProbDistribution, the first one in the set), or the last one without a score, as Relion's 'remove duplicates'. The distances are computed by the job (positions in Angstrom, with the shifts). Every tomogram is kept."
                 },
                 {
                     "name": "subset_tomo_names",
@@ -73,6 +74,22 @@
                     "condition": "mode == 2 or mode == 3",
                     "allowsEmpty": true,
                     "help": "Optional seed for the random selection, so the same subset can be reproduced across runs. Leave empty to select a different random subset each time."
+                },
+                {
+                    "name": "subset_duplicates_distance",
+                    "label": "Duplicates distance (A)",
+                    "paramClass": "FloatParam",
+                    "condition": "mode == 5",
+                    "help": "Particles of the same tomogram closer than this distance (Angstrom) are duplicates (empty: none): only the one with the highest score (or the last one) is kept. The 'Coordinates Distances' view of an emw-coordinates-compare job shows the duplicates at any distance, and its 'Remove duplicates' button launches this mode.",
+                    "allowsEmpty": true
+                },
+                {
+                    "name": "subset_edge_distance",
+                    "label": "Edge distance (A)",
+                    "paramClass": "FloatParam",
+                    "condition": "mode == 5",
+                    "allowsEmpty": true,
+                    "help": "Particles closer than this distance (Angstrom) to the edges of the tomogram box (X, Y and Z; positions with the shifts, sizes from the tomograms.star) are removed, before the duplicates (empty: none). The 'Coordinates Distances' view of an emw-coordinates-compare job shows them at any distance."
                 },
                 {
                     "name": "exclude_tilts",

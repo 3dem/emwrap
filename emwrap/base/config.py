@@ -75,6 +75,16 @@ class ProcessingConfig:
             "label": "EMwrap Merge Sets",
             "output": "EMwrap"
         },
+        "emw-coordinates-compare": {
+            "launcher": "emwrap.base.coordinates_compare",
+            "label": "EMwrap Coordinates Compare",
+            "output": "EMwrap"
+        },
+        "emw-geometry-mask": {
+            "launcher": "emwrap.base.geometry_mask",
+            "label": "EMwrap Geometry Mask",
+            "output": "GeometryMask"
+        },
         "emw-warp-mctf": {
             "launcher": "emwrap.warp.warp_mctf",
             "label": "Warp Motion and CTF",
@@ -110,14 +120,23 @@ class ProcessingConfig:
             "label": "PyTom Template Matching",
             "output": "PyTom"
         },
+        "emw-pytme": {
+            "launcher": "emwrap.pytme.pytme_pipeline",
+            "label": "pyTME Template Matching",
+            "output": "PyTME"
+        },
         "emw-warp-export_particles": {
             "launcher": "emwrap.warp.warp_export_particles",
             "label": "Warp Export Particles",
             "output": "WarpExportParticles"
         },
-        "emw-pytme": {"launcher": "emwrap.pytme", "visible": False},        
         "emw-relion-symmetrize_volume": {"launcher": "emwrap.relion.symmetrize_volume"},
         "emw-relion-mask_create": {"launcher": "emwrap.relion.mask_create"},
+        "emw-relion-transform_volume": {
+            "launcher": "emwrap.relion.transform_volume",
+            "label": "Relion Transform Volume",
+            "output": "TransformVolume"
+        },
         "emw-warp-mtools_create": {
             "launcher": "emwrap.warp.warp_mtools_create",
             "label": "Warp M Create Population",
@@ -231,6 +250,7 @@ class ProcessingConfig:
         { "name": "warp", "prefixes": ["emw-warp"] },
         { "name": "relion", "prefixes": ["emw-relion", "relion."] },
         { "name": "pytom", "prefixes": ["emw-pytom"] },
+        { "name": "pytme", "prefixes": ["emw-pytme"] },
         { "name": "aretomo", "prefixes": ["emw-aretomo", "emw-denoiset"] },
         { "name": "spa", "prefixes": ["emw-import-movies", "emw-preprocessing", "emw-rln2d"] }
     ]

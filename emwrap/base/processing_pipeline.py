@@ -28,10 +28,20 @@ from collections import defaultdict
 
 from emtools.utils import Process, Color, Pretty, FolderManager, Timer
 from emtools.jobs import BatchManager, Args, Pipeline
+from emtools.hpc import ClusterJob, ComputingEnv
 from emtools.metadata import (Table, Column, StarFile, StarMonitor, TextFile,
                               Acquisition, RelionStar)
 
 from .config import ProcessingConfig
+from .job_resources import get_job_gpu_list, count_job_cpus
+
+
+def banner(lines):
+    """ Box of asterisks around the given lines. """
+    width = max(80, max(len(line) for line in lines) + 4)
+    border = '*' * width
+    rows = '\n'.join(f"* {line.ljust(width - 4)} *" for line in lines)
+    return f"{border}\n{rows}\n{border}"
 
 
 def launcher_banner(variable, launcher):
@@ -40,10 +50,7 @@ def launcher_banner(variable, launcher):
     lines = [f"{variable} launcher: {launcher}"]
     if not launcher or not (os.path.exists(launcher) or shutil.which(launcher)):
         lines.append("NOT FOUND")
-    width = max(80, max(len(line) for line in lines) + 4)
-    border = '*' * width
-    rows = '\n'.join(f"* {line.ljust(width - 4)} *" for line in lines)
-    return f"{border}\n{rows}\n{border}"
+    return banner(lines)
 
 
 def print_launcher(variable, launcher):
@@ -268,6 +275,13 @@ class ProcessingPipeline(Pipeline, FolderManager):
         runInfo['end'] = Pretty.now()
         runInfo['elapsed'] = str(t.getElapsedTime())
         runInfo['status'] = status
+        computing = runInfo.get('computing') or {}
+        if cluster := computing.get('cluster'):
+            # Memory used by the cluster job, while it is still running
+            if memory := ClusterJob.memory(cluster):
+                computing['memory'] = memory
+                self.log(f"Cluster job {cluster['job_id']} memory: "
+                         f"max {memory.get('max')}, avg {memory.get('avg')}")
         try:
             self.readInfo()
             runs = self.info['runs']
@@ -327,6 +341,19 @@ class ProcessingPipeline(Pipeline, FolderManager):
         else:
             return gpu_list
 
+    def computingInfo(self):
+        """ Computing environment of this run (see ComputingEnv.collect),
+        with the CPUs and GPUs set in the job params. It never fails. """
+        def _safe(func, default=None):
+            try:
+                return func()
+            except Exception:
+                return default
+
+        return ComputingEnv.collect(
+            gpu_ids=_safe(lambda: get_job_gpu_list(self._args), []),
+            cpus=_safe(lambda: count_job_cpus(self._args)))
+
     @classmethod
     def get_launcher(cls, packageName=None):
         """ Get a launcher script to 'launch' programs from
@@ -371,6 +398,8 @@ class ProcessingPipeline(Pipeline, FolderManager):
             # launching) belongs to this run, to report its time in the queue
             if launched := self.info.pop('launched', None):
                 runInfo['launched'] = launched
+            runInfo['computing'] = computing = self.computingInfo()
+            print(f"\n{banner(ComputingEnv.lines(computing))}\n", flush=True)
             self.info['runs'].append(runInfo)
             self.writeInfo()
             self._currentRun = (runInfo, t)
@@ -557,9 +586,73 @@ class ProcessingPipeline(Pipeline, FolderManager):
             return os.path.relpath(path, self.workingDir)
         return path
 
+    def relativizePaths(self, obj, mapping=None):
+        """ Return a copy of obj (dict/list/str, e.g. a loaded JSON) where
+        every absolute path string is made relative to the project root.
+
+        Absolute paths are fine during the processing (e.g. for programs
+        running in a tmp/scratch folder), but persisted outputs must use
+        project-root-relative paths. 'mapping' optionally maps absolute
+        paths (e.g. of tmp files) to their final project path; other
+        absolute paths inside the project are made relative to it. Paths
+        are compared after resolving symlinks, since the same folder can
+        be reached through different mounts. Absolute paths outside the
+        project (e.g. programs) are left unchanged.
+        """
+        mapping = {os.path.realpath(k): v for k, v in (mapping or {}).items()}
+        roots = [os.path.realpath(self.workingDir),
+                 os.path.abspath(self.workingDir)]
+
+        def _fixPath(p):
+            real = os.path.realpath(p)
+            if real in mapping:
+                return mapping[real]
+            for path, root in ((real, roots[0]), (os.path.normpath(p), roots[1])):
+                if path == root or path.startswith(root + os.sep):
+                    return os.path.relpath(path, root)
+            return p
+
+        def _fix(v):
+            if isinstance(v, dict):
+                return {k: _fix(x) for k, x in v.items()}
+            if isinstance(v, (list, tuple)):
+                return type(v)(_fix(x) for x in v)
+            if isinstance(v, str) and os.path.isabs(v):
+                return _fixPath(v)
+            return v
+
+        return _fix(obj)
+
+    def relativizeStar(self, starFile, mapping=None):
+        """ Rewrite starFile (written by an external program) making its
+        absolute paths relative to the project root (see relativizePaths).
+        Returns True if the file was modified. """
+        tables = StarFile.getTablesDict(starFile, guessType=False)
+        changed = False
+        newTables = {}
+        for name, table in tables.items():
+            newTable = Table(table.getColumnNames())
+            for row in table:
+                values = row._asdict()
+                newValues = self.relativizePaths(values, mapping)
+                changed = changed or newValues != values
+                newTable.addRowValues(**newValues)
+            newTables[name] = newTable
+
+        if changed:
+            with StarFile(starFile, 'w') as sf:
+                for name, table in newTables.items():
+                    sf.writeTable(name, table, computeFormat='left')
+        return changed
+
+    def projectFile(self, path):
+        """Full path of a project-root-relative (or absolute) path, to open
+        it whatever the current folder is."""
+        return os.path.join(self.workingDir, self.toProjectPath(path))
+
     def projectExists(self, path):
         """Return True when a project-root-relative path exists on disk."""
-        return os.path.exists(os.path.join(self.workingDir, self.toProjectPath(path)))
+        return os.path.exists(self.projectFile(path))
 
     def linkProjectPath(self, dest_folder, src_path, name=None):
         """Symlink src_path into dest_folder using project-root-relative paths."""

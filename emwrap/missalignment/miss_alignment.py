@@ -1318,6 +1318,12 @@ class MissAlignment(WarpBasePipeline):
                 f'{output_star}'
             )
 
+        # relion-warp-convert writes absolute paths (we pass it absolute
+        # arguments), persist them relative to the project root
+        for star_file in [output_star] + sorted(
+                glob(os.path.join(batch.join('tilt_series'), '*.star'))):
+            self.relativizeStar(star_file)
+
         return output_star
 
     # ------------------------------------------------------------------

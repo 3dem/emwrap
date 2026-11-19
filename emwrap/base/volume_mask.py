@@ -165,6 +165,72 @@ def compute_mask(binned, threshold, lowpass=None, extend=0, soft_edge=0,
     return 1 - mask if invert else mask
 
 
+def _crop_pad(data, shape):
+    """ The centre of data (z, y, x) cropped or zero padded to shape. """
+    out = np.zeros(shape, dtype=data.dtype)
+    src, dst = [], []
+    for n, m in zip(data.shape, shape):
+        k = min(n, m)
+        # Aligned at n // 2, also the zero frequency of a shifted FFT
+        src.append(slice(n // 2 - k // 2, n // 2 - k // 2 + k))
+        dst.append(slice(m // 2 - k // 2, m // 2 - k // 2 + k))
+    out[tuple(dst)] = data[tuple(src)]
+    return out
+
+
+def compute_template(binned, in_angpix, out_angpix, box, center=False,
+                     invert=False, mirror=False, max_size=PREVIEW_SIZE):
+    """ Tentative template (float32 (z, y, x)) of a BinnedMap, as
+    pytom_create_template.py: centred by its centre of mass (of the positive
+    density), resampled (Fourier crop/pad) to the output pixel size, cropped
+    or padded to the output box, inverted and mirrored.
+
+    The template is computed on the output box downscaled by an integer
+    factor to at most max_size px; return (template, binning of the box).
+    """
+    f = max(1, math.ceil(box / max_size))
+    previewAngpix = out_angpix * f
+    data = binned.data
+    ft = np.fft.fftshift(np.fft.fftn(data))
+    if center:
+        weights = np.clip(data, 0, None)
+        total = weights.sum()
+        if total > 0:
+            grids = np.indices(data.shape, dtype=np.float32)
+            shift = [(n - 1) / 2 - (g * weights).sum() / total
+                     for g, n in zip(grids, data.shape)]
+            freqs = np.meshgrid(*[np.fft.fftshift(np.fft.fftfreq(n))
+                                  for n in data.shape], indexing='ij')
+            ft *= np.exp(-2j * np.pi * sum(q * s for q, s in zip(freqs, shift)))
+    # Fourier crop (or pad) to the preview pixel size
+    scale = in_angpix * binned.binning / previewAngpix
+    shape = tuple(max(1, int(round(n * scale))) for n in data.shape)
+    ft = _crop_pad(ft, shape)
+    template = np.fft.ifftn(np.fft.ifftshift(ft)).real * (np.prod(shape) / data.size)
+    n = math.ceil(box / f)
+    template = _crop_pad(template.astype(np.float32), (n, n, n))
+    if invert:
+        template = -template
+    if mirror:  # PyTom flips its first axis, x
+        template = template[:, :, ::-1]
+    return np.ascontiguousarray(template), f
+
+
+def spherical_mask(box, radius, sigma=0, binning=1, cutoff_sd=3):
+    """ Spherical mask (float32 0-1) as pytom_create_mask.py, on the box
+    (px) downscaled by binning: 1 inside the radius (px) and a Gaussian
+    fall-off of sigma (px) outside, cut at cutoff_sd sigmas. """
+    n = math.ceil(box / binning)
+    coords = np.arange(n) * binning + (binning - 1) / 2 - (box - 1) / 2
+    z, y, x = np.meshgrid(coords, coords, coords, indexing='ij')
+    dist = np.sqrt(x ** 2 + y ** 2 + z ** 2) - radius
+    mask = (dist <= 0).astype(np.float32)
+    if sigma and sigma > 0:
+        edge = (dist > 0) & (dist <= cutoff_sd * sigma)
+        mask[edge] = np.exp(-0.5 * (dist[edge] / sigma) ** 2)
+    return mask
+
+
 def density_from_array(array, binning, valueRange=(0.0, 1.0)):
     """ The array (z, y, x) as emflow's VolumeDensity: uint8 over valueRange,
     zlib compressed, base64. """

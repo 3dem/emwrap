@@ -1,0 +1,96 @@
+{
+    "name": "emw-geometry-mask",
+    "label": "EMwrap Geometry Mask",
+    "help": "Create a 3D mask from geometric shapes (sphere, cylinder and box). Each shape has a center and three Euler angles (rot, tilt, psi); the mask is the union of all shapes (1 inside any of them, 0 outside), with an optional soft edge. The box and pixel size of the mask are those of the optional input volume, or the box size below.",
+    "wizards": [
+        {
+            "id": "geometry_mask",
+            "label": "Geometry mask wizard",
+            "adaptor": "emwrap.base.wizards.GeometryMaskAdaptor",
+            "params": [
+                "soft_edge",
+                "shapes"
+            ]
+        }
+    ],
+    "sections": [
+        {
+            "label": "Input",
+            "params": [
+                {
+                    "name": "input_volume",
+                    "label": "Input volume (optional):",
+                    "paramClass": "PathParam",
+                    "pointerClass": "Volume",
+                    "allowsEmpty": true,
+                    "help": "Optional map: the mask is created on its box and pixel size, and the wizard shows it under the mask. Without it, set the box size below."
+                },
+                {
+                    "label": "Box size (px)",
+                    "paramClass": "Line",
+                    "help": "Dimensions of the mask in pixels, only used without an input volume.",
+                    "params": [
+                        {
+                            "name": "box_x",
+                            "label": "X:",
+                            "paramClass": "IntParam",
+                            "allowsEmpty": true
+                        },
+                        {
+                            "name": "box_y",
+                            "label": "Y:",
+                            "paramClass": "IntParam",
+                            "allowsEmpty": true
+                        },
+                        {
+                            "name": "box_z",
+                            "label": "Z:",
+                            "paramClass": "IntParam",
+                            "allowsEmpty": true
+                        }
+                    ]
+                },
+                {
+                    "name": "angpix",
+                    "label": "Pixel size (Å):",
+                    "paramClass": "FloatParam",
+                    "allowsEmpty": true,
+                    "help": "Pixel size written in the mask header. Empty: the one of the input volume (or 1 without it)."
+                },
+                {
+                    "name": "soft_edge",
+                    "label": "Soft edge (px):",
+                    "paramClass": "FloatParam",
+                    "default": 0,
+                    "help": "Width in pixels of the soft edge added outside the shapes, as relion_mask_create --width_soft_edge: the mask decays from 1 to 0 with a raised cosine over this distance, to avoid sharp edges. 0: a binary mask."
+                },
+                {
+                    "label": "Shapes",
+                    "paramClass": "Group",
+                    "params": [
+                        {
+                            "name": "shapes",
+                            "label": "Shapes",
+                            "paramClass": "TableParam",
+                            "help": "One row per shape; the mask is the union of all of them. All values are in pixels (center from the first voxel of the box; empty: the center of the box) and the angles in degrees (ZYZ Euler angles, as Relion). Sizes per shape:\n\n*sphere*: radius\n*cylinder*: radius and height (along the rotated Z axis)\n*box*: size_x, size_y and size_z (along the rotated axes)\n\nUse the wizard to add and edit the shapes over the input volume.",
+                            "params": [
+                                {"name": "shape", "label": "Shape", "paramClass": "StringParam", "help": "sphere, cylinder or box"},
+                                {"name": "center_x", "label": "Center X", "paramClass": "FloatParam"},
+                                {"name": "center_y", "label": "Center Y", "paramClass": "FloatParam"},
+                                {"name": "center_z", "label": "Center Z", "paramClass": "FloatParam"},
+                                {"name": "rot", "label": "Rot", "paramClass": "FloatParam"},
+                                {"name": "tilt", "label": "Tilt", "paramClass": "FloatParam"},
+                                {"name": "psi", "label": "Psi", "paramClass": "FloatParam"},
+                                {"name": "radius", "label": "Radius", "paramClass": "FloatParam"},
+                                {"name": "height", "label": "Height", "paramClass": "FloatParam"},
+                                {"name": "size_x", "label": "Size X", "paramClass": "FloatParam"},
+                                {"name": "size_y", "label": "Size Y", "paramClass": "FloatParam"},
+                                {"name": "size_z", "label": "Size Z", "paramClass": "FloatParam"}
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}

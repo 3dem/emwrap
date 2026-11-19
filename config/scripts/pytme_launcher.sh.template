@@ -1,0 +1,9 @@
+#!/bin/bash
+
+# pyTME (KosinskiLab) from SBGrid, pinned version (SBGrid title 'pytme').
+# 0.3.x executables: match_template, postprocess, preprocess,
+# estimate_memory_usage, preprocessor_gui, python.pytme
+. /programs/sbgrid.shrc
+export PYTME_X=0.3.3
+
+"$@"

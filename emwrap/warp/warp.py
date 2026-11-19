@@ -24,7 +24,7 @@ import tifffile
 
 from emtools.utils import FolderManager, Path
 from emtools.metadata import (StarFile, Table, RelionStar, WarpXml, Imod,
-                              WarpPopulation)
+                              WarpPopulation, Mdoc)
 from emtools.jobs import Batch, Args
 from emtools.image import Image
 from emwrap.base import ProcessingPipeline
@@ -753,6 +753,22 @@ class WarpBasePipeline(ProcessingPipeline):
             (ok, dims) — ok is False when the aligned stack is missing;
             dims are aligned-stack dimensions when found.
         """
+        ok, dims, newTsTable = self.alignTsTable(tsDict, newPs)
+        if ok:
+            self.write_ts_table(tsDict['rlnTomoName'], newTsTable,
+                                tsDict['rlnTomoTiltSeriesStarFile'])
+        return ok, dims
+
+    def alignTsTable(self, tsDict, newPs=None):
+        """ Update tsDict with alignment labels (as updateAlignTsDict) and
+        return the enriched TS table without writing anything, so it can
+        also be read while the job runs (e.g. EMhub's alignment progress).
+        Input files are opened from the project root (workingDir), not from
+        the current folder.
+
+        Returns:
+            (ok, dims, table) — table is None when not ok.
+        """
         if newPs is None:
             newPs = self.alignmentPs()
 
@@ -769,7 +785,7 @@ class WarpBasePipeline(ProcessingPipeline):
                 'rlnTomoTiltSeriesStarFile': tsStarFile,
                 'rlnTiltSeriesAligned': "None"
             })
-            return False, None
+            return False, None, None
 
         xfFile, tltFile = self.alignmentFiles(tsName)
         
@@ -780,7 +796,7 @@ class WarpBasePipeline(ProcessingPipeline):
                 'rlnTomoTiltSeriesStarFile': tsStarFile,
                 'rlnTiltSeriesAligned': tsAligned
             })
-            return False, None
+            return False, None, None
 
         dims = Image.get_dimensions(tsAligned)
         tsDict.update({
@@ -789,7 +805,8 @@ class WarpBasePipeline(ProcessingPipeline):
         })
 
         # Generate the proper metadata star file for this row
-        tsTable = StarFile.getTableFromFile(tsName, inputTsStar, guessType=False)
+        tsTable = StarFile.getTableFromFile(tsName, self.projectFile(inputTsStar),
+                                            guessType=False)
         # ts_import skips tilts whose frame series are deselected in
         # warp_frameseries (e.g. tilts excluded by a subset job), so keep
         # only the tilts that made it into the tomostar
@@ -798,7 +815,7 @@ class WarpBasePipeline(ProcessingPipeline):
         if len(alignments) != len(tiltRows):
             self.log(f"ERROR: Alignment count mismatch for TS {tsName}: "
                      f"{len(alignments)} alignments vs {len(tiltRows)} tilts")
-            return False, dims
+            return False, dims, None
         newTsTable = Table(tsTable.getColumnNames() + RelionStar.TOMO_ALIGNMENT_COLUMNS)
         # Alignments from AreTomo are sorted from negative to positive tilt angle
         # so we need to sort the TS metadata to match that order
@@ -818,10 +835,9 @@ class WarpBasePipeline(ProcessingPipeline):
                      f"in Warp: {', '.join(sorted(unused))}")
         if not len(newTsTable):
             self.log(f"ERROR: All tilts are disabled in Warp for TS {tsName}")
-            return False, dims
+            return False, dims, None
 
-        self.write_ts_table(tsName, newTsTable, tsStarFile)
-        return ok, dims
+        return ok, dims, newTsTable
 
     def reconstructPs(self):
         """ Return reconstruction output pixel size from job args. """
@@ -1072,6 +1088,70 @@ class WarpBaseTsAlign(WarpBasePipeline):
         """ Abstract method that should be implemented in subclasses. """
         raise Exception("Missing implementation in base class.")
 
+    @classmethod
+    def fromJobFolder(cls, projectRoot, jobDir):
+        """ Instance of the job in jobDir (absolute) of the project at
+        projectRoot, from its job.star, to read its outputs from anywhere
+        (e.g. from EMhub while the job runs): it does not run nor write
+        anything, and does not log. """
+        from emwrap.base.job_star import read_job_params
+
+        params = dict(read_job_params(jobDir))
+        params['working_dir'] = projectRoot
+        # Only validated by the constructor, the compute scratch might not
+        # exist where this is used
+        params['scratch_dir'] = jobDir
+        params.pop('gpus', None)
+        if inputTs := params.get('input_tiltseries'):
+            params['input_tiltseries'] = os.path.join(projectRoot, inputTs)
+        job = cls(params, jobDir)
+        job.log = lambda *args, **kwargs: None
+        return job
+
+    def alignmentProgress(self, tsName=None):
+        """ The alignment of each input tilt series so far (only tsName if
+        given), without writing anything: a list of (tsDict, table) in the
+        input order. For an aligned tilt series, tsDict is its row of the
+        output STAR (see alignTsTable) and table the rows of its tilt series
+        STAR; otherwise (not aligned yet, or failed) tsDict is its input row
+        and table None.
+        """
+        tsAllTable = StarFile.getTableFromFile(
+            'global', self._args['input_tiltseries'], guessType=False)
+        newPs = self.alignmentPs()
+        progress = []
+        for tsRow in tsAllTable:
+            if tsName is not None and tsRow.rlnTomoName != tsName:
+                continue
+            tsDict = tsRow._asdict()
+            ok, _, table = self.alignTsTable(tsDict, newPs)
+            progress.append((tsDict, table) if ok else (tsRow._asdict(), None))
+        return progress
+
+    def _copyMdocTilts(self, tsRow, src, dst):
+        """ Copy the mdoc ``src`` to ``dst`` keeping only the tilts whose
+        movies are in the tilt-series STAR file of ``tsRow``. Tilts with
+        missing or corrupted movies (skipped by the import) have no frame
+        series, and WarpTools ts_import fails for the whole series (and then
+        crashes) if the mdoc references them.
+        """
+        tsStar = getattr(tsRow, 'rlnTomoTiltSeriesStarFile', None)
+        if not tsStar or not os.path.exists(tsStar):
+            shutil.copy(src, dst)
+            return
+        tsTable = StarFile.getTableFromFile(tsRow.rlnTomoName, tsStar,
+                                            guessType=False)
+        movies = {os.path.basename(r.rlnMicrographMovieName) for r in tsTable}
+        mdoc = Mdoc.parse(src)
+        removed = [k for k, s in mdoc.zsections()
+                   if Mdoc.getSubFrameBase(s) not in movies]
+        for k in removed:
+            del mdoc[k]
+        mdoc.write(dst)
+        if removed:
+            self.log(f"TS {tsRow.rlnTomoName}: removed {len(removed)} tilt(s) "
+                     f"not in {tsStar} from the mdoc")
+
     def _importMdocs(self, inputFolder, tsAllTable):
         """ Create the ``mdocs`` folder with copies of the mdoc files of the
         tilt series in the input STAR only. Files are copied, not linked,
@@ -1102,7 +1182,7 @@ class WarpBaseTsAlign(WarpBasePipeline):
             if not os.path.exists(src):
                 missing.append(src)
                 continue
-            shutil.copy(src, os.path.join(dstFolder, mdocName))
+            self._copyMdocTilts(tsRow, src, os.path.join(dstFolder, mdocName))
 
         if missing:
             raise Exception("Missing expected mdoc file(s): " + ', '.join(missing))

@@ -34,6 +34,7 @@ tomo-data-curation skill on a hand curation (ChlamyBrnA, EMPIAR-11830).
 
 One json per tilt series, <tomoName>_imageqc.json beside the jpegs, written
 by the tilt analysis job (emw-tilt-analyze) that made them (write_table_json).
+It also keeps the CTF profile correlation of each tilt (CTF_CORRELATIONS).
 
 The curation rule (curate_series) turns the measures and the motion and CTF
 values of the star file into the tilts to leave out: the OTF dashboard
@@ -63,6 +64,12 @@ class TiltQualityCuration:
     VERSION = 1
     SUFFIX = '_imageqc.json'
     MEASURES = ('texture', 'darkArea', 'matchPeak', 'matchNcc', 'fieldShift')
+    # In the json of a tilt series: the CTF profile correlation of each tilt
+    # with a power spectrum, {name: value or None}, a copy of the values in
+    # the tilts' _ctf.json, so a reader opens one file per tilt series and
+    # not one per tilt.  Optional: jsons written before it lack it (the OTF
+    # dashboard adds it to them, see add_ctf_correlations).
+    CTF_CORRELATIONS = 'ctfCorrelations'
 
     # The tilt jpegs (TiltThumbnailWriter).  The measures were calibrated on
     # this size and on TiltThumbnailWriter.tilt_image(): changing either
@@ -544,15 +551,17 @@ class TiltQualityCuration:
             return None
 
     @classmethod
-    def write_series_json(cls, path, tomo_name, tilts, force=False):
+    def write_series_json(cls, path, tomo_name, tilts, force=False, ctf_correlations=None):
         """ Measure the tilts of a series and write the json, unless it is
         up to date: newer than every jpeg and listing the same tilts.
 
         tilts: dicts with 'movie', 'angle', 'name' (the micrograph base name,
         which is how readers match a tilt) and 'jpeg' (path, None for a tilt
-        without an average: left out).  Returns (rows, written): the measures,
-        None if no jpeg exists.  Written to a temporary file then renamed, so a
-        reader never gets a partial file.
+        without an average: left out).  ctf_correlations: {name: value} of
+        the tilts (CTF_CORRELATIONS), stored with the measures; a json up to
+        date that lacks them only gets them added.  Returns (rows, written):
+        the measures, None if no jpeg exists.  Written to a temporary file
+        then renamed, so a reader never gets a partial file.
         """
         tilts = [t for t in tilts if t.get('jpeg')]
         if not any(os.path.exists(t['jpeg']) for t in tilts):
@@ -560,7 +569,9 @@ class TiltQualityCuration:
         if not force:
             rows = cls.read_series_json(path, tilts)
             if rows is not None and len(rows) == len(tilts):
-                return rows, False
+                written = (ctf_correlations is not None
+                           and cls.add_ctf_correlations(path, ctf_correlations))
+                return rows, written
         rows = cls.series_measures([
             dict(movie=t['movie'], angle=t['angle'], name=t['name'],
                  image=cls.load_jpeg(t['jpeg']) if os.path.exists(t['jpeg']) else None)
@@ -568,17 +579,48 @@ class TiltQualityCuration:
         data = {'version': cls.VERSION, 'tomoName': tomo_name,
                 'source': 'tilt jpegs', 'jpegSize': cls.JPEG_SIZE,
                 'blockSize': cls.BLOCK, 'darkLevel': cls.DARK_LEVEL, 'tilts': rows}
+        if ctf_correlations is not None:
+            data[cls.CTF_CORRELATIONS] = dict(ctf_correlations)
         TiltThumbnailWriter.save_json(data, path)
         return rows, True
+
+    @classmethod
+    def add_ctf_correlations(cls, path, ctf_correlations):
+        """ Store ctf_correlations ({name: value}, CTF_CORRELATIONS) in the
+        json of a tilt series of this version, leaving its measures as they
+        are.  Returns True if the file was written: False when it already
+        has these values, or is missing, unreadable or of another version. """
+        try:
+            with open(path) as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            return False
+        if not isinstance(data, dict) or data.get('version') != cls.VERSION:
+            return False
+        values = dict(ctf_correlations)
+        if data.get(cls.CTF_CORRELATIONS) == values:
+            return False
+        data[cls.CTF_CORRELATIONS] = values
+        TiltThumbnailWriter.save_json(data, path)
+        return True
+
+    @classmethod
+    def ctf_correlations_of(cls, tilts):
+        """ {name: CTF profile correlation} of the tilts with a power
+        spectrum (tilts_from_star_rows with ctf_correlation), for
+        CTF_CORRELATIONS. """
+        return {t['name']: t['ctfCorrelation'] for t in tilts
+                if t.get('name') and t.get('ps')}
 
     @classmethod
     def write_table_json(cls, thumbnails_dir, tomo_name, ts_table):
         """ <tomoName>_imageqc.json of a tilt series in thumbnails_dir, the
         folder its jpegs were written to, from its tilt-series STAR table,
-        once the jpegs are all written: see write_series_json. """
-        tilts = cls.tilts_from_star_rows([row._asdict() for row in ts_table], thumbnails_dir,
-                                         ctf_correlation=False)
-        return cls.write_series_json(cls.json_path(thumbnails_dir, tomo_name), tomo_name, tilts)
+        once the jpegs and the CTF fit profiles are all written: see
+        write_series_json. """
+        tilts = cls.tilts_from_star_rows([row._asdict() for row in ts_table], thumbnails_dir)
+        return cls.write_series_json(cls.json_path(thumbnails_dir, tomo_name), tomo_name, tilts,
+                                     ctf_correlations=cls.ctf_correlations_of(tilts))
 
     # ------------------------------------------------------------------
     # The tilts of a tilt series star file
@@ -624,6 +666,7 @@ class TiltQualityCuration:
                 'angle': float(d['rlnTomoNominalStageTiltAngle']),
                 'name': name,
                 'mic': os.path.join(root, mic) if mic else None,
+                'ps': ps,
                 'jpeg': jpeg,
                 'motion': cls._star_float(d, 'rlnAccumMotionTotal', True),
                 'ctfResolution': cls._star_float(d, 'rlnCtfMaxResolution', True),

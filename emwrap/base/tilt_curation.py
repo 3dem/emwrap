@@ -225,7 +225,8 @@ class TiltCurationPipeline(SubsetTsPipeline):
         configPath = tqc.Config.path(self.outputDir)
         tqc.Config.write(configPath, self.thresholds, user=os.environ.get('USER'),
                            source=f'{self.name} {self.outputPrefix}',
-                           loaded_from=os.path.abspath(self.inputConfig) if self.inputConfig else None)
+                           loaded_from=(self.relativizePaths(os.path.abspath(self.inputConfig))
+                                        if self.inputConfig else None))
         self.log(f"Tilt QC configuration applied: {Color.cyan(configPath)}")
 
         for name, tsStar, qcJson in series:
