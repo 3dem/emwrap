@@ -3,7 +3,7 @@
     "help": "Wrapper for *pyTME* (Python Template Matching Engine), a GPU-accelerated template matching for cryo-EM and cryo-ET, developed by Valentin J. Maurer and Jan Kosinski at EMBL Hamburg.\n\nEach tomogram is matched with *match_template* and its peaks are called with *postprocess* (RELION 5 and RELION 4 STAR files and pyTME orientations). The output particles have the same format as emw-pytom, with the pyTME score as rlnLCCmax.\n\nThe template and mask must have the voxel size of the tomograms (e.g. created with emw-pytom-create_template).\n\n*Documentation*:\nhttps://kosinskilab.github.io/pyTME/\n\n*CITATION*:\n\nMaurer, V. J., Siggel, M., & Kosinski, J. (2024). PyTME (Python Template Matching Engine): A fast, flexible, and multi-purpose template matching library for cryogenic electron microscopy data. SoftwareX, 25, 101636. https://doi.org/10.1016/j.softx.2024.101636",
     "sections": [
         {
-            "label": "Template Matching",
+            "label": "Input",
             "params": [
                 {
                     "label": "Input",
@@ -28,114 +28,8 @@
                             "label": "Template mask (MRC)",
                             "paramClass": "PathParam",
                             "pointerClass": "VolumeMask",
-                            "help": "(-I/--template-mask) Mask of the template, same box and voxel size."
-                        }
-                    ]
-                },
-                {
-                    "paramClass": "Line",
-                    "label": "Sampling:",
-                    "params": [
-                        {
-                            "name": "pytme.angular-sampling",
-                            "label": "Angular (deg)",
-                            "paramClass": "FloatParam",
-                            "help": "(-a/--angular-sampling) Angular sampling in degrees, lower values mean more rotations (10 ~ 7k, 5 ~ 53k rotations). If empty, it is derived from the particle diameter (--particle-diameter)."
-                        },
-                        {
-                            "name": "pytme.score",
-                            "label": "Score",
-                            "paramClass": "EnumParam",
-                            "default": "FLCSphericalMask",
-                            "choices": {
-                                "FLCSphericalMask": "FLC (spherical mask)",
-                                "FLC": "FLC (any mask)",
-                                "CC": "CC",
-                                "LCC": "LCC",
-                                "CORR": "CORR",
-                                "CAM": "CAM",
-                                "MCC": "MCC"
-                            },
-                            "help": "(-s/--score) Scoring function. FLCSphericalMask is faster but assumes a spherical template mask, use FLC for other masks."
-                        }
-                    ]
-                },
-                {
-                    "paramClass": "Line",
-                    "label": "Filter (A):",
-                    "params": [
-                        {
-                            "name": "pytme.lowpass",
-                            "label": "Low-pass",
-                            "default": 20,
-                            "paramClass": "FloatParam",
-                            "help": "(--lowpass) Resolution (A) to low-pass filter the template and tomogram."
-                        },
-                        {
-                            "name": "pytme.highpass",
-                            "label": "High-pass",
-                            "default": 400,
-                            "paramClass": "FloatParam",
-                            "help": "(--highpass) Resolution (A) to high-pass filter the template and tomogram."
-                        },
-                        {
-                            "name": "pytme.whiten-spectrum",
-                            "label": "Whitening?",
-                            "paramClass": "BooleanParam",
-                            "default": false,
-                            "help": "(--whiten-spectrum) Apply spectral whitening to the template and tomogram."
-                        }
-                    ]
-                },
-                {
-                    "paramClass": "Line",
-                    "label": "Missing wedge:",
-                    "params": [
-                        {
-                            "name": "pytme.tilt-weighting",
-                            "label": "Tilt weighting",
-                            "paramClass": "EnumParam",
-                            "default": "relion",
-                            "choices": {
-                                "relion": "RELION (dose)",
-                                "grigorieff": "Grigorieff (dose)",
-                                "angle": "Angle (cosine)",
-                                "none": "None"
-                            },
-                            "help": "(--tilt-weighting) Weighting of the individual tilts of the wedge. The tilt angles and accumulated dose (--tilt-angles) are taken from the tilt series STAR files; relion and grigorieff use the dose, angle uses a cosine weighting and none a binary wedge."
-                        },
-                        {
-                            "name": "pytme.background-correction",
-                            "label": "Phase-scrambling background?",
-                            "paramClass": "BooleanParam",
-                            "default": false,
-                            "help": "(--background-correction phase-scrambling) Transform the scores into SNR-like values using a phase-scrambled template as background (similar to the random phase correction of PyTom)."
-                        }
-                    ]
-                },
-                {
-                    "paramClass": "Line",
-                    "label": "CTF:",
-                    "params": [
-                        {
-                            "name": "pytme.ctf",
-                            "label": "Model",
-                            "paramClass": "EnumParam",
-                            "default": "tomogram",
-                            "choices": {
-                                "tomogram": "Mean defocus",
-                                "per-tilt": "Per-tilt defocus",
-                                "none": "No CTF"
-                            },
-                            "help": "CTF of the template, from the tilt series STAR files defocus (rlnDefocusU/V/Angle): the mean defocus of all the tilts (--defocus) or the defocus of each tilt (--ctf-file). pyTME 0.3.3 does not use the astigmatism in either case (mean of defocus U and V). Voltage, spherical aberration and amplitude contrast come from the acquisition."
-                        },
-                        {
-                            "name": "pytme.flip-phase",
-                            "label": "Phase-flip?",
-                            "paramClass": "BooleanParam",
-                            "default": true,
-                            "condition": "pytme.ctf != 'none'",
-                            "help": "Phase-flipping CTF correction of the template (as for phase-flipped tomograms), otherwise --no-flip-phase."
+                            "help": "(-I/--template-mask) Mask of the template, same box and voxel size. Optional: without a mask pyTME uses the whole template box.",
+                            "allowsEmpty": true
                         }
                     ]
                 },
@@ -145,12 +39,114 @@
                     "paramClass": "BooleanParam",
                     "default": false,
                     "help": "(--invert-target-contrast) Invert the tomogram contrast (multiply by -1). Usually not needed if the template has the contrast of the tomograms."
+                }
+            ]
+        },
+        {
+            "label": "Template Matching",
+            "params": [
+                {
+                    "name": "pytme.angular-sampling",
+                    "label": "Angular sampling (deg)",
+                    "paramClass": "FloatParam",
+                    "help": "(-a/--angular-sampling) Angular sampling in degrees, lower values mean more rotations (10 ~ 7k, 5 ~ 53k rotations). If empty, it is derived from the particle diameter (--particle-diameter).",
+                    "allowsEmpty": true
+                },
+                {
+                    "name": "pytme.score",
+                    "label": "Score",
+                    "paramClass": "EnumParam",
+                    "default": "FLCSphericalMask",
+                    "choices": {
+                        "FLCSphericalMask": "FLC (spherical mask)",
+                        "FLC": "FLC (any mask)",
+                        "CC": "CC",
+                        "LCC": "LCC",
+                        "CORR": "CORR",
+                        "CAM": "CAM",
+                        "MCC": "MCC"
+                    },
+                    "help": "(-s/--score) Scoring function. FLCSphericalMask is faster but assumes a spherical template mask, use FLC for other masks."
+                },
+                {
+                    "name": "pytme.background-correction",
+                    "label": "Phase-scrambling background?",
+                    "paramClass": "BooleanParam",
+                    "default": false,
+                    "help": "(--background-correction phase-scrambling) Transform the scores into SNR-like values using a phase-scrambled template as background (similar to the random phase correction of PyTom)."
                 },
                 {
                     "name": "pytme.extra_args",
                     "label": "match_template extra arguments",
                     "paramClass": "StringParam",
                     "help": "Extra command-line arguments to pass directly to match_template (pyTME 0.3.3), exactly as they would be typed on the command line (e.g. \"--target-mask mask.mrc --no-filter-target\"). Options not exposed above include:\n--target-mask (skip regions outside this mask)\n--wedge-axes (projection and tilt axes, default 2,0)\n--no-filter-target (do not filter the tomogram)\n--no-pass-smooth (hard edge band-pass)\n--phase-shift (phase plate phase shift, in degrees)\n--centering / --pad-edges / --interpolation-order / --use-memmap\n--memory-scaling (fraction of memory to use, default 0.85)\n--no-use-optimized-set (random uniform rotations)\nSee the pyTME documentation for the full list: https://kosinskilab.github.io/pyTME/\n\nOptions already set above (or computed automatically from the acquisition/batch data, such as --target, --tilt-angles or --defocus) must not be repeated here -- doing so will fail the job with an error. Single-letter options (-m, -i, -a, ...) are not recognized here, use their long form."
+                }
+            ]
+        },
+        {
+            "label": "Filters & CTF",
+            "params": [
+                {
+                    "paramClass": "Line",
+                    "label": "Filter (A):",
+                    "params": [
+                        {
+                            "name": "pytme.lowpass",
+                            "label": "Low-pass",
+                            "default": 20,
+                            "paramClass": "FloatParam",
+                            "help": "(--lowpass) Resolution (A) to low-pass filter the template and tomogram. Leave empty to not low-pass filter.",
+                            "allowsEmpty": true
+                        },
+                        {
+                            "name": "pytme.highpass",
+                            "label": "High-pass",
+                            "default": 400,
+                            "paramClass": "FloatParam",
+                            "help": "(--highpass) Resolution (A) to high-pass filter the template and tomogram. Leave empty to not high-pass filter.",
+                            "allowsEmpty": true
+                        }
+                    ]
+                },
+                {
+                    "name": "pytme.whiten-spectrum",
+                    "label": "Spectral whitening?",
+                    "paramClass": "BooleanParam",
+                    "default": false,
+                    "help": "(--whiten-spectrum) Apply spectral whitening to the template and tomogram."
+                },
+                {
+                    "name": "pytme.tilt-weighting",
+                    "label": "Tilt weighting",
+                    "paramClass": "EnumParam",
+                    "default": "relion",
+                    "choices": {
+                        "relion": "RELION (dose)",
+                        "grigorieff": "Grigorieff (dose)",
+                        "angle": "Angle (cosine)",
+                        "none": "None"
+                    },
+                    "help": "(--tilt-weighting) Weighting of the individual tilts of the wedge. The tilt angles and accumulated dose (--tilt-angles) are taken from the tilt series STAR files; relion and grigorieff use the dose, angle uses a cosine weighting and none a binary wedge."
+                },
+                {
+                    "name": "pytme.ctf",
+                    "label": "CTF model",
+                    "paramClass": "EnumParam",
+                    "default": "tomogram",
+                    "choices": {
+                        "tomogram": "Mean defocus",
+                        "per-tilt": "Per-tilt defocus",
+                        "none": "No CTF"
+                    },
+                    "help": "CTF of the template, from the tilt series STAR files defocus (rlnDefocusU/V/Angle): the mean defocus of all the tilts (--defocus) or the defocus of each tilt (--ctf-file). pyTME 0.3.3 does not use the astigmatism in either case (mean of defocus U and V). Voltage, spherical aberration and amplitude contrast come from the acquisition."
+                },
+                {
+                    "name": "pytme.flip-phase",
+                    "label": "Phase-flip the CTF?",
+                    "paramClass": "BooleanParam",
+                    "default": true,
+                    "condition": "pytme.ctf != 'none'",
+                    "help": "Phase-flipping CTF correction of the template (as for phase-flipped tomograms), otherwise --no-flip-phase."
                 }
             ]
         },
@@ -179,22 +175,24 @@
                             "name": "pytme_postprocess.min-distance",
                             "label": "Between peaks",
                             "paramClass": "FloatParam",
-                            "help": "(--min-distance) Minimum distance (A) between peaks, converted to voxels of the tomograms. By default, the particle radius."
+                            "help": "(--min-distance) Minimum distance (A) between peaks, converted to voxels of the tomograms. By default, the particle radius.",
+                            "allowsEmpty": true
                         },
                         {
                             "name": "pytme_postprocess.min-boundary-distance",
                             "label": "To edges",
                             "paramClass": "FloatParam",
-                            "help": "(--min-boundary-distance) Minimum distance (A) of peaks to the tomogram edges, converted to voxels."
-                        },
-                        {
-                            "name": "pytme_postprocess.mask-edges",
-                            "label": "Mask edges?",
-                            "paramClass": "BooleanParam",
-                            "default": true,
-                            "help": "(--mask-edges) Do not call peaks from scores computed from padded densities: if no distance to the edges is given, half of the template box is used."
+                            "help": "(--min-boundary-distance) Minimum distance (A) of peaks to the tomogram edges, converted to voxels. Leave empty for no minimum distance (see Mask edges).",
+                            "allowsEmpty": true
                         }
                     ]
+                },
+                {
+                    "name": "pytme_postprocess.mask-edges",
+                    "label": "Mask edges?",
+                    "paramClass": "BooleanParam",
+                    "default": true,
+                    "help": "(--mask-edges) Do not call peaks from scores computed from padded densities: if no distance to the edges is given, half of the template box is used."
                 },
                 {
                     "paramClass": "Line",
@@ -204,14 +202,16 @@
                             "name": "pytme_postprocess.min-score",
                             "label": "Minimum score",
                             "paramClass": "FloatParam",
-                            "help": "(--min-score) Minimum score of the peaks."
+                            "help": "(--min-score) Minimum score of the peaks. Leave empty to use only the false positives cutoff (the score scale depends on the data, template and filters).",
+                            "allowsEmpty": true
                         },
                         {
                             "name": "pytme_postprocess.n-false-positives",
                             "label": "False positives",
                             "paramClass": "FloatParam",
                             "default": 1,
-                            "help": "(--n-false-positives) Number of accepted false positives to determine the minimum score from the score statistics (Rickgauer et al. 2017). The largest of this and the minimum score is used. Leave both empty to keep the maximum number of particles."
+                            "help": "(--n-false-positives) Number of accepted false positives to determine the minimum score from the score statistics (Rickgauer et al. 2017). The largest of this and the minimum score is used. Leave both empty to keep the maximum number of particles.",
+                            "allowsEmpty": true
                         }
                     ]
                 },
