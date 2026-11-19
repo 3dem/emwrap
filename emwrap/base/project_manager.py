@@ -29,6 +29,7 @@ from datetime import datetime
 
 from emtools.utils import FolderManager, Process, Color, Path, Timer, Pretty
 from emtools.jobs import BatchManager, Workflow
+from emtools.hpc import ClusterJob
 from emtools.metadata import Table, StarFile, RelionStar
 
 from .config import ProcessingConfig
@@ -824,9 +825,6 @@ class ProjectManager(FolderManager):
         self.runJob(job_id, wait=False, update=True)
         return True
 
-    # Cluster job id as written by bsub/sbatch, also an LSF array element
-    CLUSTER_JOB_ID_RE = re.compile(r'^\d+(\[\d+\])?$')
-
     def getJobQueue(self, jobId):
         """ Name and config of the queue used by a job (from its params), or
         (name, None) if it was not submitted to a configured queue. """
@@ -834,6 +832,11 @@ class ProjectManager(FolderManager):
         if qname in ('', 'None', 'NO-NAME', 'NO-QUEUE'):
             return qname, None
         return qname, ProcessingConfig.get_queue(qname)
+
+    def _readClusterJobId(self, jobId):
+        """ Cluster job id of a job submitted to a queue (from its job.id). """
+        with open(self.join(jobId, self.JOB_CLUSTER_ID_FILE)) as f:
+            return f.readline().strip()
 
     def canInspectJob(self, jobId):
         """ True if the job has a cluster job id and its queue defines an
@@ -845,62 +848,38 @@ class ProjectManager(FolderManager):
 
     def inspectJob(self, jobId, timeout=90):
         """ Run the 'inspect' command of the job's queue for its cluster job,
-        e.g. "inspect": "$SCRIPTS/lsf_inspect_job.sh {job_id} --json".
-        It queries the queueing system, so it is meant for launched or
-        running jobs. Returns a dict with: job_id, queue, command and either
-        format='json' + data (if the output is JSON) or format='text' + text.
-        """
-        with open(self.join(jobId, self.JOB_CLUSTER_ID_FILE)) as f:
-            cluster_job_id = f.readline().strip()
-        if not self.CLUSTER_JOB_ID_RE.match(cluster_job_id):
-            raise Exception(f"Invalid cluster job id '{cluster_job_id}' for job {jobId}.")
-
+        e.g. "inspect": "$SCRIPTS/lsf_inspect_job.sh {job_id} --json"
+        (see emtools.hpc.ClusterJob.inspect), adding the queue name. """
+        cluster_job_id = self._readClusterJobId(jobId)
         qname, queue = self.getJobQueue(jobId)
         if not queue or not queue.get('inspect'):
             raise Exception(f"No 'inspect' command configured for queue '{qname}'.")
-
-        cmd = queue['inspect'].format(job_id=cluster_job_id)
         try:
-            p = subprocess.run(shlex.split(cmd), capture_output=True, text=True,
-                               timeout=timeout)
-        except subprocess.TimeoutExpired:
-            raise Exception(f"Timeout ({timeout} s) inspecting cluster job "
-                            f"{cluster_job_id}: {cmd}")
-        except OSError as e:
-            raise Exception(f"Could not run inspect command '{cmd}': {e}")
-
-        result = {'job_id': cluster_job_id, 'queue': qname, 'command': cmd}
-        try:
-            result.update(format='json', data=json.loads(p.stdout))
-        except ValueError:
-            text = (p.stdout or '').strip()
-            if p.returncode != 0 and p.stderr.strip():
-                text = (text + '\n' + p.stderr.strip()).strip()
-            result.update(format='text', text=text)
-        return result
+            result = ClusterJob.inspect(queue['inspect'], cluster_job_id, timeout=timeout)
+        except Exception as e:
+            raise Exception(f"Inspecting job {jobId}: {e}")
+        return {'queue': qname, **result}
 
     def _stopClusterJob(self, jobId):
         """Cancel a job that was submitted to a cluster queue."""
-        with open(self.join(jobId, self.JOB_CLUSTER_ID_FILE)) as f:
-            cluster_job_id = f.readline().strip()
-
-        job_params = self._readJobParams(self._getJob(jobId))
-        qname = job_params.get('queue.name', 'NO-NAME')
+        qname, queue = self.getJobQueue(jobId)
         if qname == 'NO-NAME':
             raise Exception(f"No queue name found for stopping job {jobId}.")
-
-        if queue := ProcessingConfig.get_queue(qname):
-            cancelCmd = queue['cancel'].format(job_id=cluster_job_id)
-        else:
+        if not queue:
             raise Exception(f"Queue {qname} not found in config for stopping job {jobId}.")
 
         scriptLog = self.join(jobId, 'job.log')
         try:
-            subprocess.run(shlex.split(cancelCmd), check=True, capture_output=True, text=True)
-            self._log(f"Stopping CLUSTER job, {cancelCmd}", jobFile=scriptLog, flush=True)
-        except subprocess.CalledProcessError as e:
+            p = ClusterJob.run(queue['cancel'], self._readClusterJobId(jobId))
+        except Exception as e:
             self._log("ERROR: Stopping CLUSTER job failed", jobFile=scriptLog)
-            self._log(f"  Error: '{e.stderr.rstrip()}'", jobFile=scriptLog)
+            self._log(f"  Error: '{e}'", jobFile=scriptLog)
+            return
+        if p.returncode == 0:
+            self._log(f"Stopping CLUSTER job, {shlex.join(p.args)}", jobFile=scriptLog, flush=True)
+        else:
+            self._log("ERROR: Stopping CLUSTER job failed", jobFile=scriptLog)
+            self._log(f"  Error: '{p.stderr.rstrip()}'", jobFile=scriptLog)
 
     def _stopLocalJob(self, jobId):
         """Kill a locally launched job using its recorded root process id."""
