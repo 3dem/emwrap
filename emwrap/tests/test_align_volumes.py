@@ -14,10 +14,10 @@
 # *
 # **************************************************************************
 
-""" The references of a multi-reference 3D classification (emw-aligned-volumes)
+""" The references of a multi-reference 3D classification (emw-align-volumes)
 and the volume alignment, with synthetic volumes (no datasets needed):
 
-    python -m unittest emwrap.tests.test_aligned_volumes
+    python -m unittest emwrap.tests.test_align_volumes
 """
 
 import os
@@ -32,9 +32,9 @@ from emtools.utils import FolderManager
 from emtools.metadata import StarFile
 
 from emwrap.base import volume_align as va
-from emwrap.base.aligned_volumes import (AlignedVolumesPipeline, default_volume_name,
-                                         parse_volumes, parse_numbers, REFERENCES_STAR,
-                                         ALIGNMENT_STAR)
+from emwrap.base.align_volumes import (AlignVolumesPipeline, default_volume_name,
+                                       parse_volumes, parse_numbers, REFERENCES_STAR,
+                                       ALIGNMENT_STAR)
 from emwrap.base.project_data import ProjectData
 from emwrap.tests.test_output_types import _Job, _Workflow
 
@@ -117,10 +117,10 @@ class TestVolumeAlign(unittest.TestCase):
         self.assertGreater(real_cc(aligned, vol), 0.95)
 
 
-class TestAlignedVolumes(unittest.TestCase):
+class TestAlignVolumes(unittest.TestCase):
 
     def setUp(self):
-        self.path = tempfile.mkdtemp(prefix='emwrap_aligned_volumes_')
+        self.path = tempfile.mkdtemp(prefix='emwrap_align_volumes_')
         self.target = blobs()
         write(self._p('Refine3D/job010/run_class001.mrc'), self.target, ANGPIX)
         self.R = va.rotvec_to_matrices(np.radians([[0, 70, -30]]))[0]
@@ -141,7 +141,7 @@ class TestAlignedVolumes(unittest.TestCase):
         args = {'working_dir': self.path, 'threads': 2, 'align_angular_step': 30,
                 'align_lowpass': 20}
         args.update(params)
-        return AlignedVolumesPipeline(args, output)
+        return AlignVolumesPipeline(args, output)
 
     def test_helpers(self):
         self.assertEqual(default_volume_name('InitialModel/job466/run_it120_class001.mrc'),
@@ -210,7 +210,7 @@ class TestAlignedVolumes(unittest.TestCase):
         FolderManager.__init__(data, self.path)
         data._debug = lambda *args: None
         output = 'EMwrap/job050/' + REFERENCES_STAR
-        data._wf = _Workflow({output: _Job('EMwrap/job050', 'emw-aligned-volumes')})
+        data._wf = _Workflow({output: _Job('EMwrap/job050', 'emw-align-volumes')})
         info = data._computeOutputTypeInfo(output, [])
         self.assertEqual(info['type'], 'Volumes')
         self.assertTrue(info['info'].startswith('3 references, '), info['info'])
@@ -258,7 +258,7 @@ class TestAlignedVolumes(unittest.TestCase):
     def test_form(self):
         from emwrap.base.config import ProcessingConfig
         from emwrap.base.job_form import JobForm
-        form = ProcessingConfig.get_job_form('emw-aligned-volumes')
+        form = ProcessingConfig.get_job_form('emw-align-volumes')
         params = {'input_volumes': table(['Reconstruct/job030/merged.mrc'], ['nucleosome']),
                   'do_align': False}
         self.assertEqual(JobForm.validate_params(form, params, project_path=self.path), [])

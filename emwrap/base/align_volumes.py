@@ -121,11 +121,11 @@ def write_volume(path, data, angpix):
         mrc.voxel_size = angpix
 
 
-class AlignedVolumesPipeline(ProcessingPipeline):
+class AlignVolumesPipeline(ProcessingPipeline):
     """ Copy (and optionally align) volumes as the references of a
     multi-reference 3D classification. """
 
-    name = 'emw-aligned-volumes'
+    name = 'emw-align-volumes'
 
     def __init__(self, args, output):
         ProcessingPipeline.__init__(self, args, output)
@@ -362,4 +362,4 @@ class AlignedVolumesPipeline(ProcessingPipeline):
 
 
 if __name__ == '__main__':
-    AlignedVolumesPipeline.main()
+    AlignVolumesPipeline.main()

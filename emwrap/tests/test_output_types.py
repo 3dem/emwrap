@@ -120,8 +120,8 @@ class TestOutputTypes(unittest.TestCase):
             'MaskCreate/job011/mask.mrc', relion, {'type': 'Volume'}))
         self.assertFalse(self.data._isStaleVolumeInfo(
             'PyTom/job008/emd_template.mrc', pytom, {'type': 'Volume'}))
-        # The references of emw-aligned-volumes cached as a Volume (before Volumes)
-        refs = {'jobtype': 'emw-aligned-volumes'}
+        # The references of emw-align-volumes cached as a Volume (before Volumes)
+        refs = {'jobtype': 'emw-align-volumes'}
         self.assertTrue(self.data._isStaleVolumeInfo(
             'EMwrap/job050/input_references.star', refs, {'type': 'Volume'}))
         self.assertFalse(self.data._isStaleVolumeInfo(

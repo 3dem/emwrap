@@ -85,9 +85,9 @@ class ProcessingConfig:
             "label": "EMwrap Geometry Mask",
             "output": "GeometryMask"
         },
-        "emw-aligned-volumes": {
-            "launcher": "emwrap.base.aligned_volumes",
-            "label": "EMwrap Aligned Volumes",
+        "emw-align-volumes": {
+            "launcher": "emwrap.base.align_volumes",
+            "label": "EMwrap Align Volumes",
             "output": "EMwrap"
         },
         "emw-warp-mctf": {

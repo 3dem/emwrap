@@ -811,7 +811,7 @@ class ProjectData(FolderManager):
             tables = sf.getTableNames()
             if 'classes2d' in tables:
                 return self._multiClasses2dInfo(sf)
-            # Volumes, or Volume (emw-aligned-volumes jobs before Volumes)
+            # Volumes, or Volume (emw-align-volumes jobs before Volumes)
             if 'references' in tables and nodeType in ('Volumes', 'Volume'):
                 return self._referencesInfo(sf, filepath)
             for tableName, datatype in self.SPA_TABLES.items():
@@ -832,7 +832,7 @@ class ProjectData(FolderManager):
     def _referencesInfo(self, sf, filepath):
         """ Info of a list of references of a multi-reference 3D
         classification (data_references, rlnReferenceImage, as written by
-        emw-aligned-volumes): Volumes, they go to the 'Reference map' of the
+        emw-align-volumes): Volumes, they go to the 'Reference map' of the
         3D classification. Box and pixel size of the first reference. """
         table = sf.getTable('references')
         info = f'{len(table)} references'
@@ -1515,13 +1515,13 @@ class ProjectData(FolderManager):
 
     def _isStaleVolumeInfo(self, output_id, job, cached):
         """ True for a mask cached as a Volume (before masks were VolumeMask)
-        or a list of references of emw-aligned-volumes cached as a Volume
+        or a list of references of emw-align-volumes cached as a Volume
         (before they were Volumes). """
         if cached.get('type') != 'Volume':
             return False
         if job['jobtype'] in self.MASK_JOBTYPES:
             return self._outputTypeFromRelionNodes(output_id) == 'VolumeMask'
-        return (job['jobtype'] == 'emw-aligned-volumes'
+        return (job['jobtype'] == 'emw-align-volumes'
                 and output_id.endswith('.star'))
 
     def setOutputInfo(self, output_id, output_info):

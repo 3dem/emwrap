@@ -1,6 +1,6 @@
 {
-    "name": "emw-aligned-volumes",
-    "label": "EMwrap Aligned Volumes",
+    "name": "emw-align-volumes",
+    "label": "EMwrap Align Volumes",
     "help": "Prepare the references of a multi-reference 3D classification: the input volumes, in their order (the first is class 1), optionally aligned to a map in the frame of the particle poses.\n\nA 3D classification that does not align the particles (or only searches around their poses) compares each particle with the references in its current orientation, so the references need the orientation and centre of the map the poses come from. De novo initial models (and maps of other jobs) have their own: without the alignment, the particles can not match them and the classes lose their shapes in the first iteration.\n\nThe alignment searches all rotations and shifts that maximise the cross-correlation with the map (low-pass filtered, inside a spherical mask), and resamples the volumes to its box and pixel size.\n\nOutput: input_references.star (Volumes, the 'Reference map' of the 3D classification, one class per row) and the references ref_class<NNN>_<name>.mrc. The job also computes the cross-correlation of every pair of references (how similar the classes are, with the low-pass and mask of the alignment). Analyze Results shows how each volume was aligned, the similarity matrix and all the references together in 3D.",
     "sections": [
         {

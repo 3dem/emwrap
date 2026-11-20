@@ -274,7 +274,7 @@ them) and emflow displays them.
 - **Relion adaptor** (`RelionReferenceMaskAdaptor`, Class3D and Refine3D):
   the volume is `fn_ref` (for a list of references, Volumes: a STAR file
   with rlnReferenceImage, e.g. the `input_references.star` of
-  `emw-aligned-volumes`, the first one, with a warning), the mask
+  `emw-align-volumes`, the first one, with a warning), the mask
   `fn_mask` and the diameter `particle_diameter`. The wand is on
   `fn_mask` and `particle_diameter`.
   Without a mask, OK sets `particle_diameter`; with one, it sets nothing.
