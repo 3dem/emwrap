@@ -18,7 +18,9 @@ The wizards so far:
   from tilt-series, used by Warp `emw-warp-export_particles` and Relion
   `relion.pseudosubtomo`.
 - `VolumeMaskWizard`: the mask of a map (a mask map or a sphere), used by
-  Relion `relion.class3d.tomo` and `relion.refine3d.tomo`, and by Warp
+  Relion `relion.class3d.tomo` and `relion.refine3d.tomo`, the mask
+  diameter of `relion.initialmodel.tomo` (a sphere over the map of the
+  particles, or in an empty box of their size), and by Warp
   `emw-warp-mtools_create` (the species mask over the last Relion volume of
   the input `_data.star`, `WarpCreateSpeciesMaskAdaptor`).
 - `MaskCreateWizard`: the parameters of a mask created from a map, with a
@@ -278,6 +280,13 @@ them) and emflow displays them.
   `fn_mask` and the diameter `particle_diameter`. The wand is on
   `fn_mask` and `particle_diameter`.
   Without a mask, OK sets `particle_diameter`; with one, it sets nothing.
+- **Relion InitialModel adaptor** (`RelionInitialModelMaskAdaptor`): only
+  `particle_diameter`, as a sphere over the map of the Relion refinement or
+  classification the particles come from (`<prefix>_data.star`), or, before
+  there is any map, in an empty box of the particles (the `box` input:
+  `rlnImageSize` and `rlnImagePixelSize` of their optics; `data.volume` is
+  `{kind: "box", path: "", dimensions, voxelSize}` and the UI draws an empty
+  density). OK sets `particle_diameter`.
 
 ## Example: MaskCreateWizard
 

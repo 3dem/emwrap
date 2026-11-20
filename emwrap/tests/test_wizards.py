@@ -50,6 +50,7 @@ WARP = 'emw-warp-export_particles'
 RELION = 'relion.pseudosubtomo'
 CLASS3D = 'relion.class3d.tomo'
 REFINE3D = 'relion.refine3d.tomo'
+INITIAL_MODEL = 'relion.initialmodel.tomo'
 MASK_CREATE = 'emw-relion-mask_create'
 MTOOLS_CREATE = 'emw-warp-mtools_create'
 PYTOM_TEMPLATE = 'emw-pytom-create_template'
@@ -347,6 +348,40 @@ class TestWizards(unittest.TestCase):
         result = Wizards.apply(self.project, REFINE3D, 'mask', params,
                                {'diameter': 50})
         self.assertEqual(result['params'], {'particle_diameter': 50})
+
+    def test_initialmodel_mask(self):
+        """ The mask diameter of an initial model: a sphere in an empty box
+        of the particles, or over the map they come from. """
+        optics = ('data_optics\n\nloop_\n_rlnOpticsGroup #1\n_rlnImagePixelSize #2\n'
+                  '_rlnImageSize #3\n1 7.64 32\n\ndata_particles\n\nloop_\n'
+                  '_rlnOpticsGroup #1\n1\n')
+        self._write('EMwrap/job020/particles.star', optics)
+        self._write('EMwrap/job020/optimisation_set.star',
+                    'data_optimisation_set\n\nloop_\n_rlnTomoTomogramsFile #1\n'
+                    '_rlnTomoParticlesFile #2\nEMwrap/job020/tomograms.star '
+                    'EMwrap/job020/particles.star\n')
+        params = {'in_optimisation': 'EMwrap/job020/optimisation_set.star',
+                  'particle_diameter': '200'}
+        result = Wizards.open(self.project, INITIAL_MODEL, 'mask', params)
+        self.assertEqual(result['ui'], 'VolumeMaskWizard')
+        volume = result['data']['volume']
+        self.assertEqual((volume['kind'], volume['dimensions'], volume['voxelSize']),
+                         ('box', [32, 32, 32], 7.64))
+        self.assertEqual(result['inputs'], {'mask_type': 'sphere', 'diameter': 200})
+        self.assertTrue(any('empty box' in w for w in result['warnings']))
+        result = Wizards.apply(self.project, INITIAL_MODEL, 'mask', params, {'diameter': 180})
+        self.assertEqual(result['params'], {'particle_diameter': 180})
+
+        # Particles of a refinement: over its map
+        self._write('Refine3D/job030/run_data.star', optics)
+        self._write_mrc('Refine3D/job030/run_class001.mrc', (32, 32, 32), angpix=7.64)
+        params = {'use_direct_entries': True, 'in_particles': 'Refine3D/job030/run_data.star',
+                  'particle_diameter': '200'}
+        volume = Wizards.open(self.project, INITIAL_MODEL, 'mask', params)['data']['volume']
+        self.assertEqual((volume['kind'], volume['path']), ('volume', 'Refine3D/job030/run_class001.mrc'))
+        # No particles
+        with self.assertRaises(WizardError):
+            Wizards.open(self.project, INITIAL_MODEL, 'mask', {'particle_diameter': '200'})
 
     def test_mtools_create_mask(self):
         self._write('Refine3D/job010/run_data.star', 'data_particles\n')
