@@ -542,6 +542,14 @@ class JobForm:
                     errors.append(f"{label}: invalid table value ({exc}).")
                     return
 
+                min_rows = container_def.get('min')
+                if min_rows is not None:
+                    n = sum(not _is_table_row_empty(r, columns) for r in rows)
+                    if n < int(min_rows):
+                        errors.append(
+                            f"{label}: at least {int(min_rows)} row(s) are required.")
+                        return
+
                 for row_index, row in enumerate(rows):
                     if _is_table_row_empty(row, columns):
                         continue

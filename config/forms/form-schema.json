@@ -372,6 +372,11 @@
           "items": {
             "$ref": "#/$defs/parameter"
           }
+        },
+        "min": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Minimum number of (non-empty) rows required"
         }
       },
       "unevaluatedProperties": false
