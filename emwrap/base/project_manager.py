@@ -23,6 +23,7 @@ import string
 import subprocess
 import argparse
 import shutil
+import socket
 import time
 from contextlib import contextmanager
 from datetime import datetime
@@ -613,17 +614,28 @@ class ProjectManager(FolderManager):
         return self.exists(job_id, self.JOB_SCHEDULE_ID_FILE)
 
     def _readSchedulePid(self, job_id):
-        path = self.join(job_id, self.JOB_SCHEDULE_ID_FILE)
-        if not os.path.exists(path):
-            return None
-        with open(path) as f:
-            pid = f.readline().strip()
-        return pid or None
+        return self.readScheduleProcess(job_id)[0]
+
+    def readScheduleProcess(self, job_id):
+        """ (pid, host) of the schedule watcher of a scheduled job, from its
+        schedule.id file: the pid in the first line and the host in the
+        second one (None for files written before the host was stored).
+        (None, None) if the file does not exist or is empty. """
+        try:
+            with open(self.join(job_id, self.JOB_SCHEDULE_ID_FILE)) as f:
+                lines = [line.strip() for line in f.readlines()]
+        except OSError:
+            return None, None
+        pid = lines[0] if lines and lines[0] else None
+        host = lines[1] if len(lines) > 1 and lines[1] else None
+        return pid, host
 
     def _isScheduleWatcherActive(self, job_id):
-        pid = self._readSchedulePid(job_id)
+        pid, host = self.readScheduleProcess(job_id)
         if not pid:
             return False
+        if host and not self.same_host(host, socket.gethostname()):
+            return True  # Running in another host, it can not be checked here
         try:
             os.kill(int(pid), 0)
             return True
@@ -669,10 +681,18 @@ class ProjectManager(FolderManager):
     def _stopScheduleWatcher(self, jobId):
         """Stop the per-job schedule watcher process."""
         job_log = self._jobLogPath(jobId)
-        pid = self._readSchedulePid(jobId)
+        pid, host = self.readScheduleProcess(jobId)
         if not pid:
             self._removeScheduleId(jobId)
             return False
+
+        if host and not self.same_host(host, socket.gethostname()):
+            # The pid is of another machine: without schedule.id the
+            # watcher exits by itself in its next check
+            self._log(f"Schedule watcher of {jobId} runs on {host} (pid {pid}), "
+                      f"it exits in its next check", jobFile=job_log, flush=True)
+            self._removeScheduleId(jobId)
+            return True
 
         self._log(f"Stopping schedule watcher, pid={pid}",
                   jobFile=job_log, flush=True)
@@ -778,8 +798,9 @@ class ProjectManager(FolderManager):
         job_id = Path.rmslash(job_id)
         job_log = self._jobLogPath(job_id)
         watcher_pid = str(os.getpid())
+        # The pid of the watcher and the host running it
         with open(self.join(job_id, self.JOB_SCHEDULE_ID_FILE), 'w') as f:
-            f.write(f"{watcher_pid}\n")
+            f.write(f"{watcher_pid}\n{socket.gethostname()}\n")
         self._log(
             f"Schedule watcher started for {job_id} (pid={watcher_pid})",
             jobFile=job_log, flush=True)
@@ -881,22 +902,50 @@ class ProjectManager(FolderManager):
             self._log("ERROR: Stopping CLUSTER job failed", jobFile=scriptLog)
             self._log(f"  Error: '{p.stderr.rstrip()}'", jobFile=scriptLog)
 
+    @staticmethod
+    def same_host(host1, host2):
+        """ True if two host names are the same machine (short names, so
+        'cryo-em-wkst03' and 'cryo-em-wkst03.stjude.org' are). """
+        def _short(h):
+            return str(h or '').strip().split('.')[0].lower()
+        return bool(_short(host1)) and _short(host1) == _short(host2)
+
+    def readLocalProcess(self, jobId):
+        """ (pid, host) of the root process of a locally launched job, from
+        its process.id file: the pid in the first line and the host in the
+        second one (None for files written before the host was stored).
+        (None, None) if the file does not exist or is empty. """
+        try:
+            with open(self.join(jobId, self.JOB_PROCESS_ID_FILE)) as f:
+                lines = [line.strip() for line in f.readlines()]
+        except OSError:
+            return None, None
+        pid = lines[0] if lines and lines[0] else None
+        host = lines[1] if len(lines) > 1 and lines[1] else None
+        return pid, host
+
     def _stopLocalJob(self, jobId):
         """Kill a locally launched job using its recorded root process id."""
         scriptLog = self.join(jobId, 'job.log')
-        process_id_file = self.join(jobId, self.JOB_PROCESS_ID_FILE)
-        if not os.path.exists(process_id_file):
+        if not self.exists(jobId, self.JOB_PROCESS_ID_FILE):
             self._log(
                 f"No {self.JOB_PROCESS_ID_FILE} found for local job {jobId}",
                 jobFile=scriptLog, flush=True)
             return
 
-        with open(process_id_file) as f:
-            pid = f.readline().strip()
+        pid, host = self.readLocalProcess(jobId)
 
         if not pid:
             self._log(
                 f"Empty {self.JOB_PROCESS_ID_FILE} for local job {jobId}",
+                jobFile=scriptLog, flush=True)
+            return
+
+        if host and not self.same_host(host, socket.gethostname()):
+            # The pid is of another machine, it might be any process here
+            self._log(
+                f"ERROR: Local job {jobId} runs on {host} (pid {pid}), "
+                f"it can not be stopped from {socket.gethostname()}",
                 jobFile=scriptLog, flush=True)
             return
 
@@ -1231,8 +1280,9 @@ class ProjectManager(FolderManager):
         cluster_id_file = os.path.join(folder_path, self.JOB_CLUSTER_ID_FILE)
         if os.path.exists(cluster_id_file):
             os.remove(cluster_id_file)
+        # The pid of the root process and the host running it
         with open(os.path.join(folder_path, self.JOB_PROCESS_ID_FILE), 'w') as f:
-            f.write(str(p.pid))
+            f.write(f"{p.pid}\n{socket.gethostname()}\n")
         if wait:
             p.wait()
 
