@@ -247,8 +247,9 @@ class TiltAnalyzePipeline(ProcessingPipeline):
         another file than the one asked for now. """
         path = tqc.Config.path(self.outputDir)
         # Persisted relative to the project root (absolute if outside it)
-        loadedAbs = os.path.abspath(self.inputConfig) if self.inputConfig else None
-        loaded = self.relativizePaths(loadedAbs) if loadedAbs else None
+        loaded = self.projectPath(self.inputConfig)
+        # Configurations saved before were storing the absolute path
+        loadedAbs = self.projectFile(loaded) if loaded else None
         if os.path.exists(path):
             try:
                 current = tqc.Config.read_file(path)

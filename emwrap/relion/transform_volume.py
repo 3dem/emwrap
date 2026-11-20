@@ -230,7 +230,7 @@ class RelionTransformVolume(RelionBasePipeline):
         inVol = self._get('i')
         if not inVol:
             raise Exception("Input volume is required.")
-        inVolAbs = inVol if os.path.isabs(inVol) else os.path.join(self.workingDir, inVol)
+        inVolAbs = self.projectFile(inVol)
         if not os.path.exists(inVolAbs):
             raise Exception(f"Input volume '{inVol}' does not exist.")
 

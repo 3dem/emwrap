@@ -1,6 +1,6 @@
 {
     "name": "emw-pytme",
-    "help": "Wrapper for *pyTME* (Python Template Matching Engine), a GPU-accelerated template matching for cryo-EM and cryo-ET, developed by Valentin J. Maurer and Jan Kosinski at EMBL Hamburg.\n\nEach tomogram is matched with *pytme match* and its peaks are called with *pytme postprocess* (RELION 5 and RELION 4 STAR files and pyTME orientations). The output particles have the same format as emw-pytom, with the pyTME score as rlnLCCmax.\n\nThe template and mask must have the voxel size of the tomograms (e.g. created with emw-pytom-create_template).\n\n*Documentation*:\nhttps://kosinskilab.github.io/pyTME/\n\n*CITATION*:\n\nMaurer, V. J., Siggel, M., & Kosinski, J. (2024). PyTME (Python Template Matching Engine): A fast, flexible, and multi-purpose template matching library for cryogenic electron microscopy data. SoftwareX, 25, 101636. https://doi.org/10.1016/j.softx.2024.101636",
+    "help": "Wrapper for *pyTME* (Python Template Matching Engine), a GPU-accelerated template matching for cryo-EM and cryo-ET, developed by Valentin J. Maurer and Jan Kosinski at EMBL Hamburg.\n\nEach tomogram is matched with *pytme match* and its peaks are called with *pytme postprocess* (*match_template* and *postprocess* with pyTME 0.3.3, detected from the launcher) (RELION 5 and RELION 4 STAR files and pyTME orientations). The output particles have the same format as emw-pytom, with the pyTME score as rlnLCCmax.\n\nThe template and mask must have the voxel size of the tomograms (e.g. created with emw-pytom-create_template).\n\n*Documentation*:\nhttps://kosinskilab.github.io/pyTME/\n\n*CITATION*:\n\nMaurer, V. J., Siggel, M., & Kosinski, J. (2024). PyTME (Python Template Matching Engine): A fast, flexible, and multi-purpose template matching library for cryogenic electron microscopy data. SoftwareX, 25, 101636. https://doi.org/10.1016/j.softx.2024.101636",
     "sections": [
         {
             "label": "Input",
@@ -79,7 +79,7 @@
                     "name": "pytme.extra_args",
                     "label": "pytme match extra arguments",
                     "paramClass": "StringParam",
-                    "help": "Extra command-line arguments to pass directly to 'pytme match' (pyTME >= 0.3.6), exactly as they would be typed on the command line (e.g. \"--target-mask mask.mrc --no-filter-target\"). Options not exposed above include:\n--target-mask (skip regions outside this mask)\n--wedge-axes (projection and tilt axes, default 2,0)\n--no-filter-target (do not filter the tomogram)\n--no-pass-smooth (hard edge band-pass)\n--phase-shift (phase plate phase shift, in degrees)\n--centering / --pad-edges / --interpolation-order / --use-memmap\n--memory-scaling (fraction of memory to use, default 0.85)\n--no-use-optimized-set (random uniform rotations)\nSee the pyTME documentation for the full list: https://kosinskilab.github.io/pyTME/\n\nOptions already set above (or computed automatically from the acquisition/batch data, such as --target, --tilt-angles or --defocus) must not be repeated here -- doing so will fail the job with an error. Single-letter options (-m, -i, -a, ...) are not recognized here, use their long form."
+                    "help": "Extra command-line arguments to pass directly to 'pytme match' (match_template with pyTME 0.3.3), exactly as they would be typed on the command line (e.g. \"--target-mask mask.mrc --no-filter-target\"). Options not exposed above include:\n--target-mask (skip regions outside this mask)\n--wedge-axes (projection and tilt axes, default 2,0)\n--no-filter-target (do not filter the tomogram)\n--no-pass-smooth (hard edge band-pass)\n--phase-shift (phase plate phase shift, in degrees)\n--centering / --pad-edges / --interpolation-order / --use-memmap\n--memory-scaling (fraction of memory to use, default 0.85)\n--no-use-optimized-set (random uniform rotations)\nSee the pyTME documentation for the full list: https://kosinskilab.github.io/pyTME/\n\nOptions already set above (or computed automatically from the acquisition/batch data, such as --target, --tilt-angles or --defocus) must not be repeated here -- doing so will fail the job with an error. Single-letter options (-m, -i, -a, ...) are not recognized here, use their long form."
                 }
             ]
         },
@@ -210,7 +210,7 @@
                             "label": "False positives",
                             "paramClass": "FloatParam",
                             "default": 1,
-                            "help": "(--n-false-positives) Number of accepted false positives to determine the minimum score from the score statistics (Rickgauer et al. 2017). The largest of this and the minimum score is used. Leave both empty to keep the maximum number of particles.",
+                            "help": "(--n-false-positives) Number of accepted false positives to determine the minimum score from the score statistics (Rickgauer et al. 2017). The largest of this and the minimum score is used (pyTME 0.3.3 uses only this cutoff and ignores the minimum score). Leave both empty to keep the maximum number of particles.",
                             "allowsEmpty": true
                         }
                     ]
@@ -257,7 +257,7 @@
                             "name": "launcher",
                             "label": "pyTME",
                             "paramClass": "StringParam",
-                            "help": "Launcher to use for the pyTME programs ('pytme match' and 'pytme postprocess', pyTME >= 0.3.6). Leave empty to use EMWRAP_CONFIG default."
+                            "help": "Launcher to use for the pyTME programs: pyTME 0.3.3 (match_template and postprocess) or >= 0.3.4 ('pytme match' and 'pytme postprocess'), detected from the commands the launcher provides. Leave empty to use EMWRAP_CONFIG default."
                         }
                     ]
                 }

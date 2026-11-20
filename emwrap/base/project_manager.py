@@ -23,11 +23,13 @@ import string
 import subprocess
 import argparse
 import shutil
+import socket
 import time
 from contextlib import contextmanager
 from datetime import datetime
 
-from emtools.utils import FolderManager, Process, Color, Path, Timer, Pretty
+from emtools.utils import (FolderManager, Process, Color, Path, Timer, Pretty,
+                           ResourceMonitor)
 from emtools.jobs import BatchManager, Workflow
 from emtools.hpc import ClusterJob
 from emtools.metadata import Table, StarFile, RelionStar
@@ -613,17 +615,28 @@ class ProjectManager(FolderManager):
         return self.exists(job_id, self.JOB_SCHEDULE_ID_FILE)
 
     def _readSchedulePid(self, job_id):
-        path = self.join(job_id, self.JOB_SCHEDULE_ID_FILE)
-        if not os.path.exists(path):
-            return None
-        with open(path) as f:
-            pid = f.readline().strip()
-        return pid or None
+        return self.readScheduleProcess(job_id)[0]
+
+    def readScheduleProcess(self, job_id):
+        """ (pid, host) of the schedule watcher of a scheduled job, from its
+        schedule.id file: the pid in the first line and the host in the
+        second one (None for files written before the host was stored).
+        (None, None) if the file does not exist or is empty. """
+        try:
+            with open(self.join(job_id, self.JOB_SCHEDULE_ID_FILE)) as f:
+                lines = [line.strip() for line in f.readlines()]
+        except OSError:
+            return None, None
+        pid = lines[0] if lines and lines[0] else None
+        host = lines[1] if len(lines) > 1 and lines[1] else None
+        return pid, host
 
     def _isScheduleWatcherActive(self, job_id):
-        pid = self._readSchedulePid(job_id)
+        pid, host = self.readScheduleProcess(job_id)
         if not pid:
             return False
+        if host and not self.same_host(host, socket.gethostname()):
+            return True  # Running in another host, it can not be checked here
         try:
             os.kill(int(pid), 0)
             return True
@@ -669,10 +682,18 @@ class ProjectManager(FolderManager):
     def _stopScheduleWatcher(self, jobId):
         """Stop the per-job schedule watcher process."""
         job_log = self._jobLogPath(jobId)
-        pid = self._readSchedulePid(jobId)
+        pid, host = self.readScheduleProcess(jobId)
         if not pid:
             self._removeScheduleId(jobId)
             return False
+
+        if host and not self.same_host(host, socket.gethostname()):
+            # The pid is of another machine: without schedule.id the
+            # watcher exits by itself in its next check
+            self._log(f"Schedule watcher of {jobId} runs on {host} (pid {pid}), "
+                      f"it exits in its next check", jobFile=job_log, flush=True)
+            self._removeScheduleId(jobId)
+            return True
 
         self._log(f"Stopping schedule watcher, pid={pid}",
                   jobFile=job_log, flush=True)
@@ -778,8 +799,9 @@ class ProjectManager(FolderManager):
         job_id = Path.rmslash(job_id)
         job_log = self._jobLogPath(job_id)
         watcher_pid = str(os.getpid())
+        # The pid of the watcher and the host running it
         with open(self.join(job_id, self.JOB_SCHEDULE_ID_FILE), 'w') as f:
-            f.write(f"{watcher_pid}\n")
+            f.write(f"{watcher_pid}\n{socket.gethostname()}\n")
         self._log(
             f"Schedule watcher started for {job_id} (pid={watcher_pid})",
             jobFile=job_log, flush=True)
@@ -881,22 +903,151 @@ class ProjectManager(FolderManager):
             self._log("ERROR: Stopping CLUSTER job failed", jobFile=scriptLog)
             self._log(f"  Error: '{p.stderr.rstrip()}'", jobFile=scriptLog)
 
+    @staticmethod
+    def same_host(host1, host2):
+        """ True if two host names are the same machine (short names, so
+        'cryo-em-wkst03' and 'cryo-em-wkst03.stjude.org' are). """
+        def _short(h):
+            return str(h or '').strip().split('.')[0].lower()
+        return bool(_short(host1)) and _short(host1) == _short(host2)
+
+    def readLocalProcess(self, jobId):
+        """ (pid, host) of the root process of a locally launched job, from
+        its process.id file: the pid in the first line and the host in the
+        second one (None for files written before the host was stored).
+        (None, None) if the file does not exist or is empty. """
+        try:
+            with open(self.join(jobId, self.JOB_PROCESS_ID_FILE)) as f:
+                lines = [line.strip() for line in f.readlines()]
+        except OSError:
+            return None, None
+        pid = lines[0] if lines and lines[0] else None
+        host = lines[1] if len(lines) > 1 and lines[1] else None
+        return pid, host
+
+    # ------------------- Where a job runs and its usage ---------------------
+    # From the files written by emwrap in the job folder (job.id, process.id,
+    # schedule.id, info.json, job.log and profile/runNN.csv), never querying
+    # the queueing system. The job is a workflow job (id and 'status').
+    def getClusterJobId(self, job):
+        """ Id of the last cluster job of a job submitted to a queue, or ''
+        (run locally). It is the job.id written when submitting (only kept
+        if the last launch was submitted to a queue) or, for older jobs, the
+        cluster job recorded in the last run (info.json). """
+        try:
+            if clusterJobId := self._readClusterJobId(job.id):
+                return clusterJobId
+        except OSError:
+            pass
+        if job['status'] in ('Launched', 'Running'):
+            return ''  # launched locally, the last run may be an old one
+        runs = self.getJobRuns(job)
+        computing = (runs[-1].get('computing') or {}) if runs else {}
+        return str((computing.get('cluster') or {}).get('job_id') or '')
+
+    def getLocalProcess(self, job, runs=None):
+        """ {'pid', 'host'} of a job run locally (not in a cluster), {} if
+        not known. From process.id (older files have no host) or, for jobs
+        without it, the job process recorded in the last run (info.json).
+        Strings, '' if not known. Only for jobs without a cluster job id
+        (see getClusterJobId); runs: the job runs, if already read. """
+        pid, host = self.readLocalProcess(job.id)
+        if pid and host:
+            return {'pid': pid, 'host': host}
+        if job['status'] in ('Launched', 'Running') and pid:
+            return {'pid': pid, 'host': ''}  # the last run may be an old one
+        runs = self.getJobRuns(job) if runs is None else runs
+        computing = next((r['computing'] for r in reversed(runs)
+                          if r.get('computing')), None) or {}
+        if computing.get('cluster'):
+            return {}
+        pid = pid or str(computing.get('pid') or '')
+        host = str(computing.get('host') or '')
+        return {'pid': pid, 'host': host} if pid else {}
+
+    def getScheduleProcess(self, job):
+        """ {'pid', 'host'} of the schedule watcher of a scheduled job
+        (schedule.id, host '' in older files), {} if it is not scheduled. """
+        if job['status'] != 'Scheduled':
+            return {}
+        pid, host = self.readScheduleProcess(job.id)
+        return {'pid': pid, 'host': host or ''} if pid else {}
+
+    def readScheduleLog(self, jobId, maxLines=300):
+        """ Lines of job.log written since the job was last scheduled (the
+        schedule watcher logs its dependency checks there), the last
+        maxLines of them. """
+        try:
+            with open(self._jobLogPath(jobId), errors='replace') as f:
+                lines = [line for line in f.read().splitlines() if line.strip()]
+        except OSError:
+            return []
+        start = 0
+        for i, line in enumerate(lines):
+            if f"Job {jobId} scheduled" in line:
+                start = i
+        return lines[start:][-maxLines:]
+
+    def getJobProfiles(self, jobId, active=False, maxPoints=400, maxRuns=5):
+        """ Resource usage of the last maxRuns profiled runs of a job (the
+        'profile' param or EMWRAP_PROFILE, see ResourceMonitor): run number,
+        start, end, interval, node GPUs, file (from the project root),
+        samples, summary (from info.json, computed from the CSV while the
+        run has none) and series (the CSV columns reduced to maxPoints, see
+        ResourceMonitor.load_series). If active (job Launched or Running),
+        the last run without end has 'latest': its last sample and 'age',
+        seconds since it was written (a killed run never gets an end).
+        Reads info.json, not the cached runs, to get the last summary. """
+        info = ProcessingPipeline.readJobInfo(self.join(jobId, 'info.json')) or {}
+        runs = info.get('runs') or []
+        profiles = []
+        for i, run in enumerate(runs):
+            profile = run.get('profile') or {}
+            csvFile = self.join(jobId, profile['file']) if profile.get('file') else None
+            if not csvFile or not os.path.exists(csvFile):
+                continue
+            try:
+                data = ResourceMonitor.load_series(csvFile, maxPoints)
+                summary = profile.get('summary') or ResourceMonitor.summarize(csvFile)
+            except Exception as e:
+                print(f"Reading profile {csvFile}: {e}")
+                continue
+            entry = {'run': i + 1, 'start': run.get('start') or '',
+                     'end': run.get('end') or '',
+                     'interval': profile.get('interval'),
+                     'gpus': profile.get('gpus') or ResourceMonitor.csv_gpus(csvFile),
+                     'file': os.path.join(jobId, profile['file']),
+                     'samples': data['samples'], 'summary': summary,
+                     'series': data['series']}
+            if (active and i == len(runs) - 1 and not run.get('end')
+                    and data['last']):
+                age = time.time() - os.path.getmtime(csvFile)
+                entry['latest'] = dict(data['last'], age=round(age))
+            profiles.append(entry)
+        return profiles[-maxRuns:]
+
     def _stopLocalJob(self, jobId):
         """Kill a locally launched job using its recorded root process id."""
         scriptLog = self.join(jobId, 'job.log')
-        process_id_file = self.join(jobId, self.JOB_PROCESS_ID_FILE)
-        if not os.path.exists(process_id_file):
+        if not self.exists(jobId, self.JOB_PROCESS_ID_FILE):
             self._log(
                 f"No {self.JOB_PROCESS_ID_FILE} found for local job {jobId}",
                 jobFile=scriptLog, flush=True)
             return
 
-        with open(process_id_file) as f:
-            pid = f.readline().strip()
+        pid, host = self.readLocalProcess(jobId)
 
         if not pid:
             self._log(
                 f"Empty {self.JOB_PROCESS_ID_FILE} for local job {jobId}",
+                jobFile=scriptLog, flush=True)
+            return
+
+        if host and not self.same_host(host, socket.gethostname()):
+            # The pid is of another machine, it might be any process here
+            self._log(
+                f"ERROR: Local job {jobId} runs on {host} (pid {pid}), "
+                f"it can not be stopped from {socket.gethostname()}",
                 jobFile=scriptLog, flush=True)
             return
 
@@ -1231,8 +1382,9 @@ class ProjectManager(FolderManager):
         cluster_id_file = os.path.join(folder_path, self.JOB_CLUSTER_ID_FILE)
         if os.path.exists(cluster_id_file):
             os.remove(cluster_id_file)
+        # The pid of the root process and the host running it
         with open(os.path.join(folder_path, self.JOB_PROCESS_ID_FILE), 'w') as f:
-            f.write(str(p.pid))
+            f.write(f"{p.pid}\n{socket.gethostname()}\n")
         if wait:
             p.wait()
 

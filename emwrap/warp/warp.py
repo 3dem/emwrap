@@ -365,8 +365,7 @@ class WarpBasePipeline(ProcessingPipeline):
         is linked only when importing into the job root.
         """
         def _abs(path):
-            path = getattr(path, 'path', path)
-            return os.path.join(self.workingDir, self.toProjectPath(path))
+            return self.projectFile(getattr(path, 'path', path))
 
         gain = None if dest else self.acq.get('gain', None)
         self.log(f"{self.name}: Importing Warp inputs from "
@@ -1162,11 +1161,8 @@ class WarpBaseTsAlign(WarpBasePipeline):
         every mdoc, including those whose frames were deselected, which
         can leave WarpTools stuck.
         """
-        def _abs(path):
-            return os.path.join(self.workingDir, self.toProjectPath(path))
-
-        srcFolder = _abs(inputFolder.join(self.MDOCS))
-        dstFolder = _abs(self.join(self.MDOCS))
+        srcFolder = self.projectFile(inputFolder.join(self.MDOCS))
+        dstFolder = self.projectFile(self.join(self.MDOCS))
         if os.path.islink(dstFolder) or os.path.isfile(dstFolder):
             os.unlink(dstFolder)
         elif os.path.isdir(dstFolder):
