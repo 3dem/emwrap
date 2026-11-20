@@ -16,6 +16,11 @@
 
 import os
 import math
+import shlex
+import shutil
+import subprocess
+import tempfile
+import threading
 
 from emtools.utils import FolderManager
 from emtools.jobs import Args
@@ -27,7 +32,8 @@ from emwrap.base import ProcessingPipeline
 class PyTME:
     """ pyTME wrapper to pick one tomogram in a batch folder.
 
-    It runs (pyTME >= 0.3.6, the 'pytme' command):
+    It runs (pyTME >= 0.3.4 'pytme' subcommands, or the pyTME 0.3.3
+    'match_template' and 'postprocess' commands, detected from the launcher):
         pytme match: template matching, writes the scores (pickle)
         pytme postprocess: peak calling, once per output format:
             relion5 -> <tsName>_particles_relion5.star (centered Angstroms)
@@ -63,6 +69,32 @@ class PyTME:
         self.args = args
         print(f"pytme args: {str(args)}")
 
+    # Launcher -> whether it provides the 'pytme' command (pyTME >= 0.3.4)
+    _pytmeCli = {}
+    _pytmeCliLock = threading.Lock()
+
+    @classmethod
+    def hasPytmeCli(cls, launcher):
+        """ True if the launcher provides the 'pytme' command (pyTME >= 0.3.4,
+        'pytme match' and 'pytme postprocess'), False for pyTME 0.3.3 (only
+        the 'match_template' and 'postprocess' commands). Checked once per
+        launcher. """
+        with cls._pytmeCliLock:
+            if launcher not in cls._pytmeCli:
+                cmd = shlex.split(launcher or '') + ['sh', '-c', 'command -v pytme']
+                try:
+                    p = subprocess.run(cmd, capture_output=True, text=True,
+                                       timeout=300)
+                    lines = p.stdout.strip().splitlines()
+                    found = (p.returncode == 0 and bool(lines)
+                             and lines[-1].strip().endswith('pytme'))
+                except Exception as e:
+                    print(f"WARNING: could not check the pyTME version with "
+                          f"'{launcher}': {e}")
+                    found = False
+                cls._pytmeCli[launcher] = found
+            return cls._pytmeCli[launcher]
+
     def process_batch(self, batch, **kwargs):
         tsName = batch['tsName']
         batch.create()
@@ -81,14 +113,21 @@ class PyTME:
         mask = matchArgs.get('template-mask', None)
         mask = batch.link(mask, absolute=True) if mask else None
 
+        if newCli := self.hasPytmeCli(launcher):
+            matchCmd = {'pytme': 'match'}
+            ppCmd = {'pytme': 'postprocess'}
+        else:
+            matchCmd = {'match_template': ''}
+            ppCmd = {'postprocess': ''}
+            template, mask = self._padTemplate(batch, template, mask)
+        batch.log(f"pyTME commands: {'pytme match/postprocess (>= 0.3.4)' if newCli else 'match_template/postprocess (0.3.3)'}")
+
         args = Args({
-            'pytme': 'match',
+            **matchCmd,
             '-m': tomogram,
             '-i': template,
             '-o': pickleFn,
             '-s': matchArgs.get('score', 'FLCSphericalMask') or 'FLCSphericalMask',
-            # The command runs inside the batch folder
-            '--temp-directory': os.path.abspath(batch.path),
         })
         if mask:
             args['-I'] = mask
@@ -174,12 +213,20 @@ class PyTME:
                 label, batch, returncode, outputs=outputs,
                 logfile=batch.join('batch.log'))
 
-        _check('pytme_match', _call('pytme_match', args), [pickleFn])
+        # pyTME (>= 0.3.4) sets TMPDIR to --temp-directory, where the shared
+        # memory manager creates its Unix socket: a long batch path exceeds
+        # the AF_UNIX limit (107 chars) and match fails with an EOFError
+        tempDir = self._tempDir(tsName)
+        args['--temp-directory'] = tempDir
+        try:
+            _check('pytme_match', _call('pytme_match', args), [pickleFn])
+        finally:
+            shutil.rmtree(tempDir, ignore_errors=True)
 
         # Peak calling, once for each output format
         pixelSize = float(self.acq.pixel_size)
         ppBase = Args({
-            'pytme': 'postprocess',
+            **ppCmd,
             '--input-file': pickleFn,
             '--peak-caller': ppArgs.get('peak-caller', 'PeakCallerMaximumFilter')
                              or 'PeakCallerMaximumFilter',
@@ -214,6 +261,15 @@ class PyTME:
                 self._writeEmpty(batch.join(outFn), fmt)
                 continue
             _check(label, returncode, [outFn])
+
+    @staticmethod
+    def _tempDir(tsName):
+        """ Short temporary folder for pyTME, in the system temporary
+        folder ($TMPDIR, or /tmp when that path is too long). """
+        base = tempfile.gettempdir()
+        if len(base) > 50:
+            base = '/tmp'
+        return tempfile.mkdtemp(prefix=f'pytme_{tsName[:20]}_', dir=base)
 
     def _minDistance(self, ppArgs):
         """ Minimum distance between peaks (A), by default the particle
@@ -258,6 +314,41 @@ class PyTME:
     def _tiltSeriesTable(self, batch):
         tsStar = batch['rowDict']['rlnTomoTiltSeriesStarFile']
         return StarFile.getTableFromFile(batch['tsName'], tsStar, guessType=False)
+
+    def _padTemplate(self, batch, template, mask):
+        """ Workaround for a pyTME 0.3.3 bug (fixed in 0.3.4): with tilt
+        weighting, the tilt filter (ReconstructFromTilt) returns an array
+        instead of a dict when the number of tilts equals the template box
+        size, and match_template fails with "invalid literal for int() with
+        base 10: 'data'". In that case the template (and mask) are padded
+        with one zero voxel on each side, keeping their center and sampling.
+        Returns the (maybe padded) template and mask file names in the batch
+        folder. """
+        import mrcfile
+        import numpy as np
+
+        nTilts = len(batch['tilt_angles'])
+        with mrcfile.open(batch.join(template), header_only=True) as mrc:
+            h = mrc.header
+            dims = (int(h.nx), int(h.ny), int(h.nz))
+        if nTilts not in dims:
+            return template, mask
+
+        def _pad(fn):
+            base, ext = os.path.splitext(fn)
+            padded = f"{base}_pad{ext}"
+            with mrcfile.open(batch.join(fn), permissive=True) as mrc:
+                data = np.pad(mrc.data, 1)
+                voxelSize = mrc.voxel_size.copy()
+            with mrcfile.new(batch.join(padded), overwrite=True) as mrc:
+                mrc.set_data(data.astype(np.float32))
+                mrc.voxel_size = voxelSize
+            return padded
+
+        batch.log(f"WARNING: {nTilts} tilts and template box {dims}, padding the "
+                  f"template{' and mask' if mask else ''} by 1 voxel per side "
+                  f"(pyTME 0.3.3 fails when they are the same)")
+        return _pad(template), (_pad(mask) if mask else None)
 
     def _writeTilts(self, batch):
         """ Tab-separated file with tilt angles and accumulated dose
