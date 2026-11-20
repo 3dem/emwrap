@@ -16,6 +16,8 @@
 
 """ Wizard adaptors of the Relion job forms (see emwrap.base.wizards). """
 
+from emtools.metadata import StarFile
+
 from emwrap.base.wizards import (WizardAdaptor, WizardError,
                                  ExportTomoParticlesWizard, VolumeMaskWizard,
                                  MaskCreateWizard,
@@ -76,7 +78,7 @@ class RelionReferenceMaskAdaptor(WizardAdaptor):
 
     def toWizard(self, params):
         return {
-            'volume': params.get('fn_ref'),
+            'volume': self._referenceMap(params.get('fn_ref')),
             'mask': params.get('fn_mask'),
             'diameter': params.get('particle_diameter')
         }
@@ -85,6 +87,22 @@ class RelionReferenceMaskAdaptor(WizardAdaptor):
         if outputs['mask_type'] == 'map':
             return {}
         return {'particle_diameter': outputs['diameter']}
+
+    def _referenceMap(self, fnRef):
+        """ The reference map, or the first one of a list of references
+        (Volumes: a STAR file with rlnReferenceImage, one per class). """
+        if not fnRef or not str(fnRef).endswith('.star'):
+            return fnRef
+        try:
+            refs = StarFile.getTableFromFile('references', self.join(fnRef))
+        except Exception as e:
+            raise WizardError(f"Could not read the references {fnRef}: {e}")
+        if not len(refs):
+            raise WizardError(f"There are no references in {fnRef}.")
+        if len(refs) > 1:
+            self.warnings.append(f"The mask is shown over the first of the "
+                                 f"{len(refs)} references.")
+        return refs[0].rlnReferenceImage
 
 
 class RelionMaskCreateAdaptor(WizardAdaptor):

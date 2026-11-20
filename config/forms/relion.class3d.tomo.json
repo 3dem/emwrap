@@ -72,8 +72,8 @@
                             "name": "fn_ref",
                             "label": "Reference map:",
                             "paramClass": "PathParam",
-                            "pointerClass": "Volume",
-                            "help": "A 3D map in MRC/Spider format. Make sure this map has the same dimensions and the same pixel size as your input images, or specify that one can resize the reference if needed."
+                            "pointerClass": "Volume, Volumes",
+                            "help": "A 3D map in MRC/Spider format, or the references of a multi-reference classification (Volumes, e.g. the input_references.star of emw-aligned-volumes: one map per class, in their order). Make sure this map has the same dimensions and the same pixel size as your input images, or specify that one can resize the reference if needed."
                         },
                         {
                             "name": "fn_mask",
