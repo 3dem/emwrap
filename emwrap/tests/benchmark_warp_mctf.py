@@ -21,7 +21,7 @@ import numpy as np
 import time
 import json
 
-from emtools.utils import Color, Process, System, Path, GpuMonitor
+from emtools.utils import Color, Process, System, Path, ResourceMonitor
 from emtools.jobs import BatchManager, Args
 from emtools.metadata import Table, StarFile
 
@@ -66,12 +66,15 @@ def runJob(cmd, argsJson, inputStr, alias):
     argsFn = f"args{jobCounter:03d}_{alias}.json"
     with open(argsFn, 'w') as f:
         json.dump(argsJson, f, indent=4)
-    gm = GpuMonitor()
-    gm.outputLog = f"gpu_monitor_{jobCounter:03d}.json"
-    gm.start()
-    Process.system(cmd.format(argsFn=argsFn, inputStr=inputStr))
+    # CPU, memory, I/O and GPU usage of the job (all the GPUs), see
+    # ResourceMonitor; EMhub plots it in the benchmark session page
+    monitor = ResourceMonitor.launch(os.getpid(), f"profile_{jobCounter:03d}.csv",
+                                     interval=2, gpus='all')
+    try:
+        Process.system(cmd.format(argsFn=argsFn, inputStr=inputStr))
+    finally:
+        ResourceMonitor.terminate(monitor)
     jobCounter += 1
-    gm.stop()
 
 
 def lastJob():
