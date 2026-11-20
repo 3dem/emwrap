@@ -26,7 +26,8 @@ import argparse
 import re
 from collections import defaultdict
 
-from emtools.utils import Process, Color, Pretty, FolderManager, Timer
+from emtools.utils import (Process, Color, Pretty, FolderManager, Timer,
+                           ResourceMonitor)
 from emtools.jobs import BatchManager, Args, Pipeline
 from emtools.hpc import ClusterJob, ComputingEnv
 from emtools.metadata import (Table, Column, StarFile, StarMonitor, TextFile,
@@ -97,6 +98,8 @@ class ProcessingPipeline(Pipeline, FolderManager):
         self.infoFile = self.join('info.json')
         # (runInfo, timer) of the run in progress, see __endRun
         self._currentRun = None
+        # Resource monitor process of the run in progress (see profile_interval)
+        self._monitor = None
         # Lock used when requiring single thread running output generation code
         self.outputLock = threading.Lock()
 
@@ -265,6 +268,64 @@ class ProcessingPipeline(Pipeline, FolderManager):
         self.__file('EXIT_ABORTED')
         sys.exit(0)
 
+    def profile_interval(self):
+        """ Seconds between resource usage samples of the job: its 'profile'
+        param (Compute > Launchers > Profile in the form) or, if it is
+        empty, the EMWRAP_PROFILE variable. A positive number turns the
+        profiling on with that interval, 0 (or none set) turns it off. An
+        invalid value is reported and taken as 0. """
+        value = str(self._args.get('profile', None) or '').strip()
+        source = "'profile' param"
+        if not value:
+            value = os.environ.get('EMWRAP_PROFILE', '').strip()
+            source = 'EMWRAP_PROFILE'
+        try:
+            interval = float(value or 0)
+        except ValueError:
+            interval = float('nan')
+        if not interval >= 0:  # Invalid, negative or nan
+            print(f"WARNING: Invalid {source}='{value}', expected the "
+                  f"seconds between samples (0 for no profiling)", flush=True)
+            return 0.0
+        return interval
+
+    def __startProfile(self, runInfo):
+        """ Start the resource monitor of this run, if profile_interval > 0.
+        It writes profile/runNN.csv in the job folder, see ResourceMonitor.
+        A failure here is only logged, it must never stop the job. """
+        if not (interval := self.profile_interval()):
+            return
+        try:
+            n = len(self.info['runs']) + 1
+            csvFile = os.path.join('profile', f'run{n:02d}.csv')
+            os.makedirs(self.join('profile'), exist_ok=True)
+            gpus = ComputingEnv.monitor_gpus(runInfo.get('computing') or {})
+            gpusStr = gpus if isinstance(gpus, str) else ', '.join(map(str, gpus))
+            self.log(f"Resource usage every {interval} s (job GPUs: "
+                     f"{gpusStr or 'none'}) -> {self.join(csvFile)}", flush=True)
+            self._monitor = ResourceMonitor.launch(
+                os.getpid(), self.join(csvFile), interval, gpus)
+            runInfo['profile'] = {'file': csvFile, 'interval': interval}
+        except Exception as e:
+            self._monitor = None
+            self.log(f"WARNING: Could not start the resource monitor: {e}")
+
+    def __endProfile(self, runInfo):
+        """ Stop the resource monitor and store its summary in runInfo. """
+        if self._monitor is None:
+            return
+        monitor, self._monitor = self._monitor, None
+        try:
+            ResourceMonitor.terminate(monitor)
+            profile = runInfo['profile']
+            csvFile = self.join(profile['file'])
+            # The node GPUs (nvidia-smi index) monitored for the job ones
+            profile['gpus'] = ResourceMonitor.csv_gpus(csvFile)
+            profile['summary'] = summary = ResourceMonitor.summarize(csvFile)
+            self.log('\n'.join(ResourceMonitor.summary_lines(summary)))
+        except Exception as e:
+            self.log(f"WARNING: Could not summarize the resource usage: {e}")
+
     def __endRun(self, status):
         """ Store end time, elapsed and status of the current run in
         info.json, also when the run fails or is aborted. """
@@ -272,6 +333,7 @@ class ProcessingPipeline(Pipeline, FolderManager):
             return
         runInfo, t = self._currentRun
         self._currentRun = None
+        self.__endProfile(runInfo)
         runInfo['end'] = Pretty.now()
         runInfo['elapsed'] = str(t.getElapsedTime())
         runInfo['status'] = status
@@ -400,6 +462,7 @@ class ProcessingPipeline(Pipeline, FolderManager):
                 runInfo['launched'] = launched
             runInfo['computing'] = computing = self.computingInfo()
             print(f"\n{banner(ComputingEnv.lines(computing))}\n", flush=True)
+            self.__startProfile(runInfo)
             self.info['runs'].append(runInfo)
             self.writeInfo()
             self._currentRun = (runInfo, t)
