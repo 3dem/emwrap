@@ -325,6 +325,21 @@ class TestWizards(unittest.TestCase):
             with self.assertRaises(WizardError):
                 Wizards.open(self.project, CLASS3D, 'mask', {**params, **p})
 
+        # The references of a multi-reference classification (Volumes): the
+        # mask over the first one
+        from emtools.metadata import StarFile, Table
+        refs = Table(['rlnReferenceImage'])
+        refs.addRowValues(ref)
+        refs.addRowValues('MaskCreate/job011/mask.mrc')
+        os.makedirs(self.project.join('EMwrap/job013'), exist_ok=True)
+        with StarFile(self.project.join('EMwrap/job013/input_references.star'), 'w') as sf:
+            sf.writeTable('references', refs)
+        params = {'fn_ref': 'EMwrap/job013/input_references.star', 'fn_mask': '',
+                  'particle_diameter': '60'}
+        result = Wizards.open(self.project, CLASS3D, 'mask', params)
+        self.assertEqual(result['data']['volume']['path'], ref)
+        self.assertEqual(len(result['warnings']), 1)
+
         # Refine3D has the same params and adaptor
         params = {'fn_ref': ref, 'fn_mask': '', 'particle_diameter': '60'}
         result = Wizards.open(self.project, REFINE3D, 'mask', params)

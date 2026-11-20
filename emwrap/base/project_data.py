@@ -797,7 +797,8 @@ class ProjectData(FolderManager):
     def _spaStarInfo(self, output_id, filepath):
         """ Return output info of SPA STAR files (Movies, Micrographs,
         Particles, Classes2D from Relion optimiser files and MultiClasses2D),
-        with the number of items and the current pixel size, or None.
+        with the number of items and the current pixel size, or None. Also
+        the references of a multi-reference 3D classification (Volumes).
         The datatype declared in RELION_OUTPUT_NODES.star is used if it is
         an emwrap datatype (capitalized, e.g. 'Particles'), not a lowercase
         Relion keyword (e.g. 'relion' in 'ParticleGroupMetadata.star.relion'). """
@@ -810,6 +811,9 @@ class ProjectData(FolderManager):
             tables = sf.getTableNames()
             if 'classes2d' in tables:
                 return self._multiClasses2dInfo(sf)
+            # Volumes, or Volume (emw-align-volumes jobs before Volumes)
+            if 'references' in tables and nodeType in ('Volumes', 'Volume'):
+                return self._referencesInfo(sf, filepath)
             for tableName, datatype in self.SPA_TABLES.items():
                 if tableName in tables:
                     n = sf.getTableSize(tableName)
@@ -824,6 +828,21 @@ class ProjectData(FolderManager):
                         datatype = nodeType
                     return {'type': datatype, 'info': info}
         return None
+
+    def _referencesInfo(self, sf, filepath):
+        """ Info of a list of references of a multi-reference 3D
+        classification (data_references, rlnReferenceImage, as written by
+        emw-align-volumes): Volumes, they go to the 'Reference map' of the
+        3D classification. Box and pixel size of the first reference. """
+        table = sf.getTable('references')
+        info = f'{len(table)} references'
+        if len(table):
+            try:
+                meta = Image.get_metadata(self.join(table[0].rlnReferenceImage))
+                info += f", {meta['info']}" if meta else ''
+            except Exception as e:
+                self._debug(f"Error reading the first reference of {filepath}: {e}")
+        return {'type': 'Volumes', 'info': info}
 
     def _classesInfo(self, optimiserStar):
         """ Info of 2D/3D classes from a Relion optimiser STAR file, with the
@@ -1457,7 +1476,7 @@ class ProjectData(FolderManager):
         if (not force and cached and job is not None
                 and not self.isActiveJob(job)
                 and job.id not in self._computedJobs
-                and not self._isStaleMaskInfo(output_id, job, cached)):
+                and not self._isStaleVolumeInfo(output_id, job, cached)):
             return cached
 
         if self._isPendingOutput(output_id):
@@ -1477,7 +1496,7 @@ class ProjectData(FolderManager):
 
         if (force or self._shouldRefreshOutputInfo(output_id, job)
                 or (cached and job is not None
-                    and self._isStaleMaskInfo(output_id, job, cached))):
+                    and self._isStaleVolumeInfo(output_id, job, cached))):
             info = self._computeOutputTypeInfo(
                 output_id, self._outputInfoFilesForId(output_id))
             self._set_info(self._outputs, output_id, info)
@@ -1494,11 +1513,16 @@ class ProjectData(FolderManager):
             return self._pendingOutputInfo(output_id)
         return info
 
-    def _isStaleMaskInfo(self, output_id, job, cached):
-        """ True for a mask cached as a Volume (before masks were VolumeMask). """
-        return (cached.get('type') == 'Volume'
-                and job['jobtype'] in self.MASK_JOBTYPES
-                and self._outputTypeFromRelionNodes(output_id) == 'VolumeMask')
+    def _isStaleVolumeInfo(self, output_id, job, cached):
+        """ True for a mask cached as a Volume (before masks were VolumeMask)
+        or a list of references of emw-align-volumes cached as a Volume
+        (before they were Volumes). """
+        if cached.get('type') != 'Volume':
+            return False
+        if job['jobtype'] in self.MASK_JOBTYPES:
+            return self._outputTypeFromRelionNodes(output_id) == 'VolumeMask'
+        return (job['jobtype'] == 'emw-align-volumes'
+                and output_id.endswith('.star'))
 
     def setOutputInfo(self, output_id, output_info):
         self._set_info(self._outputs, output_id, output_info)
