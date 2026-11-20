@@ -28,7 +28,8 @@ import time
 from contextlib import contextmanager
 from datetime import datetime
 
-from emtools.utils import FolderManager, Process, Color, Path, Timer, Pretty
+from emtools.utils import (FolderManager, Process, Color, Path, Timer, Pretty,
+                           ResourceMonitor)
 from emtools.jobs import BatchManager, Workflow
 from emtools.hpc import ClusterJob
 from emtools.metadata import Table, StarFile, RelionStar
@@ -923,6 +924,107 @@ class ProjectManager(FolderManager):
         pid = lines[0] if lines and lines[0] else None
         host = lines[1] if len(lines) > 1 and lines[1] else None
         return pid, host
+
+    # ------------------- Where a job runs and its usage ---------------------
+    # From the files written by emwrap in the job folder (job.id, process.id,
+    # schedule.id, info.json, job.log and profile/runNN.csv), never querying
+    # the queueing system. The job is a workflow job (id and 'status').
+    def getClusterJobId(self, job):
+        """ Id of the last cluster job of a job submitted to a queue, or ''
+        (run locally). It is the job.id written when submitting (only kept
+        if the last launch was submitted to a queue) or, for older jobs, the
+        cluster job recorded in the last run (info.json). """
+        try:
+            if clusterJobId := self._readClusterJobId(job.id):
+                return clusterJobId
+        except OSError:
+            pass
+        if job['status'] in ('Launched', 'Running'):
+            return ''  # launched locally, the last run may be an old one
+        runs = self.getJobRuns(job)
+        computing = (runs[-1].get('computing') or {}) if runs else {}
+        return str((computing.get('cluster') or {}).get('job_id') or '')
+
+    def getLocalProcess(self, job, runs=None):
+        """ {'pid', 'host'} of a job run locally (not in a cluster), {} if
+        not known. From process.id (older files have no host) or, for jobs
+        without it, the job process recorded in the last run (info.json).
+        Strings, '' if not known. Only for jobs without a cluster job id
+        (see getClusterJobId); runs: the job runs, if already read. """
+        pid, host = self.readLocalProcess(job.id)
+        if pid and host:
+            return {'pid': pid, 'host': host}
+        if job['status'] in ('Launched', 'Running') and pid:
+            return {'pid': pid, 'host': ''}  # the last run may be an old one
+        runs = self.getJobRuns(job) if runs is None else runs
+        computing = next((r['computing'] for r in reversed(runs)
+                          if r.get('computing')), None) or {}
+        if computing.get('cluster'):
+            return {}
+        pid = pid or str(computing.get('pid') or '')
+        host = str(computing.get('host') or '')
+        return {'pid': pid, 'host': host} if pid else {}
+
+    def getScheduleProcess(self, job):
+        """ {'pid', 'host'} of the schedule watcher of a scheduled job
+        (schedule.id, host '' in older files), {} if it is not scheduled. """
+        if job['status'] != 'Scheduled':
+            return {}
+        pid, host = self.readScheduleProcess(job.id)
+        return {'pid': pid, 'host': host or ''} if pid else {}
+
+    def readScheduleLog(self, jobId, maxLines=300):
+        """ Lines of job.log written since the job was last scheduled (the
+        schedule watcher logs its dependency checks there), the last
+        maxLines of them. """
+        try:
+            with open(self._jobLogPath(jobId), errors='replace') as f:
+                lines = [line for line in f.read().splitlines() if line.strip()]
+        except OSError:
+            return []
+        start = 0
+        for i, line in enumerate(lines):
+            if f"Job {jobId} scheduled" in line:
+                start = i
+        return lines[start:][-maxLines:]
+
+    def getJobProfiles(self, jobId, active=False, maxPoints=400, maxRuns=5):
+        """ Resource usage of the last maxRuns profiled runs of a job (the
+        'profile' param or EMWRAP_PROFILE, see ResourceMonitor): run number,
+        start, end, interval, node GPUs, file (from the project root),
+        samples, summary (from info.json, computed from the CSV while the
+        run has none) and series (the CSV columns reduced to maxPoints, see
+        ResourceMonitor.load_series). If active (job Launched or Running),
+        the last run without end has 'latest': its last sample and 'age',
+        seconds since it was written (a killed run never gets an end).
+        Reads info.json, not the cached runs, to get the last summary. """
+        info = ProcessingPipeline.readJobInfo(self.join(jobId, 'info.json')) or {}
+        runs = info.get('runs') or []
+        profiles = []
+        for i, run in enumerate(runs):
+            profile = run.get('profile') or {}
+            csvFile = self.join(jobId, profile['file']) if profile.get('file') else None
+            if not csvFile or not os.path.exists(csvFile):
+                continue
+            try:
+                data = ResourceMonitor.load_series(csvFile, maxPoints)
+                summary = profile.get('summary') or ResourceMonitor.summarize(csvFile)
+            except Exception as e:
+                print(f"Reading profile {csvFile}: {e}")
+                continue
+            entry = {'run': i + 1, 'start': run.get('start') or '',
+                     'end': run.get('end') or '',
+                     'interval': profile.get('interval'),
+                     'gpus': profile.get('gpus') or ResourceMonitor.csv_gpus(csvFile),
+                     'file': os.path.join(jobId, profile['file']),
+                     'samples': data['samples'], 'summary': summary,
+                     'series': data['series']}
+            if (active and i == len(runs) - 1 and not run.get('end')
+                    and data['last']):
+                age = time.time() - os.path.getmtime(csvFile)
+                entry['latest'] = dict(data['last'], age=round(age))
+            profiles.append(entry)
+        return profiles[-maxRuns:]
 
     def _stopLocalJob(self, jobId):
         """Kill a locally launched job using its recorded root process id."""
