@@ -217,8 +217,7 @@ class ProcessingPipeline(Pipeline, FolderManager):
             if call:
                 cwd = True
                 if work_dir is not None:
-                    cwd = os.path.join(self.workingDir,
-                                       self.toProjectPath(work_dir))
+                    cwd = self.projectFile(work_dir)
                 returncode = batch.call(launcher, args, logfile=logfile, cwd=cwd)
 
         if check and call:
@@ -744,9 +743,15 @@ class ProcessingPipeline(Pipeline, FolderManager):
         return changed
 
     def projectFile(self, path):
-        """Full path of a project-root-relative (or absolute) path, to open
-        it whatever the current folder is."""
-        return os.path.join(self.workingDir, self.toProjectPath(path))
+        """ Full path of a project-root-relative (or absolute) path, to open
+        it whatever the current folder is: relative paths are joined to the
+        project root and absolute ones kept, both normalized.
+
+        Absolute paths are not turned into '../..' paths from the project
+        root (as toProjectPath does): the OS resolves '..' after following
+        the symlinks, so these would point elsewhere when the project root
+        is reached through a symlink. """
+        return os.path.normpath(os.path.join(self.workingDir, str(path or '')))
 
     def projectExists(self, path):
         """Return True when a project-root-relative path exists on disk."""

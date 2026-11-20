@@ -133,6 +133,39 @@ class TestProjectPaths(unittest.TestCase):
             os.chdir(cwd)
 
     # ------------------------------------------------------------------
+    # projectFile
+    # ------------------------------------------------------------------
+    def test_project_file(self):
+        f = self.job.projectFile
+        self.assertEqual(f('Jobs/job001/out.star'),
+                         self._in('Jobs', 'job001', 'out.star'))
+        self.assertEqual(f('./Jobs//job001/'), self._in('Jobs', 'job001'))
+        self.assertEqual(f(self._in('a.star')), self._in('a.star'))
+        prog = os.path.join(self.outside, 'program')
+        self.assertEqual(f(prog), prog)
+        for value in (None, '', '.'):
+            self.assertEqual(f(value), self.root)
+        self.assertTrue(self.job.projectExists('Jobs/job001'))
+        self.assertFalse(self.job.projectExists('Jobs/job002'))
+
+    def test_project_file_symlinked_root_outside(self):
+        """ With the project root reached through a symlink to a deeper
+        folder, a '../..' path from the link would be resolved by the OS
+        from the link target: absolute paths must be kept as they are. """
+        deep = os.path.join(self.base, 'real', 'a', 'project')
+        os.makedirs(os.path.join(deep, 'Jobs', 'job001'))
+        link = os.path.join(self.base, 'link_project')
+        os.symlink(deep, link)
+        job = self._pipeline(link)
+        external = os.path.join(self.outside, 'config.json')
+        open(external, 'w').close()
+        self.assertEqual(job.projectFile(external), external)
+        self.assertTrue(job.projectExists(external))
+        # What toProjectPath gives, joined to the root, misses the file
+        old = os.path.join(link, job.toProjectPath(external))
+        self.assertFalse(os.path.exists(old))
+
+    # ------------------------------------------------------------------
     # relativizePaths
     # ------------------------------------------------------------------
     def test_relativize_nested(self):
