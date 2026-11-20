@@ -16,9 +16,7 @@
 
 """ Wizard adaptors of the Relion job forms (see emwrap.base.wizards). """
 
-import os
-
-from emtools.metadata import StarFile, RelionStar
+from emtools.metadata import StarFile
 
 from emwrap.base.wizards import (WizardAdaptor, WizardError,
                                  ExportTomoParticlesWizard, VolumeMaskWizard,
@@ -105,64 +103,6 @@ class RelionReferenceMaskAdaptor(WizardAdaptor):
             self.warnings.append(f"The mask is shown over the first of the "
                                  f"{len(refs)} references.")
         return refs[0].rlnReferenceImage
-
-
-class RelionInitialModelMaskAdaptor(WizardAdaptor):
-    """ relion.initialmodel.tomo <-> VolumeMaskWizard
-
-    The mask diameter (particle_diameter) of an initial model, as a sphere:
-    over the map of the Relion refinement or classification the particles
-    come from (a <prefix>_data.star), if there is one, else in an empty box
-    of the particles (box and pixel size of their optics). The particles are
-    those of the optimisation set (in_optimisation) or in_particles. OK sets
-    particle_diameter.
-    """
-    wizard = VolumeMaskWizard
-
-    def _particles(self, params):
-        optimisation = str(params.get('in_optimisation') or '').strip()
-        if optimisation and not to_bool(params.get('use_direct_entries', False)):
-            path = self.join(optimisation)
-            if not os.path.exists(path):
-                raise WizardError(f"The optimisation set was not found: {optimisation}")
-            if RelionStar.isTomoOptimisationSet(path):
-                row = RelionStar.readTomoOptimisationSet(path)[0]
-                if particles := getattr(row, 'rlnTomoParticlesFile', None):
-                    return particles
-        if particles := str(params.get('in_particles') or '').strip():
-            return particles
-        raise WizardError("Select the input particles (optimisation set or "
-                          "particle set) before opening the wizard.")
-
-    def _box(self, particles):
-        """ {'size', 'angpix'} of the particles, from their optics. """
-        try:
-            optics = StarFile.getTableFromFile('optics', self.join(particles))[0]
-            return {'size': int(float(optics.rlnImageSize)),
-                    'angpix': float(optics.rlnImagePixelSize)}
-        except Exception as e:
-            raise WizardError(f"Could not read the box size of the particles "
-                              f"{particles}: {e}")
-
-    def toWizard(self, params):
-        # Imported here: the helper is in the Warp wizards
-        from emwrap.warp.wizards import relion_last_volume
-
-        particles = self._particles(params)
-        inputs = {'diameter': params.get('particle_diameter')}
-        if particles.endswith('_data.star'):
-            try:
-                inputs['volume'] = relion_last_volume(self.project, particles)
-                return inputs
-            except WizardError:
-                pass
-        inputs['box'] = self._box(particles)
-        self.warnings.append("No map of these particles yet: the mask is shown "
-                             "in an empty box of their size.")
-        return inputs
-
-    def fromWizard(self, outputs, params):
-        return {'particle_diameter': outputs['diameter']}
 
 
 class RelionMaskCreateAdaptor(WizardAdaptor):

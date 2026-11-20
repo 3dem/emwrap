@@ -420,11 +420,7 @@ class VolumeMaskWizard(Wizard):
     the host adds the request of their density ('density') to them.
 
     Inputs (from the adaptor):
-        volume: the volume (required, unless box)
-        box: without a volume, {'size': px, 'angpix': A/px}: the sphere is
-            shown in an empty box (e.g. the box of the particles of an
-            initial model, before there is any map); data.volume is then
-            {'kind': 'box', 'path': '', 'dimensions', 'voxelSize'}
+        volume: the volume (required)
         mask: mask map, optional; on the same box as the volume
         diameter: diameter of the spherical mask (A), optional; by default
             80% of the box
@@ -444,15 +440,9 @@ class VolumeMaskWizard(Wizard):
                 'voxelSize': angpix}
 
     def prepare(self, inputs):
-        box = inputs.get('box')
-        if inputs.get('volume'):
-            volume = self._volume(inputs['volume'], 'map')
-        elif box:
-            n = int(box['size'])
-            volume = {'kind': 'box', 'path': '', 'dimensions': [n, n, n],
-                      'voxelSize': to_float(box.get('angpix')) or None}
-        else:
+        if not inputs.get('volume'):
             raise WizardError("Select the input map before opening the wizard.")
+        volume = self._volume(inputs['volume'], 'map')
         mask = self._volume(inputs['mask'], 'mask') if inputs.get('mask') else None
         if mask and mask['dimensions'] != volume['dimensions']:
             raise WizardError(

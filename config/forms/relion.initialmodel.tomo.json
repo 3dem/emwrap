@@ -2,14 +2,6 @@
     "name": "relion.initialmodel.tomo",
     "label": "Relion Tomo Initial Volume",
     "help": "RELION de novo 3D initial model for subtomogram averaging (InitialModel, tomography). Matches RelionJob::initialiseInimodelJob with is_tomo=true: relion_refine --grad --denovo_3dref with --ios or direct tomography inputs, followed by relion_align_symmetry to write initial_model.mrc.",
-    "wizards": [
-        {
-            "id": "mask",
-            "label": "Mask diameter wizard",
-            "adaptor": "emwrap.relion.wizards.RelionInitialModelMaskAdaptor",
-            "params": ["particle_diameter"]
-        }
-    ],
     "sections": [
         {
             "label": "I/O",
