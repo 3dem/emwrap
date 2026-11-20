@@ -236,7 +236,7 @@ class SubsetTsPipeline(ProcessingPipeline):
             raise Exception(
                 f"Missing rlnTomoParticlesFile in optimisation_set STAR file: {inputStar}"
             )
-        return self._absPath(ptsStar)
+        return self.projectFile(ptsStar)
 
     def _readGlobalTable(self, starPath):
         """Read and validate a RELION tomography global table."""
@@ -462,16 +462,13 @@ class SubsetTsPipeline(ProcessingPipeline):
         self.writeRelionOutputNodes([[outputStar, outputNode]])
         return inputType, len(filtered)
 
-    def _absPath(self, path):
-        return path if os.path.isabs(path) else os.path.join(self.workingDir, path)
-
     def _subsetOptimisationSet(self, inputStar, subsetNames):
         """ Subset a TomoCoordinates / TomoParticles optimisation set: its
         tomograms and their particles, both registered as outputs. """
         optRow = RelionStar.readTomoOptimisationSet(inputStar)[0]
         optValues = optRow._asdict()
 
-        tomoStar = self._absPath(self._getTomogramsStar(inputStar))
+        tomoStar = self.projectFile(self._getTomogramsStar(inputStar))
         ptsStar = self._getParticlesStar(inputStar)
 
         outTomoStar = self.join('tomograms.star')
@@ -663,7 +660,7 @@ class SubsetTsPipeline(ProcessingPipeline):
         particlesTable = StarFile.getTableFromFile(
             RelionStar.TOMO_PARTICLES_TABLE, ptsStar)
         # For pixel coordinates and the edges
-        tomograms = tomo_geometry(self._absPath(self._getTomogramsStar(inputStar)))
+        tomograms = tomo_geometry(self.projectFile(self._getTomogramsStar(inputStar)))
         kept, scoreColumn, nEdge, nDup = remove_duplicates(
             particlesTable, self.duplicatesDistance, tomograms, self.edgeDistance)
         self.particleIndexes = set(kept)

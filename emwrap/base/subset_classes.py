@@ -61,9 +61,6 @@ class SubsetClassesPipeline(ProcessingPipeline):
             raise Exception("Select at least one class (e.g. '1,3-4').")
         return classes
 
-    def _absPath(self, path):
-        return path if os.path.isabs(path) else os.path.join(self.workingDir, path)
-
     def _writeParticles(self, inputStar, outputStar):
         """ Copy all tables from 'inputStar', keeping only the rows of the
         'particles' table that belong to the selected classes. """
@@ -115,14 +112,14 @@ class SubsetClassesPipeline(ProcessingPipeline):
     def prerun(self):
         if not self.inputSet:
             raise Exception("Missing parameter 'input_set'.")
-        inputStar = self._absPath(self.inputSet)
+        inputStar = self.projectFile(self.inputSet)
         if not os.path.exists(inputStar):
             raise Exception(f"Input STAR file not found: {inputStar}")
 
         optValues = None
         if RelionStar.isTomoOptimisationSet(inputStar):
             optValues = RelionStar.readTomoOptimisationSet(inputStar)[0]._asdict()
-            dataStar = self._absPath(optValues['rlnTomoParticlesFile'])
+            dataStar = self.projectFile(optValues['rlnTomoParticlesFile'])
             if not os.path.exists(dataStar):
                 raise Exception(f"Particles file '{dataStar}' from the "
                                 f"optimisation set does not exist.")

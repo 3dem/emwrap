@@ -1238,7 +1238,12 @@ class MissAlignment(WarpBasePipeline):
     # Output registration
     # ------------------------------------------------------------------
     def _correct_warp_converted_tilt_series_stars(self, batch):
-        """Invert the RELION Y tilt in each Warp-converted tilt-series STAR."""
+        """Invert the RELION Y tilt in each Warp-converted tilt-series STAR.
+
+        relion-warp-convert writes absolute paths (we pass it absolute
+        arguments), they are also persisted relative to the project root
+        here (see relativizePaths), so each file is rewritten only once.
+        """
         tilt_series_directory = batch.join('tilt_series')
         individual_stars = sorted(glob(os.path.join(tilt_series_directory, '*.star')))
 
@@ -1266,7 +1271,7 @@ class MissAlignment(WarpBasePipeline):
 
             corrected_table = Table(table.getColumnNames())
             for row in table:
-                row_dict = row._asdict()
+                row_dict = self.relativizePaths(row._asdict())
                 row_dict['rlnTomoYTilt'] = -float(row_dict['rlnTomoYTilt'])
                 corrected_table.addRowValues(**row_dict)
 
@@ -1319,10 +1324,9 @@ class MissAlignment(WarpBasePipeline):
             )
 
         # relion-warp-convert writes absolute paths (we pass it absolute
-        # arguments), persist them relative to the project root
-        for star_file in [output_star] + sorted(
-                glob(os.path.join(batch.join('tilt_series'), '*.star'))):
-            self.relativizeStar(star_file)
+        # arguments), persist them relative to the project root (the
+        # tilt_series/*.star were already fixed by the correction above)
+        self.relativizeStar(output_star)
 
         return output_star
 
@@ -1346,7 +1350,7 @@ class MissAlignment(WarpBasePipeline):
             self.log(f'Starting training with {len(training_subset)} tilt series')
             model_run_directory = self.launch_training(training_subset)
             output_nodes.append([
-                self.project.relpath(model_run_directory),
+                self.projectPath(model_run_directory),
                 'TomogramGroupMetadata.star.relion.tomo.MissAlignmentModelDir',
             ])
         else:

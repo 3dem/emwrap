@@ -74,7 +74,7 @@ class RelionMaskCreate(RelionBasePipeline):
             if not in_vol or not str(in_vol).strip():
                 raise Exception("From-volume mode requires an input volume (--i).")
             # Resolve path relative to project (workingDir)
-            in_vol_abs = os.path.join(self.workingDir, in_vol) if not os.path.isabs(in_vol) else in_vol
+            in_vol_abs = self.projectFile(in_vol)
             if not os.path.exists(in_vol_abs):
                 raise Exception(f"Input volume '{in_vol}' does not exist (resolved: {in_vol_abs}).")
             in_vol_local = batch.link(in_vol_abs)

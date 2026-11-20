@@ -21,7 +21,7 @@ import numpy as np
 import time
 import json
 
-from emtools.utils import Color, Process, System, Path, GpuMonitor
+from emtools.utils import Color, Process, System, Path
 from emtools.jobs import BatchManager, Args
 from emtools.metadata import Table, StarFile
 
