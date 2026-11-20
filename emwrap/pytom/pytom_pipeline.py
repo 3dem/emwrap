@@ -72,7 +72,7 @@ class PyTomPipeline(PickingPipeline):
                     pytomArgs.get('template', None), pytomArgs.get('mask', None)]:
             if src:
                 link = batch.join(os.path.basename(src))
-                mapping[link] = self.relativizePaths(os.path.abspath(src))
+                mapping[link] = self.projectPath(src)
 
         with open(dst, 'w') as f:
             json.dump(self.relativizePaths(data, mapping), f, indent=4)

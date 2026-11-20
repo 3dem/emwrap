@@ -649,24 +649,15 @@ class ProcessingPipeline(Pipeline, FolderManager):
             return os.path.relpath(path, self.workingDir)
         return path
 
-    def relativizePaths(self, obj, mapping=None):
-        """ Return a copy of obj (dict/list/str, e.g. a loaded JSON) where
-        every absolute path string is made relative to the project root.
-
-        Absolute paths are fine during the processing (e.g. for programs
-        running in a tmp/scratch folder), but persisted outputs must use
-        project-root-relative paths. 'mapping' optionally maps absolute
-        paths (e.g. of tmp files) to their final project path; other
-        absolute paths inside the project are made relative to it. Paths
-        are compared after resolving symlinks, since the same folder can
-        be reached through different mounts. Absolute paths outside the
-        project (e.g. programs) are left unchanged.
-        """
+    def _projectPathFunc(self, mapping=None):
+        """ Function fixing one absolute path with the projectPath rules,
+        with the mapping keys and the project roots resolved only once
+        (relativizePaths applies it to many paths). """
         mapping = {os.path.realpath(k): v for k, v in (mapping or {}).items()}
         roots = [os.path.realpath(self.workingDir),
                  os.path.abspath(self.workingDir)]
 
-        def _fixPath(p):
+        def _fixAbs(p):
             real = os.path.realpath(p)
             if real in mapping:
                 return mapping[real]
@@ -675,13 +666,57 @@ class ProcessingPipeline(Pipeline, FolderManager):
                     return os.path.relpath(path, root)
             return p
 
+        return _fixAbs
+
+    def projectPath(self, path, mapping=None):
+        """ Path to persist in the job outputs (STAR files, info.json, other
+        JSON files): relative to the project root (workingDir) when it is
+        inside the project, absolute when it is outside (e.g. programs or
+        external inputs).
+
+        - An empty value (None, '') is returned as is.
+        - A relative path is taken as relative to the project root (the jobs
+          run with the project root as current folder) and normalized. If it
+          goes out of the project ('../x') it is made absolute instead.
+        - An absolute path is first looked up in 'mapping' (absolute paths,
+          e.g. of tmp files, to their final project path). Otherwise it is
+          made relative to the project root if it is inside it, comparing
+          after resolving symlinks (the same folder can be reached through
+          different mounts) and also with the non-resolved root. Absolute
+          paths outside the project are returned unchanged.
+
+        Absolute paths are fine during the processing (e.g. for programs
+        running in a tmp/scratch folder), see relativizePaths for whole
+        dicts/lists (e.g. a loaded JSON) and relativizeStar for STAR files.
+        Unlike toProjectPath, paths outside the project are kept absolute
+        instead of becoming '../..' paths.
+        """
+        if not path:
+            return path
+        path = os.path.normpath(str(path))
+        if not os.path.isabs(path):
+            if path != os.pardir and not path.startswith(os.pardir + os.sep):
+                return path
+            path = os.path.normpath(
+                os.path.join(os.path.abspath(self.workingDir), path))
+        return self._projectPathFunc(mapping)(path)
+
+    def relativizePaths(self, obj, mapping=None):
+        """ Return a copy of obj (dict/list/tuple/str, e.g. a loaded JSON)
+        where every absolute path string is fixed with projectPath (same
+        'mapping'): made relative to the project root if inside it, left
+        absolute otherwise. Relative strings are left untouched, since
+        not every string value is a path (e.g. URLs, labels, numbers).
+        """
+        fixAbs = self._projectPathFunc(mapping)
+
         def _fix(v):
             if isinstance(v, dict):
                 return {k: _fix(x) for k, x in v.items()}
             if isinstance(v, (list, tuple)):
                 return type(v)(_fix(x) for x in v)
             if isinstance(v, str) and os.path.isabs(v):
-                return _fixPath(v)
+                return fixAbs(v)
             return v
 
         return _fix(obj)
