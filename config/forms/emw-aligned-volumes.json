@@ -1,0 +1,108 @@
+{
+    "name": "emw-aligned-volumes",
+    "label": "EMwrap Aligned Volumes",
+    "help": "Prepare the references of a multi-reference 3D classification: the input volumes, in their order (the first is class 1), optionally aligned to a map in the frame of the particle poses.\n\nA 3D classification that does not align the particles (or only searches around their poses) compares each particle with the references in its current orientation, so the references need the orientation and centre of the map the poses come from. De novo initial models (and maps of other jobs) have their own: without the alignment, the particles can not match them and the classes lose their shapes in the first iteration.\n\nThe alignment searches all rotations and shifts that maximise the cross-correlation with the map (low-pass filtered, inside a spherical mask), and resamples the volumes to its box and pixel size.\n\nOutput: input_references.star (Volumes, the 'Reference map' of the 3D classification, one class per row) and the references ref_class<NNN>_<name>.mrc. The job also computes the cross-correlation of every pair of references (how similar the classes are, with the low-pass and mask of the alignment). Analyze Results shows how each volume was aligned, the similarity matrix and all the references together in 3D.",
+    "sections": [
+        {
+            "label": "Input",
+            "params": [
+                {
+                    "name": "input_volumes",
+                    "label": "Input volumes:",
+                    "paramClass": "TableParam",
+                    "min": 1,
+                    "help": "The volumes of the references, one per row in the order of the classes: the first row is class 1, the second class 2... Drag each volume from the outputs of its job onto its row (or onto the last row, to add one), and give it a name.",
+                    "params": [
+                        {
+                            "name": "volume",
+                            "label": "Volume",
+                            "paramClass": "PathParam",
+                            "pointerClass": "Volume",
+                            "help": "The volume (MRC map) of the class."
+                        },
+                        {
+                            "name": "name",
+                            "label": "Name (optional)",
+                            "paramClass": "StringParam",
+                            "help": "Name of the reference, e.g. nucleosome or flat_membrane; it names its file ref_class<NNN>_<name>.mrc. Without it, the name of its job and file (e.g. job466_run_it120_class001)."
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "label": "Alignment",
+            "params": [
+                {
+                    "name": "do_align",
+                    "label": "Align the volumes:",
+                    "paramClass": "BooleanParam",
+                    "default": true,
+                    "help": "Align the volumes to a map in the frame of the particle poses (and resample them to its box and pixel size). Without it, the volumes are copied as they are, and must have the same box and pixel size."
+                },
+                {
+                    "label": "Alignment",
+                    "paramClass": "Group",
+                    "condition": "do_align",
+                    "params": [
+                        {
+                            "name": "align_reference",
+                            "label": "Map of the poses:",
+                            "paramClass": "PathParam",
+                            "pointerClass": "Volume",
+                            "help": "A map in the frame of the particle poses that the 3D classification will start from: the map of the same iteration of the refinement or 3D classification that wrote them (e.g. Class3D/job415/run_it002_class001.mrc for Class3D/job415/run_it002_optimisation_set.star), with the box and pixel size of the particles."
+                        },
+                        {
+                            "name": "align_skip",
+                            "label": "Keep as they are:",
+                            "paramClass": "StringParam",
+                            "default": "",
+                            "allowsEmpty": true,
+                            "help": "Numbers of the volumes (in the list above, the first is 1) not to align, e.g. '1' for a reference already in the frame of the poses (such as a map reconstructed from the same particles). They are only resampled, if needed."
+                        },
+                        {
+                            "name": "align_lowpass",
+                            "label": "Low-pass (Å):",
+                            "paramClass": "FloatParam",
+                            "default": 25,
+                            "help": "Resolution of the maps compared, usually the initial low-pass filter of the 3D classification (--ini_high)."
+                        },
+                        {
+                            "name": "align_diameter",
+                            "label": "Mask diameter (Å):",
+                            "paramClass": "FloatParam",
+                            "default": -1,
+                            "help": "Diameter of the spherical mask of the comparison, usually the particle diameter of the 3D classification. -1: 90% of the box."
+                        },
+                        {
+                            "name": "align_max_shift",
+                            "label": "Maximum shift (Å):",
+                            "paramClass": "FloatParam",
+                            "default": -1,
+                            "help": "Largest shift searched. -1: a quarter of the mask diameter."
+                        },
+                        {
+                            "name": "align_angular_step",
+                            "label": "Angular step (°):",
+                            "paramClass": "FloatParam",
+                            "default": 10,
+                            "help": "Angular step of the global search of the rotations (about 15,000 rotations at 10°, 8 times more for half the step), then refined locally down to a twentieth of it."
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "label": "Compute",
+            "params": [
+                {
+                    "name": "threads",
+                    "label": "Threads:",
+                    "paramClass": "IntParam",
+                    "default": 8,
+                    "help": "Number of processes of the rotation search."
+                }
+            ]
+        }
+    ]
+}

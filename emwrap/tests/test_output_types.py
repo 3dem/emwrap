@@ -116,10 +116,18 @@ class TestOutputTypes(unittest.TestCase):
                                  'External/job005/emd_mask.mrc': 'VolumeMask'})
 
         # A mask cached as a Volume (before) is computed again
-        self.assertTrue(self.data._isStaleMaskInfo(
+        self.assertTrue(self.data._isStaleVolumeInfo(
             'MaskCreate/job011/mask.mrc', relion, {'type': 'Volume'}))
-        self.assertFalse(self.data._isStaleMaskInfo(
+        self.assertFalse(self.data._isStaleVolumeInfo(
             'PyTom/job008/emd_template.mrc', pytom, {'type': 'Volume'}))
+        # The references of emw-aligned-volumes cached as a Volume (before Volumes)
+        refs = {'jobtype': 'emw-aligned-volumes'}
+        self.assertTrue(self.data._isStaleVolumeInfo(
+            'EMwrap/job050/input_references.star', refs, {'type': 'Volume'}))
+        self.assertFalse(self.data._isStaleVolumeInfo(
+            'EMwrap/job050/ref_class001_a.mrc', refs, {'type': 'Volume'}))
+        self.assertFalse(self.data._isStaleVolumeInfo(
+            'EMwrap/job050/input_references.star', refs, {'type': 'Volumes'}))
 
 
     def _starNodes(self, job_id, nodes):
